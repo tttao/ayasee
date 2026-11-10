@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tttao/ayasee/main/schema/snapshot.v1.json",
+  "title": "ayasee cockpit snapshot v1",
+  "description": "Counts, addresses and links only (D8): never plan values, never finding details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "generated_at", "repos"],
+  "properties": {
+    "schema": { "const": "ayasee.snapshot/v1" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "repos": { "type": "array", "items": { "$ref": "#/$defs/repo" } }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "nullableCount": { "type": ["integer", "null"], "minimum": 0 },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "main_sha", "findings", "envs"],
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+        "main_sha": { "$ref": "#/$defs/nullableString" },
+        "error": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["critical", "high", "url"],
+          "properties": {
+            "critical": { "$ref": "#/$defs/nullableCount" },
+            "high": { "$ref": "#/$defs/nullableCount" },
+            "url": { "$ref": "#/$defs/nullableString" }
+          }
+        },
+        "envs": { "type": "array", "items": { "$ref": "#/$defs/env" } }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "env", "live_sha", "live_at", "converged", "pending_commits",
+        "pending_compare_url", "gate", "drift", "health"
+      ],
+      "properties": {
+        "env": { "type": "string", "minLength": 1 },
+        "live_sha": { "$ref": "#/$defs/nullableString" },
+        "live_at": { "$ref": "#/$defs/nullableString" },
+        "converged": { "type": ["boolean", "null"] },
+        "pending_commits": { "$ref": "#/$defs/nullableCount" },
+        "pending_compare_url": { "$ref": "#/$defs/nullableString" },
+        "gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["waiting", "since", "run_url"],
+          "properties": {
+            "waiting": { "type": ["boolean", "null"] },
+            "since": { "$ref": "#/$defs/nullableString" },
+            "run_url": { "$ref": "#/$defs/nullableString" }
+          }
+        },
+        "drift": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["open", "since", "issue_url", "resources"],
+          "properties": {
+            "open": { "type": "boolean" },
+            "since": { "$ref": "#/$defs/nullableString" },
+            "issue_url": { "$ref": "#/$defs/nullableString" },
+            "resources": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["last_result", "stop_the_line"],
+          "properties": {
+            "last_result": { "enum": ["applied", "failed", "no_changes", "unknown"] },
+            "stop_the_line": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}

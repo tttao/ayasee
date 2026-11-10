@@ -1,0 +1,151 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.12.6",
+  "resource_changes": [
+    {
+      "address": "azurerm_databricks_workspace.this",
+      "mode": "managed",
+      "type": "azurerm_databricks_workspace",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "dbw-example-prod",
+          "location": "westeurope",
+          "resource_group_name": "rg-example-prod",
+          "managed_resource_group_name": "rg-example-prod-dbw-managed",
+          "sku": "premium",
+          "public_network_access_enabled": true,
+          "network_security_group_rules_required": "NoAzureDatabricksRules",
+          "custom_parameters": [
+            {
+              "no_public_ip": true,
+              "public_subnet_name": "snet-dbw-host",
+              "private_subnet_name": "snet-dbw-container"
+            }
+          ]
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "databricks_metastore_assignment.this",
+      "mode": "managed",
+      "type": "databricks_metastore_assignment",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "metastore_id": "00000000-0000-0000-0000-000000000000"
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "databricks_storage_credential.this",
+      "mode": "managed",
+      "type": "databricks_storage_credential",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "example-prod",
+          "azure_managed_identity": [
+            {
+              "access_connector_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-example-prod/providers/Microsoft.Databricks/accessConnectors/ac-example-prod"
+            }
+          ],
+          "skip_validation": false
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "databricks_external_location.this",
+      "mode": "managed",
+      "type": "databricks_external_location",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "example-prod",
+          "url": "abfss://uc@stexampleprod.dfs.core.windows.net/",
+          "credential_name": "example-prod",
+          "skip_validation": false
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "databricks_catalog.this",
+      "mode": "managed",
+      "type": "databricks_catalog",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "example_prod",
+          "isolation_mode": "ISOLATED",
+          "storage_root": "abfss://uc@stexampleprod.dfs.core.windows.net/"
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "databricks_grants.catalog",
+      "mode": "managed",
+      "type": "databricks_grants",
+      "name": "catalog",
+      "provider_name": "registry.opentofu.org/x",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "catalog": "example_prod",
+          "grant": [
+            {
+              "principal": "data-engineers",
+              "privileges": [
+                "USE_CATALOG",
+                "USE_SCHEMA",
+                "SELECT",
+                "MODIFY"
+              ]
+            },
+            {
+              "principal": "data-analysts",
+              "privileges": [
+                "USE_CATALOG",
+                "USE_SCHEMA",
+                "SELECT"
+              ]
+            }
+          ]
+        },
+        "after_unknown": {}
+      }
+    }
+  ]
+}

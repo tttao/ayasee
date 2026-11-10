@@ -1,0 +1,43 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "data.databricks_current_user.me",
+      "mode": "data",
+      "type": "databricks_current_user",
+      "name": "me",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "read"
+        ],
+        "before": null,
+        "after": {
+          "user_name": "x"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "databricks_catalog.main",
+      "mode": "managed",
+      "type": "databricks_catalog",
+      "name": "main",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "main"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

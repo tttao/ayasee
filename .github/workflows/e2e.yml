@@ -1,0 +1,94 @@
+# End-to-end scenarios against a sandbox repository (never this repository). See e2e/README.md.
+# Manual or nightly, canonical repository only. Nothing here touches production.
+#
+# Environment `e2e` holds: secrets E2E_TOKEN (maintainer identity), E2E_APPROVER_APP_ID and
+# E2E_APPROVER_APP_KEY (the second identity, a GitHub App installed on the sandbox repository),
+# E2E_WEBHOOK_URL (webhook echo); variable E2E_REPO (owner/name, name ends in -sandbox).
+# OWNER is a placeholder replaced at release.
+name: e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: One scenario, or all of them.
+        type: choice
+        default: all
+        options:
+          - all
+          - valid
+          - scan_fail
+          - pr_plan_fail
+          - dev_apply_fail
+          - gate_reject
+          - drift
+          - drift_cleared
+          - supersession
+          - stale_plan
+          - empty_prod
+          - breakglass
+  schedule:
+    - cron: "43 3 * * *"
+
+permissions: {}
+
+concurrency:
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: e2e
+    if: ${{ github.repository == 'OWNER/ayasee' }}
+    runs-on: ubuntu-latest
+    environment: e2e
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    env:
+      UV_NO_CACHE: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      - name: Install the pinned dependencies (before any token exists)
+        run: uv sync --frozen
+      - id: target
+        name: Split the sandbox repository name
+        env:
+          E2E_REPO: ${{ vars.E2E_REPO }}
+        run: |
+          case "$E2E_REPO" in
+            */*-sandbox) ;;
+            *) echo "::error::vars.E2E_REPO must be owner/<name>-sandbox"; exit 1 ;;
+          esac
+          {
+            echo "owner=${E2E_REPO%%/*}"
+            echo "name=${E2E_REPO#*/}"
+          } >>"$GITHUB_OUTPUT"
+      - id: approver
+        name: Token of the second identity
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.E2E_APPROVER_APP_ID }}
+          private-key: ${{ secrets.E2E_APPROVER_APP_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-actions: read # run and pending-deployment state
+          permission-deployments: write # approve or reject environment gates
+      - name: Run the scenarios
+        env:
+          E2E_REPO: ${{ vars.E2E_REPO }}
+          E2E_TOKEN: ${{ secrets.E2E_TOKEN }}
+          E2E_APPROVER_TOKEN: ${{ steps.approver.outputs.token }}
+          E2E_WEBHOOK_URL: ${{ secrets.E2E_WEBHOOK_URL }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          if [ -z "$SCENARIO" ] || [ "$SCENARIO" = all ]; then
+            uv run python -m e2e.run --all
+          else
+            uv run python -m e2e.run --scenario "$SCENARIO"
+          fi

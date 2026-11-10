@@ -1,0 +1,11 @@
+# The git-branch ledger lives on the `ayasee-ledger` branch of the sandbox repository itself.
+# The path is the checkout directory of a GitHub-hosted runner: /home/runner/work/<name>/<name>.
+# Change both segments if the sandbox repository is not called ayasee-sandbox.
+stages: [dev, uat, prod]
+engine: opentofu
+units_root: stages
+ledger:
+  url: git-branch:///home/runner/work/ayasee-sandbox/ayasee-sandbox?branch=ayasee-ledger&remote=origin
+gate: always
+notify:
+  teams: true

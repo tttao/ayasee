@@ -1,0 +1,493 @@
+"""Static checks on the iac-staged reusable workflow."""
+
+import re
+
+import pytest
+import yaml
+from conftest import AYASEE_USES, ROOT, SHA_REF, WORKFLOWS
+from conftest import index as _index
+from conftest import steps as _steps
+
+PATH = WORKFLOWS / "iac-staged.yml"
+STAGE_JOBS = ["dev", "uat", "prod-plan", "prod", "prod-in-sync"]
+# prod-plan and prod-in-sync never wait for prod reviewers (R31)
+EXPECTED_ENV = {
+    "dev": "dev",
+    "uat": "uat",
+    "prod-plan": "prod-plan",
+    "prod": "prod",
+    "prod-in-sync": "prod-plan",
+}
+
+
+@pytest.fixture(scope="module")
+def wf() -> dict:
+    return yaml.safe_load(PATH.read_text())
+
+
+def test_no_cancel_in_progress_on_any_job(wf):
+    assert wf["jobs"]
+    for name, job in wf["jobs"].items():
+        conc = job.get("concurrency")
+        if conc is not None:
+            assert conc["cancel-in-progress"] is False, name
+    assert "cancel-in-progress: true" not in PATH.read_text()
+
+
+def test_prod_needs_prod_plan_and_is_conditional(wf):
+    prod = wf["jobs"]["prod"]
+    assert "prod-plan" in prod["needs"]
+    assert "needs.prod-plan.outputs.has-changes == 'true'" in prod["if"]
+
+
+def test_every_job_has_environment_and_main_ref_guard(wf):
+    for name in STAGE_JOBS:
+        job = wf["jobs"][name]
+        assert job["environment"] == EXPECTED_ENV[name], name
+        assert "github.ref == 'refs/heads/main'" in job["if"], name
+        assert job["concurrency"]["group"].startswith("ayasee-${{ github.repository }}-")
+        if name == "prod-plan":
+            # M3: prod-plan writes no ledger, deployment or issue; the guard only reads issues
+            assert job["permissions"] == {
+                "id-token": "write",
+                "contents": "read",
+                "issues": "read",
+            }, name
+            continue
+        assert job["permissions"] == {
+            "id-token": "write",
+            "contents": "read",
+            "deployments": "write",
+            "issues": "write",
+            "actions": "read",
+        }, name
+    assert "github.ref == 'refs/heads/main'" in wf["jobs"]["resolve"]["if"]
+
+
+def test_concurrency_groups(wf):
+    def group(job):
+        return wf["jobs"][job]["concurrency"]["group"]
+
+    assert group("prod-plan") == "ayasee-${{ github.repository }}-prod-plan"
+    # prod and the in-sync ledger write both touch the prod record: one queue
+    assert group("prod") == group("prod-in-sync") == "ayasee-${{ github.repository }}-prod"
+
+
+def test_no_secrets_inherit(wf):
+    assert "inherit" not in PATH.read_text()
+    secrets = wf[True]["workflow_call"]["secrets"]
+    assert set(secrets) == {"teams-webhook", "ledger-token", "extra-env-secret"}
+    assert all(v["required"] is False for v in secrets.values())
+
+
+def test_empty_plan_path_writes_ledger(wf):
+    job = wf["jobs"]["prod-in-sync"]
+    assert "prod-plan" in job["needs"]
+    assert "needs.prod-plan.outputs.has-changes == 'false'" in job["if"]
+    text = "\n".join(str(s) for s in job["steps"])
+    assert "ledger" in text and "no_changes" in text
+    assert "needs.prod-plan.outputs.units" in text
+
+
+def test_every_uses_is_sha_pinned_or_local(wf):
+    refs = set()
+    for name, job in wf["jobs"].items():
+        for step in job["steps"]:
+            uses = step.get("uses")
+            if uses is None or uses.startswith("./"):
+                continue
+            assert SHA_REF.search(uses), f"{name}: {uses}"
+            m = AYASEE_USES.match(uses)
+            if m:
+                refs.add(m.group(1))
+    # all ayasee actions come from one ref, replaced at release
+    assert len(refs) == 1
+    assert "AYASEE_REF" in PATH.read_text()
+
+
+def test_third_party_uses_have_version_comment():
+    for line in PATH.read_text().splitlines():
+        if "uses:" in line and "/ayasee/actions/" not in line:
+            assert re.search(r"@[0-9a-f]{40} # v\d", line), line
+
+
+def test_no_expression_in_run_blocks(wf):
+    for name, job in wf["jobs"].items():
+        for step in job["steps"]:
+            assert "${{" not in step.get("run", ""), f"{name}: {step.get('name')}"
+
+
+def test_prod_guard_runs_before_download_and_apply(wf):
+    steps = _steps(wf, "prod")
+    guard = _index(steps, lambda s: s.get("uses", "").find("/actions/guard@") > 0)
+    download = _index(steps, lambda s: "download-artifact" in s.get("uses", ""))
+    apply = _index(steps, lambda s: "/actions/apply@" in s.get("uses", ""))
+    login = _index(steps, lambda s: "azure/login" in s.get("uses", ""))
+    assert login < guard < download < apply
+    assert steps[apply]["with"]["binding-mode"] == "encrypted_plan"
+
+
+def test_azure_login_precedes_plan_in_every_stage_job(wf):
+    for name in ("dev", "uat", "prod-plan", "prod"):
+        steps = _steps(wf, name)
+        login = _index(steps, lambda s: "azure/login" in s.get("uses", ""))
+        plan = _index(steps, lambda s: re.search(r"/actions/(plan|apply)@", s.get("uses", "")))
+        assert login < plan, name
+
+
+def test_prod_plan_upload_has_no_plan_json_and_short_retention(wf):
+    steps = _steps(wf, "prod-plan")
+    up = steps[_index(steps, lambda s: "upload-artifact" in s.get("uses", ""))]
+    assert up["with"]["name"] == "ayasee-prod-plan"
+    assert up["with"]["retention-days"] == 7
+    assert up["with"]["if-no-files-found"] == "error"
+    assert "json" not in up["with"]["path"]
+    assert "outputs.plan-dir" in up["with"]["path"]
+    assert "outputs.manifest-path" in up["with"]["path"]
+
+
+def test_prod_plan_scans_before_upload(wf):
+    steps = _steps(wf, "prod-plan")
+    policy = _index(steps, lambda s: "/actions/policy@" in s.get("uses", ""))
+    trivy = _index(steps, lambda s: "trivy-action" in s.get("uses", ""))
+    upload = _index(steps, lambda s: "upload-artifact" in s.get("uses", ""))
+    assert policy < upload and trivy < upload
+    with_ = steps[trivy]["with"]
+    assert with_["scan-type"] == "config"
+    assert with_["severity"] == "HIGH,CRITICAL"
+    assert str(with_["exit-code"]) == "1"
+    assert steps[policy]["with"]["stage"] == "prod"
+
+
+def test_prod_plan_outputs(wf):
+    assert set(wf["jobs"]["prod-plan"]["outputs"]) == {"has-changes", "critical", "high", "units"}
+
+
+def test_start_stage_validated_in_resolve(wf):
+    job = wf["jobs"]["resolve"]
+    text = "\n".join(str(s) for s in job["steps"])
+    assert "dev|uat|prod-plan" in text
+    assert wf[True]["workflow_call"]["inputs"]["start-stage"]["default"] == "dev"
+
+
+def test_dev_uat_use_same_job_and_write_ledger_with_mirror(wf):
+    for name in ("dev", "uat"):
+        steps = _steps(wf, name)
+        plan = steps[_index(steps, lambda s: "/actions/plan@" in s.get("uses", ""))]
+        apply = steps[_index(steps, lambda s: "/actions/apply@" in s.get("uses", ""))]
+        ledger = steps[_index(steps, lambda s: "/actions/ledger@" in s.get("uses", ""))]
+        assert plan["with"]["binding-mode"] == apply["with"]["binding-mode"] == "same-job"
+        assert ledger["with"]["mirror-deployments"] == "true"
+        assert "steps.units.outputs.units-json" in ledger["if"]
+
+
+def test_oidc_environment(wf):
+    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+        env = wf["jobs"][name]["env"]
+        assert env["ARM_USE_OIDC"] == "true"
+        assert env["DATABRICKS_AUTH_TYPE"] == "github-oidc-azure"
+        assert env["ARM_CLIENT_ID"] == "${{ vars.AZURE_CLIENT_ID }}"
+
+
+def test_prod_in_sync_mirrors_and_notifies_failure(wf):
+    steps = _steps(wf, "prod-in-sync")
+    ledger = steps[_index(steps, lambda s: "/actions/ledger@" in s.get("uses", ""))]
+    assert ledger["with"]["mirror-deployments"] == "true"
+    notify = steps[_index(steps, lambda s: "/actions/notify@" in s.get("uses", ""))]
+    assert notify["with"]["event"] == "prod_failed"
+    assert "failure()" in notify["if"]
+
+
+def test_skipped_needs_only_count_when_the_skip_was_intended(wf):
+    pattern = re.compile(r"needs\.(\w+)\.result == 'skipped'")
+    for name in ("uat", "prod-plan"):
+        cond = wf["jobs"][name]["if"]
+        for m in pattern.finditer(cond):
+            prev = m.group(1)
+            assert f"needs.resolve.outputs.run-{prev} == 'false' && {m.group(0)}" in cond
+            assert f"needs.{prev}.result == 'success'" in cond
+    assert wf["jobs"]["uat"]["if"].count("'skipped'") == 1
+    assert wf["jobs"]["prod-plan"]["if"].count("'skipped'") == 2
+    assert wf["jobs"]["prod-plan"]["needs"] == ["resolve", "dev", "uat"]
+    assert "'skipped'" not in wf["jobs"]["dev"]["if"]
+
+
+def test_prod_reads_the_approver_before_download_and_apply(wf):
+    steps = _steps(wf, "prod")
+    guard = _index(steps, lambda s: "/actions/guard@" in s.get("uses", ""))
+    approver = _index(steps, lambda s: s.get("id") == "approver")
+    download = _index(steps, lambda s: "download-artifact" in s.get("uses", ""))
+    apply = _index(steps, lambda s: "/actions/apply@" in s.get("uses", ""))
+    ledger = _index(steps, lambda s: "/actions/ledger@" in s.get("uses", ""))
+    assert guard < approver < download < apply < ledger
+    assert "if" not in steps[approver]  # default success(): no approval, no apply
+    assert "approvals list" in steps[approver]["run"]
+    assert steps[ledger]["with"]["approver"] == "${{ steps.approver.outputs.login }}"
+
+
+def test_binding_failure_does_not_open_stop_the_line(wf):
+    for name in ("dev", "uat", "prod"):
+        steps = _steps(wf, name)
+        issue = steps[_index(steps, lambda s: "stop-the-line" in s.get("run", ""))]
+        assert "steps.apply.outcome == 'failure'" in issue["if"]
+        assert "steps.units.outputs.units-json != ''" in issue["if"]
+    steps = _steps(wf, "prod")
+    notify = [s for s in steps if s.get("with", {}).get("event") == "prod_failed"]
+    assert notify, "prod_failed is still notified"
+
+
+def test_trivy_does_not_use_the_actions_cache(wf):
+    steps = _steps(wf, "prod-plan")
+    trivy = steps[_index(steps, lambda s: "trivy-action" in s.get("uses", ""))]
+    assert trivy["with"]["cache"] == "false"
+
+
+def test_policy_and_trivy_read_the_plan_json_dir_output(wf):
+    steps = _steps(wf, "prod-plan")
+    policy = steps[_index(steps, lambda s: "/actions/policy@" in s.get("uses", ""))]
+    trivy = steps[_index(steps, lambda s: "trivy-action" in s.get("uses", ""))]
+    assert policy["with"]["plan-json"] == "${{ steps.plan.outputs.json-dir }}"
+    assert trivy["with"]["scan-ref"] == "${{ steps.plan.outputs.json-dir }}"
+
+
+def test_resolve_rejects_unsupported_settings(wf):
+    """R35 + R73: gate: risky, engine: terraform, terragrunt: false, extra_rules, notify.teams."""
+    steps = _steps(wf, "resolve")
+    i = _index(steps, lambda s: "config check-supported" in s.get("run", ""))
+    step = steps[i]
+    assert step["env"]["CONFIG_PATH"] == "${{ inputs.config-path }}"
+    assert "if" not in step and "continue-on-error" not in step
+    assert "::error::$line" in step["run"] and "exit 1" in step["run"]
+    assert i < _index(steps, lambda s: s.get("id") == "resolve")
+
+
+def test_prod_plan_writes_nothing_to_github(wf):
+    """M3: no ledger write, no deployment mirror and no issue in prod-plan."""
+    for step in _steps(wf, "prod-plan"):
+        assert "/actions/ledger@" not in step.get("uses", "")
+        assert "ayasee issue" not in step.get("run", "")
+
+
+def test_resolve_refuses_a_superseded_commit(wf):
+    """R70: the run of a commit that is no longer the tip of main stops in resolve."""
+    steps = _steps(wf, "resolve")
+    i = _index(steps, lambda s: "main-tip" in s.get("run", ""))
+    step = steps[i]
+    assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["REPO"] == "${{ github.repository }}"
+    assert step["env"]["SHA"] == "${{ github.sha }}"
+    run = step["run"]
+    assert 'tip="$(ayasee main-tip --repo "$REPO")"' in run
+    assert '[ "$tip" = "$SHA" ]' in run and "::error::superseded" in run and "exit 1" in run
+    assert "if" not in step and "continue-on-error" not in step
+    setup = _index(steps, lambda s: "/actions/setup@" in s.get("uses", ""))
+    assert setup < i < _index(steps, lambda s: s.get("id") == "resolve")
+    assert wf["jobs"]["resolve"]["permissions"] == {"contents": "read"}
+
+
+def test_ledger_credentials_are_step_scoped_env_only(wf):
+    text = PATH.read_text()
+    assert "credential.helper" not in text and "git config" not in text
+    assert "ledger-git-credentials" not in text
+    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+        for step in _steps(wf, name):
+            uses = step.get("uses", "")
+            env = step.get("env", {})
+            if "/actions/guard@" in uses or "/actions/ledger@" in uses:
+                assert env["GIT_CONFIG_COUNT"] == "${{ secrets.ledger-token && '1' || '0' }}", name
+                assert env["GIT_CONFIG_KEY_0"] == "credential.${{ github.server_url }}.helper"
+                assert "$AYASEE_LEDGER_TOKEN" in env["GIT_CONFIG_VALUE_0"]
+            else:
+                assert "GIT_CONFIG_COUNT" not in env and "AYASEE_LEDGER_TOKEN" not in env
+        assert "ledger-token" not in str(wf["jobs"][name].get("env", {}))
+
+
+def test_prod_plan_summary_assigns_before_echoing(wf):
+    steps = _steps(wf, "prod-plan")
+    run = steps[_index(steps, lambda s: s.get("id") == "summary")]["run"]
+    for line in run.splitlines():
+        if line.strip().startswith("echo"):
+            assert "$(" not in line, line  # a failing jq inside echo would be swallowed
+    for var in ("critical", "high", "units"):
+        assert f'{var}="$(jq -e' in run
+
+
+def test_prod_in_sync_checks_out_the_repository(wf):
+    steps = _steps(wf, "prod-in-sync")
+    co = steps[_index(steps, lambda s: "actions/checkout" in s.get("uses", ""))]
+    assert co["with"]["persist-credentials"] is False
+
+
+def test_prod_failed_notification_carries_replan_detail(wf):
+    steps = _steps(wf, "prod")
+    n = [s for s in steps if s.get("with", {}).get("event") == "prod_failed"][0]
+    assert "replan_needed" in n["with"]["detail"]
+    assert "steps.units.outputs.units-json == ''" in n["with"]["detail"]
+
+
+def test_set_ayasee_ref_script(tmp_path):
+    import shutil
+    import subprocess
+
+    script = ROOT / "scripts" / "set-ayasee-ref.sh"
+    local = tmp_path / "local.yml"
+    shutil.copy(PATH, local)
+    subprocess.run([script, "--local", local], check=True)
+    text = local.read_text()
+    assert "uses: ./actions/plan # AYASEE_REF" in text
+    assert "OWNER/ayasee" not in text
+
+    head = subprocess.run(
+        ["git", "-C", ROOT, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    rel = tmp_path / "rel.yml"
+    shutil.copy(PATH, rel)
+    subprocess.run([script, "acme/ayasee", head, rel], check=True)
+    assert f"uses: acme/ayasee/actions/plan@{head} # AYASEE_REF" in rel.read_text()
+
+    bad = subprocess.run([script, "acme/ayasee", "z" * 40, rel], capture_output=True)
+    assert bad.returncode != 0
+
+
+def test_set_ayasee_ref_refuses_when_actions_differ_from_source(tmp_path):
+    import shutil
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "actions").mkdir()
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    shutil.copy(ROOT / "scripts" / "set-ayasee-ref.sh", repo / "scripts")
+    shutil.copy(PATH, repo / ".github" / "workflows" / "iac-staged.yml")
+    (repo / "actions" / "a.txt").write_text("one")
+
+    def git(*a):
+        return subprocess.run(
+            ["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-qm", "one")
+    source = git("rev-parse", "HEAD")
+    (repo / "actions" / "a.txt").write_text("two")
+    git("commit", "-qam", "two")
+    res = subprocess.run(
+        [repo / "scripts" / "set-ayasee-ref.sh", "acme/ayasee", source],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0 and "differ" in res.stderr
+    assert "OWNER/ayasee" in (repo / ".github" / "workflows" / "iac-staged.yml").read_text()
+
+
+def test_prod_records_the_ledger_even_when_cancelled(wf):
+    steps = _steps(wf, "prod")
+    assert steps[_index(steps, lambda s: s.get("id") == "units")]["if"] == "${{ always() }}"
+    ledger = steps[_index(steps, lambda s: "/actions/ledger@" in s.get("uses", ""))]
+    assert ledger["if"] == "${{ always() && steps.units.outputs.units-json != '' }}"
+
+
+# ---- R50: a rejected prod gate is announced ----
+
+
+def test_prod_result_runs_only_after_a_failed_prod_job_with_changes(wf):
+    job = wf["jobs"]["prod-result"]
+    assert job["needs"] == ["resolve", "prod-plan", "prod"]
+    cond = job["if"]
+    assert cond.startswith("${{ always()")
+    assert "needs.prod-plan.outputs.has-changes == 'true'" in cond
+    assert "needs.prod.result == 'failure'" in cond
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert "environment" not in job
+
+
+def test_prod_result_notifies_prod_rejected_only_when_the_gate_was_rejected(wf):
+    s = _steps(wf, "prod-result")
+    check = next(x for x in s if x.get("id") == "rejected")
+    assert "ayasee approvals rejected" in check["run"]
+    assert "--env prod --job prod" in check["run"]
+    notify = next(x for x in s if x.get("uses", "").startswith("OWNER/ayasee/actions/notify@"))
+    assert notify["with"]["event"] == "prod_rejected"
+    assert notify["if"] == "${{ steps.rejected.outputs.rejected == 'true' }}"
+    assert [x for x in s if "notify@" in x.get("uses", "")] == [notify]
+
+
+# ---- R52 / R51 plumbing ----
+
+
+def test_prod_plan_passes_allow_cascade_from_the_configuration(wf):
+    plan = next(x for x in _steps(wf, "prod-plan") if x.get("id") == "plan")
+    assert plan["with"]["allow-cascade"] == "${{ needs.resolve.outputs.allow-cascade }}"
+    assert "allow_cascade" in PATH.read_text()
+    for stage in ("dev", "uat"):
+        step = next(x for x in _steps(wf, stage) if x.get("id") == "plan")
+        assert "allow-cascade" not in step["with"]
+
+
+def test_extra_secret_reaches_only_plan_and_apply_steps(wf):
+    text = PATH.read_text()
+    assert text.count("secrets.extra-env-secret") == 6
+    for name, job in wf["jobs"].items():
+        for step in job["steps"]:
+            has = "AYASEE_EXTRA_SECRET" in (step.get("env") or {})
+            uses = step.get("uses", "")
+            assert has == bool(re.search(r"/actions/(plan|apply)@", uses)), (name, step)
+
+
+def test_features_step_never_blocks_the_run(wf):
+    step = next(s for s in wf["jobs"]["resolve"]["steps"] if s.get("id") == "features")
+    assert step["continue-on-error"] is True
+    assert "::warning::" in step["run"] and 'echo "features={}"' in step["run"]
+
+
+def _run_step(tmp_path, step, ayasee_body, **env):
+    import os
+    import subprocess
+
+    shim = tmp_path / "shim"
+    shim.mkdir(exist_ok=True)
+    fake = shim / "ayasee"
+    fake.write_text("#!/bin/bash\n" + ayasee_body)
+    fake.chmod(0o755)
+    return subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{shim}:{os.environ['PATH']}", **env},
+    )
+
+
+@pytest.mark.parametrize(("tip", "rc"), [("a" * 40, 0), ("b" * 40, 1)], ids=["tip", "superseded"])
+def test_superseded_step_behaviour(wf, tmp_path, tip, rc):
+    steps = _steps(wf, "resolve")
+    step = steps[_index(steps, lambda s: "main-tip" in s.get("run", ""))]
+    proc = _run_step(tmp_path, step, f"echo {tip}\n", REPO="o/r", SHA="a" * 40)
+    assert proc.returncode == rc
+    assert ("::error::superseded" in proc.stdout) is (rc == 1)
+
+
+def test_superseded_step_fails_when_the_tip_cannot_be_read(wf, tmp_path):
+    steps = _steps(wf, "resolve")
+    step = steps[_index(steps, lambda s: "main-tip" in s.get("run", ""))]
+    proc = _run_step(tmp_path, step, "exit 1\n", REPO="o/r", SHA="a" * 40)
+    assert proc.returncode != 0
+
+
+def test_check_supported_step_prints_one_error_per_line(wf, tmp_path):
+    steps = _steps(wf, "resolve")
+    step = steps[_index(steps, lambda s: "config check-supported" in s.get("run", ""))]
+    body = (
+        'echo "engine: not supported yet" >&2; echo "extra_rules: not supported yet" >&2; exit 1\n'
+    )
+    proc = _run_step(tmp_path, step, body, CONFIG_PATH=".ayasee.yaml")
+    assert proc.returncode == 1
+    assert proc.stdout.splitlines() == [
+        "::error::engine: not supported yet",
+        "::error::extra_rules: not supported yet",
+    ]
+    ok = _run_step(tmp_path, step, "exit 0\n", CONFIG_PATH=".ayasee.yaml")
+    assert ok.returncode == 0 and ok.stdout == ""

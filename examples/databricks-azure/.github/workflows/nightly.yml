@@ -1,0 +1,21 @@
+# Nightly drift check of every stage, and a rescan of main.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  nightly:
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      security-events: write
+      actions: read
+    uses: OWNER/ayasee/.github/workflows/iac-nightly.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    secrets:
+      teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}

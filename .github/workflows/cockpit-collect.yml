@@ -1,0 +1,289 @@
+# Cockpit collector: runs `ayasee cockpit collect` across the estate, commits snapshot.json and a
+# dated history copy to the data repository, then renders it (pages | issue | summary).
+# Callers add their own `workflow_run` (iac-staged and iac-nightly completed) and `schedule`
+# (*/30 * * * *) triggers: see docs/cockpit/setup.md for a wrapper. Do not set a concurrency group
+# named ayasee-cockpit in the wrapper: it would collide with the group below. The group allows
+# one run at a time; while one runs, a newer pending run replaces an older pending one (the older
+# is cancelled), so at most one run waits. The group is per repository: use one wrapper
+# repository per data repository, or two wrappers would push to the data repository concurrently.
+#
+# Lines marked AYASEE_REF, AYASEE_REPO and AYASEE_SHA are placeholders (all-zero SHA, owner
+# OWNER): scripts/set-ayasee-ref.sh rewrites them at release. This file is not callable before
+# that. The collect job checks out the ayasee source at the same pinned commit into
+# ayasee-src/ for scripts/ (R33: a reusable workflow cannot rely on github.job_workflow_sha);
+# the pages job builds cockpit-site/ through the pinned cockpit-site action. The `--local`
+# (./actions) form is not supported for this workflow: no job checks out the repository root, so
+# ./actions would not exist.
+#
+# Ledgers: the collector reads only github-branch:// ledger URLs, through the read token (it has
+# no cloud login). `ayasee cockpit repos` refuses any other store URL before a token is minted.
+name: cockpit-collect
+
+on:
+  workflow_call:
+    inputs:
+      tool-mirror:
+        description: >-
+          Optional https base URL (no trailing slash) replacing https://github.com for tool
+          downloads (GitHub Enterprise Server or offline runners). SHA-256 checks still apply.
+        type: string
+        required: false
+        default: ""
+      renderer:
+        description: How to present the snapshot (pages, issue or summary).
+        type: string
+        required: false
+        default: pages
+      repos-file:
+        description: Path of the repos file inside the data repository.
+        type: string
+        required: false
+        default: repos.yaml
+      data-repository:
+        description: The cockpit data repository, as owner/name. Also the owner of the estate installation.
+        type: string
+        required: true
+      issue-number:
+        description: Issue of the data repository that the issue renderer updates.
+        type: string
+        required: false
+        default: ""
+      history-days:
+        description: Days of history the site shows (integer, 1 to 365). Pages renderer only.
+        type: string
+        required: false
+        default: "30"
+    secrets:
+      app-id:
+        description: ID of the GitHub App (see docs/cockpit/setup.md).
+        required: true
+      app-private-key:
+        description: Private key of the GitHub App.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ayasee-cockpit
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: collect
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # the App tokens carry the real access
+    timeout-minutes: 30
+    env:
+      SNAPSHOT_CACHE: .ayasee/etag-cache.json
+    steps:
+      - id: inputs
+        name: Validate the inputs
+        env:
+          RENDERER: ${{ inputs.renderer }}
+          DATA_REPOSITORY: ${{ inputs.data-repository }}
+          REPOS_FILE: ${{ inputs.repos-file }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          HISTORY_DAYS: ${{ inputs.history-days }}
+        run: |
+          case "$RENDERER" in pages|issue|summary) ;; *)
+            echo "::error::renderer must be pages, issue or summary"
+            exit 1 ;;
+          esac
+          [[ "$DATA_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            echo "::error::data-repository must be owner/name"
+            exit 1
+          }
+          case "$REPOS_FILE" in /*|*..*|"") echo "::error::repos-file must be a relative path inside the data repository"; exit 1 ;; esac
+          if ! { [[ "$HISTORY_DAYS" =~ ^[1-9][0-9]{0,2}$ ]] && [ "$HISTORY_DAYS" -le 365 ]; }; then
+            echo "::error::history-days must be an integer between 1 and 365"
+            exit 1
+          fi
+          if [ "$RENDERER" = issue ]; then
+            [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+              echo "::error::the issue renderer needs issue-number (a positive integer)"
+              exit 1
+            }
+          fi
+          {
+            echo "owner=${DATA_REPOSITORY%%/*}"
+            echo "name=${DATA_REPOSITORY#*/}"
+          } >>"$GITHUB_OUTPUT"
+      - id: write-token
+        name: Write token for the data repository only (contents)
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ steps.inputs.outputs.owner }}
+          repositories: ${{ steps.inputs.outputs.name }}
+          permission-contents: write
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ inputs.data-repository }}
+          token: ${{ steps.write-token.outputs.token }}
+          path: data
+          persist-credentials: false
+      - name: Check out the ayasee source (scripts/)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: OWNER/ayasee # AYASEE_REPO
+          ref: 0000000000000000000000000000000000000000 # AYASEE_SHA
+          path: ayasee-src
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: repos
+        name: List the repositories of the estate
+        env:
+          REPOS_FILE: ${{ inputs.repos-file }}
+          OWNER: ${{ steps.inputs.outputs.owner }}
+        run: |
+          # fails when a repository belongs to another owner or there are more than 500
+          list="$(ayasee cockpit repos --repos-file "data/$REPOS_FILE" --owner "$OWNER")"
+          echo "list=$list" >>"$GITHUB_OUTPUT"
+      - id: read-token
+        name: Read token for the listed repositories only
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ steps.inputs.outputs.owner }}
+          repositories: ${{ steps.repos.outputs.list }}
+          permission-metadata: read
+          permission-actions: read
+          permission-issues: read
+          permission-contents: read
+          permission-deployments: read
+          permission-security-events: read
+      - id: issue-token
+        name: Issue token (issues write on the data repository, nothing else)
+        if: ${{ inputs.renderer == 'issue' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ steps.inputs.outputs.owner }}
+          repositories: ${{ steps.inputs.outputs.name }}
+          permission-issues: write
+      - id: etag
+        name: Restore the ETag cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.SNAPSHOT_CACHE }}
+          # Never an exact hit: the newest entry under restore-keys is restored. The prefix is
+          # scoped to the data repository; Actions caches are scoped by ref, so a cache saved from a
+          # PR ref is never visible to the default-branch collector.
+          key: ayasee-cockpit-etag-${{ inputs.data-repository }}-${{ github.run_id }}
+          restore-keys: ayasee-cockpit-etag-${{ inputs.data-repository }}-
+      - name: Collect the snapshot
+        env:
+          GITHUB_TOKEN: ${{ steps.read-token.outputs.token }}
+          REPOS_FILE: ${{ inputs.repos-file }}
+        run: |
+          # exit 1 means every repository failed: the job fails and nothing is committed
+          ayasee cockpit collect \
+            --repos-file "data/$REPOS_FILE" \
+            --etag-cache "$SNAPSHOT_CACHE" \
+            --out snapshot.json
+      - id: diff
+        name: Compare with the committed snapshot
+        run: |
+          # assigned first so a failing script fails the step (not swallowed by echo "$(...)")
+          result="$(ayasee-src/scripts/snapshot-changed.sh data/snapshot.json snapshot.json)"
+          echo "result=$result" >>"$GITHUB_OUTPUT"
+      - name: Write snapshot.json and the history copy
+        if: ${{ steps.diff.outputs.result == 'changed' }}
+        run: |
+          cp snapshot.json data/snapshot.json
+          hist="data/history/$(date -u +%Y/%m/%d)"
+          mkdir -p "$hist"
+          cp snapshot.json "$hist/$(date -u +%H%M).json"
+      - name: Commit and push
+        if: ${{ steps.diff.outputs.result == 'changed' }}
+        env:
+          WRITE_TOKEN: ${{ steps.write-token.outputs.token }}
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$WRITE_TOKEN"; }; f'
+        run: |
+          git -C data config user.name "ayasee-cockpit[bot]"
+          git -C data config user.email "ayasee-cockpit[bot]@users.noreply.github.com"
+          git -C data add snapshot.json history
+          git -C data commit -m "cockpit: snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git -C data push
+      - name: Save the ETag cache (only when its content changed)
+        # No status function in the condition: GitHub adds success(), so this never runs after a
+        # failed collect, diff or push. The key carries the content hash: an unchanged cache
+        # matches the restored key and is not saved again.
+        if: ${{ hashFiles(env.SNAPSHOT_CACHE) != '' && steps.etag.outputs.cache-matched-key != format('ayasee-cockpit-etag-{0}-{1}', inputs.data-repository, hashFiles(env.SNAPSHOT_CACHE)) }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.SNAPSHOT_CACHE }}
+          key: ayasee-cockpit-etag-${{ inputs.data-repository }}-${{ hashFiles(env.SNAPSHOT_CACHE) }}
+      - name: Render to the job summary
+        if: ${{ inputs.renderer == 'summary' }}
+        run: ayasee cockpit render-md --snapshot snapshot.json --summary "$GITHUB_STEP_SUMMARY"
+      - name: Render to an issue of the data repository
+        if: ${{ inputs.renderer == 'issue' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.issue-token.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          DATA_REPOSITORY: ${{ inputs.data-repository }}
+        run: |
+          ayasee cockpit render-md --snapshot snapshot.json \
+            --issue-number "$ISSUE_NUMBER" --repo "$DATA_REPOSITORY"
+      - name: Build the history index (generated for Pages only, never committed)
+        if: ${{ inputs.renderer == 'pages' }}
+        env:
+          HISTORY_DAYS: ${{ inputs.history-days }}
+        run: |
+          mkdir -p data/history
+          ayasee cockpit history-index --dir data/history --days "$HISTORY_DAYS" \
+            --out data/history/index.json
+      - name: Stage the data for the site (the fresh snapshot, not the committed one)
+        if: ${{ inputs.renderer == 'pages' }}
+        # data/snapshot.json only changes when the estate does, so its generated_at would make the
+        # site's stale banner fire on a quiet estate; the site gets this run's snapshot.json.
+        run: |
+          mkdir site-data
+          cp snapshot.json site-data/snapshot.json
+          cp -R data/history site-data/history
+      - name: Upload the data for the site
+        if: ${{ inputs.renderer == 'pages' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cockpit-data
+          path: site-data
+          if-no-files-found: error
+          retention-days: 1
+
+  pages:
+    name: pages
+    needs: collect
+    if: ${{ inputs.renderer == 'pages' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # deploy-pages
+      id-token: write # deploy-pages proves the deployment origin
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cockpit-data
+          path: cockpit-data
+      # builds the site and puts snapshot.json and history/ (with index.json) at the site root,
+      # where the page fetches ./snapshot.json and ./history/index.json
+      - uses: OWNER/ayasee/actions/cockpit-site@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          snapshot: cockpit-data/snapshot.json
+          history-dir: cockpit-data/history
+          out: site
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

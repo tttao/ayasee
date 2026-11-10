@@ -1,0 +1,34 @@
+# Optional: estate cockpit (docs/cockpit/setup.md). Keep it in one repository of the estate, with
+# the GitHub App secrets COCKPIT_APP_ID and COCKPIT_APP_PRIVATE_KEY. Delete this file if unused.
+#
+# cockpit-collect reads only github-branch:// ledgers (no cloud login). This example keeps its
+# ledger in Azure Blob storage (ledger.url in .ayasee.yaml is azure-blob://), which the cockpit
+# cannot read: before enabling this file, move the ledger to a branch (git-branch:// store plus the
+# ledger-token secret, listed as github-branch://OWNER/REPO in repos.yaml), or delete this file.
+name: cockpit
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] only calls the pinned reusable workflow; no checkout or run of the triggering run's code
+    workflows: [main]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cockpit:
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: OWNER/ayasee/.github/workflows/cockpit-collect.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    with:
+      renderer: pages
+      data-repository: OWNER/cockpit-data
+      repos-file: repos.yaml
+    secrets:
+      app-id: ${{ secrets.COCKPIT_APP_ID }}
+      app-private-key: ${{ secrets.COCKPIT_APP_PRIVATE_KEY }}

@@ -1,0 +1,257 @@
+{
+  "schema": "ayasee.snapshot/v1",
+  "generated_at": "2026-11-06T09:00:00Z",
+  "repos": [
+    {
+      "repo": "acme/lakehouse",
+      "main_sha": "f00dfeedcafe",
+      "findings": {
+        "critical": 0,
+        "high": 2,
+        "url": "https://github.com/acme/lakehouse/security/code-scanning"
+      },
+      "envs": [
+        {
+          "env": "dev",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 0,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": false,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "applied",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "uat",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 3,
+          "pending_compare_url": "https://github.com/acme/lakehouse/compare/a1b2c3d...f00dfee",
+          "gate": {
+            "waiting": false,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "applied",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "prod",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 2,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": true,
+            "since": "2026-11-06T07:30:00Z",
+            "run_url": "https://github.com/acme/lakehouse/actions/runs/1"
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "applied",
+            "stop_the_line": false
+          }
+        }
+      ]
+    },
+    {
+      "repo": "acme/ml-platform",
+      "main_sha": "0123456789ab",
+      "findings": {
+        "critical": 1,
+        "high": 4,
+        "url": null
+      },
+      "envs": [
+        {
+          "env": "dev",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 0,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": false,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": true,
+            "since": "2026-11-05T01:00:00Z",
+            "issue_url": "https://github.com/acme/ml-platform/issues/7",
+            "resources": 2
+          },
+          "health": {
+            "last_result": "applied",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "uat",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 0,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": false,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "failed",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "prod",
+          "live_sha": "a1b2c3d4e5f6",
+          "live_at": "2026-11-06T08:00:00Z",
+          "converged": true,
+          "pending_commits": 0,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": false,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "applied",
+            "stop_the_line": true
+          }
+        }
+      ]
+    },
+    {
+      "repo": "acme/new-repo",
+      "main_sha": null,
+      "findings": {
+        "critical": null,
+        "high": null,
+        "url": null
+      },
+      "envs": [
+        {
+          "env": "dev",
+          "live_sha": null,
+          "live_at": null,
+          "converged": null,
+          "pending_commits": null,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": null,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "unknown",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "uat",
+          "live_sha": null,
+          "live_at": null,
+          "converged": null,
+          "pending_commits": null,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": null,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "unknown",
+            "stop_the_line": false
+          }
+        },
+        {
+          "env": "prod",
+          "live_sha": null,
+          "live_at": null,
+          "converged": null,
+          "pending_commits": null,
+          "pending_compare_url": null,
+          "gate": {
+            "waiting": null,
+            "since": null,
+            "run_url": null
+          },
+          "drift": {
+            "open": false,
+            "since": null,
+            "issue_url": null,
+            "resources": 0
+          },
+          "health": {
+            "last_result": "unknown",
+            "stop_the_line": false
+          }
+        }
+      ]
+    },
+    {
+      "repo": "acme/broken",
+      "main_sha": null,
+      "error": "ledger branch not readable (403)",
+      "findings": {
+        "critical": null,
+        "high": null,
+        "url": null
+      },
+      "envs": []
+    }
+  ]
+}

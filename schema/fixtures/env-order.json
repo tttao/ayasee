@@ -1,0 +1,13 @@
+{
+  "comment": "Shared by cockpit-site/test/matrix.test.ts and tests/cockpit/test_render_md.py (R59 ordered merge). 'in' is one env sequence per repo, in repo order.",
+  "cases": [
+    { "name": "new env goes right after its predecessor", "in": [["dev", "prod"], ["dev", "stg", "prod"]], "expect": ["dev", "stg", "prod"] },
+    { "name": "extra env is appended after its predecessor", "in": [["dev", "prod"], ["dev", "prod", "dr"]], "expect": ["dev", "prod", "dr"] },
+    { "name": "predecessor-less env goes first", "in": [["dev", "prod"], ["sandbox", "dev"]], "expect": ["sandbox", "dev", "prod"] },
+    { "name": "first repo wins on conflict", "in": [["dev", "prod"], ["prod", "dev"]], "expect": ["dev", "prod"] },
+    { "name": "conflict with an extra env", "in": [["dev", "prod"], ["prod", "x", "dev"]], "expect": ["dev", "prod", "x"] },
+    { "name": "three repos, mutual conflict", "in": [["a", "b"], ["b", "a"], ["c"]], "expect": ["c", "a", "b"] },
+    { "name": "no repos", "in": [], "expect": [] },
+    { "name": "repos without envs", "in": [[], []], "expect": [] }
+  ]
+}

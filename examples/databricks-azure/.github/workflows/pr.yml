@@ -1,0 +1,19 @@
+# Pull-request checks: static checks and scans, and a dev-only plan with a risk comment.
+# The reusable workflow needs `pull_request`, never `pull_request_target`.
+name: pr
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  pr:
+    # Caller permissions must cover every job of the called workflow (docs/concepts/pr-checks.md).
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+      security-events: write
+      actions: read
+    uses: OWNER/ayasee/.github/workflows/iac-pr.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA

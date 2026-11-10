@@ -1,0 +1,36 @@
+{
+  "comment": "Shared by cockpit-site/test/status.test.ts and (Task 21) the Python renderer. First rule that matches wins; otherwise 'unknown'. Case inputs are flat: stop_the_line, last_result, drift_open, waiting, pending_commits, live_sha (null allowed).",
+  "order": ["held", "failed", "drift", "waiting", "pending", "synced"],
+  "fallback": "unknown",
+  "rules": {
+    "held": "health.stop_the_line is true",
+    "failed": "health.last_result is failed",
+    "drift": "drift.open is true",
+    "waiting": "gate.waiting is true",
+    "pending": "pending_commits > 0",
+    "synced": "health.last_result is applied or no_changes, and live_sha is set"
+  },
+  "cases": [
+    { "name": "held beats failed", "in": { "stop_the_line": true, "last_result": "failed", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "held" },
+    { "name": "held beats drift", "in": { "stop_the_line": true, "last_result": "applied", "drift_open": true, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "held" },
+    { "name": "held beats waiting", "in": { "stop_the_line": true, "last_result": "applied", "drift_open": false, "waiting": true, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "held" },
+    { "name": "held beats pending", "in": { "stop_the_line": true, "last_result": "applied", "drift_open": false, "waiting": false, "pending_commits": 3, "live_sha": "abc1234" }, "expect": "held" },
+    { "name": "held beats synced", "in": { "stop_the_line": true, "last_result": "applied", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "held" },
+    { "name": "failed beats drift", "in": { "stop_the_line": false, "last_result": "failed", "drift_open": true, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "failed" },
+    { "name": "failed beats waiting", "in": { "stop_the_line": false, "last_result": "failed", "drift_open": false, "waiting": true, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "failed" },
+    { "name": "failed beats pending", "in": { "stop_the_line": false, "last_result": "failed", "drift_open": false, "waiting": false, "pending_commits": 2, "live_sha": "abc1234" }, "expect": "failed" },
+    { "name": "failed beats synced", "in": { "stop_the_line": false, "last_result": "failed", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "failed" },
+    { "name": "drift beats waiting", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": true, "waiting": true, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "drift" },
+    { "name": "drift beats pending", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": true, "waiting": false, "pending_commits": 4, "live_sha": "abc1234" }, "expect": "drift" },
+    { "name": "drift beats synced", "in": { "stop_the_line": false, "last_result": "no_changes", "drift_open": true, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "drift" },
+    { "name": "waiting beats pending", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": true, "pending_commits": 5, "live_sha": "abc1234" }, "expect": "waiting" },
+    { "name": "waiting beats synced", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": true, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "waiting" },
+    { "name": "pending beats synced", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": false, "pending_commits": 1, "live_sha": "abc1234" }, "expect": "pending" },
+    { "name": "synced after applied", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "synced" },
+    { "name": "synced after no_changes", "in": { "stop_the_line": false, "last_result": "no_changes", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "synced" },
+    { "name": "synced with null pending count", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": null, "pending_commits": null, "live_sha": "abc1234" }, "expect": "synced" },
+    { "name": "applied without live_sha is unknown", "in": { "stop_the_line": false, "last_result": "applied", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": null }, "expect": "unknown" },
+    { "name": "last_result unknown is unknown", "in": { "stop_the_line": false, "last_result": "unknown", "drift_open": false, "waiting": false, "pending_commits": 0, "live_sha": "abc1234" }, "expect": "unknown" },
+    { "name": "all null is unknown", "in": { "stop_the_line": false, "last_result": "unknown", "drift_open": false, "waiting": null, "pending_commits": null, "live_sha": null }, "expect": "unknown" }
+  ]
+}

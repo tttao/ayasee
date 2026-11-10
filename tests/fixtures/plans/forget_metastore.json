@@ -1,0 +1,24 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "databricks_metastore.x",
+      "mode": "managed",
+      "type": "databricks_metastore",
+      "name": "x",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "forget"
+        ],
+        "before": {
+          "name": "m"
+        },
+        "after": null,
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "azurerm_role_assignment.x",
+      "mode": "managed",
+      "type": "azurerm_role_assignment",
+      "name": "x",
+      "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "principal_id": "<principal_id>",
+          "role_definition_name": "Contributor",
+          "scope": "/subscriptions/0000"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

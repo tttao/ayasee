@@ -1,0 +1,27 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "databricks_catalog.main",
+      "mode": "managed",
+      "type": "databricks_catalog",
+      "name": "main",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "delete",
+          "create"
+        ],
+        "before": {
+          "name": "a"
+        },
+        "after": {
+          "name": "b"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

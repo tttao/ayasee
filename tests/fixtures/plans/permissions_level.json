@@ -1,0 +1,46 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "databricks_permissions.x",
+      "mode": "managed",
+      "type": "databricks_permissions",
+      "name": "x",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "job_id": "1",
+          "access_control": [
+            {
+              "group_name": "ops",
+              "permission_level": "CAN_VIEW"
+            }
+          ]
+        },
+        "after": {
+          "job_id": "1",
+          "access_control": [
+            {
+              "group_name": "ops",
+              "permission_level": "CAN_MANAGE"
+            }
+          ]
+        },
+        "after_unknown": {},
+        "before_sensitive": {
+          "access_control": [
+            {}
+          ]
+        },
+        "after_sensitive": {
+          "access_control": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

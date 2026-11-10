@@ -1,0 +1,23 @@
+# ayasee configuration of the Databricks on Azure reference repository.
+# Reference: docs/reference/ayasee-yaml.md in the ayasee repository.
+stages: [dev, uat, prod]
+engine: opentofu
+units_root: stages
+
+ledger:
+  # azure-blob://<account>.blob.core.windows.net/<container>?prefix=<prefix>. Replace the placeholder account (README step 3).
+  url: azure-blob://stgayaseeledger.blob.core.windows.net/ledger?prefix=example
+
+gate: always
+
+# R52: when a merge changes a unit and another unit that depends on it (here workspace and
+# unity-catalog, or unity-catalog and grants), prod-plan refuses the plan: the saved plan of the
+# dependent was made against the upstream's old outputs. Land the upstream change first, then the
+# dependent one in a separate merge. Setting this to true turns the refusal off. Do not.
+# First-time adoption is the same case: land workspace, then unity-catalog, then grants as three
+# merges (each unit across all stages), never all at once. A dependent planned before its upstream
+# exists would use mock upstream outputs. allow_cascade: true is not the way to bootstrap.
+allow_cascade: false
+
+notify:
+  teams: true

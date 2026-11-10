@@ -1,0 +1,73 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "databricks_grants.x",
+      "mode": "managed",
+      "type": "databricks_grants",
+      "name": "x",
+      "provider_name": "registry.opentofu.org/databricks/databricks",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "catalog": "main",
+          "grant": [
+            {
+              "principal": "data_engineers",
+              "privileges": [
+                "USE_CATALOG",
+                "SELECT"
+              ]
+            },
+            {
+              "principal": "analysts",
+              "privileges": [
+                "SELECT"
+              ]
+            }
+          ]
+        },
+        "after": {
+          "catalog": "main",
+          "grant": [
+            {
+              "principal": "data_engineers",
+              "privileges": [
+                "USE_CATALOG",
+                "SELECT"
+              ]
+            }
+          ]
+        },
+        "after_unknown": {},
+        "before_sensitive": {
+          "grant": [
+            {
+              "privileges": [
+                false,
+                false
+              ]
+            },
+            {
+              "privileges": [
+                false
+              ]
+            }
+          ]
+        },
+        "after_sensitive": {
+          "grant": [
+            {
+              "privileges": [
+                false,
+                false
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

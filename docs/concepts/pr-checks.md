@@ -1,0 +1,124 @@
+# Pull-request checks
+
+`iac-pr` is a reusable workflow for pull requests. It runs static checks and scans, plans the
+changed **dev** units with a read-only identity, runs the policy pack on that plan and posts one
+sticky comment with the risk summary. **It never applies**: no apply, no guard, no ledger write, and
+nothing the plan produced is uploaded. The only artifacts are the scrubbed SARIF and the comment
+text, both kept for one day. Running a job in the `dev-plan` environment still creates a deployment
+record for that environment (separate from `dev`, which is why the environment has its own name).
+Suppressing that record where the platform allows it needs feature detection, which belongs to the
+GHES compatibility work that has not been done yet (see
+[known limitations](architecture.md#known-limitations)).
+
+```yaml
+# .github/workflows/iac-pr.yml in the adopting repository
+on:
+  pull_request:          # never pull_request_target
+jobs:
+  iac:
+    uses: <owner>/ayasee/.github/workflows/iac-pr.yml@<sha>
+    # no secrets: the workflow needs none
+```
+
+The caller must use `pull_request`. `pull_request_target` runs with repository secrets and a write
+token against code the author controls; the workflow's jobs also check `github.event_name ==
+'pull_request'` and do nothing for any other event.
+
+## Flow
+
+No job that evaluates the PR's HCL (`terragrunt hcl validate`, plan) holds `pull-requests: write` or
+`security-events: write`. PR code can run provider and module code in those jobs, so they hand their
+result to small jobs that run no PR code (R39).
+
+| Job | Permissions | What it does |
+|---|---|---|
+| `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on the repository (SARIF, no cache); Checkov via `uvx checkov@<version>` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
+| `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs. |
+| `plan-dev` | `contents: read`, `id-token: write` | Environment `dev-plan`. Checks out the PR head (`persist-credentials: false`), finds the changed dev units, logs in to Azure, plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (stage `dev`) and writes the comment text to artifact `ayasee-pr-comment` (1 day). |
+| `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` and runs `ayasee pr-comment`. Plan-dev refuses settings that are not supported yet before its Azure login. |
+
+### Which units are planned
+
+`ayasee changed-units --base <base sha> --head <head sha> --units-root stages --env dev` diffs
+the PR against its base (merge base) and prints:
+
+- a comma list of changed dev units, planned through the plan action's `only-units` input;
+- an empty line when nothing changed, or when only documentation changed (`*.md`, `docs/**`,
+  `LICENSE`): the plan is skipped and the comment says there are no IaC changes;
+- `ALL` when any changed file that is not documentation is outside `stages/dev/` (modules,
+  `root.hcl`, `.ayasee.yaml`, other environments), when a changed file under `stages/dev/` belongs to no unit (for example a
+  removed unit), or when the diff cannot be computed. Every dev unit is then planned.
+
+Dependents of a changed unit are not added to the list; they are planned only when `ALL` applies.
+
+If change detection itself fails, the comment says the plan failed before it started; it never
+claims there are no IaC changes.
+
+### The comment
+
+One comment per PR, found by the hidden marker `<!-- ayasee:pr-plan -->` and updated in place.
+Only a comment by the expected bot login (`--author`, default `github-actions[bot]`, type `Bot`) is
+taken over. Its body is the change set summary the plan action renders: risk tiers, resource
+addresses, principals gained or lost. It never carries resource values; backticks, line breaks and
+HTML in addresses and principal names are neutralised. **The comment is advisory**: the PR's own code
+produces the plan it summarises, so an author can influence what it says. Decide on the plan and the
+required checks, not on the comment alone.
+
+## The `dev-plan` environment
+
+A separate environment keeps PR plans out of the `dev` environment's history and approvals. Create
+`dev-plan` with these variables (the same names `dev` uses): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID`, for a dedicated user-assigned managed identity with a federated credential
+for the subject `repo:<owner>/<repo>:environment:dev-plan`. It must not be the identity `dev` applies with.
+
+Give that identity the least that lets a plan run:
+
+- Azure: **Reader** on the dev subscription (or resource groups) and **Storage Blob Data Reader** on
+  the dev state container only. No write role, no Key Vault secret access.
+- Databricks: a minimal workspace entitlement that can read the objects the plan refreshes, with no
+  cluster-create and no other entitlement.
+- Plans run with `-lock=false` (input `lock: false`): a reader cannot write the state lock blob, and
+  a PR plan must not block a real run.
+
+**Be clear about what this protects.** The plan job runs the PR's own HCL, modules and providers.
+That code can use the identity and can read dev state, including any secret that is stored in it.
+Read-only limits what it can change, not what it can read. Treat dev state as readable by anyone who
+can open a PR against the repository, keep secrets out of dev state, and keep dev data non-sensitive.
+
+Recommended: restrict the `dev-plan` environment's deployment branches (to the PR branches your
+platform lets you list, for example a protected naming pattern), where the platform supports it. The
+trade-off: PR runs have refs like `refs/pull/<n>/merge`, which branch policies may not match, so a
+strict policy can block every PR plan. Where it is too awkward, rely on the minimal role and on
+requiring approval for workflows from first-time contributors. No reviewers are required on the
+environment. The workflow reads no uat or prod variable and no secret.
+
+## Fork pull requests
+
+A fork PR gets a read-only token and no OIDC token. For those PRs `plan-dev` is skipped
+(`github.event.pull_request.head.repo.full_name == github.repository`), and so is `upload-sarif`;
+fmt, validate, Trivy and Checkov still run, and their failures fail the check.
+
+## The Checkov baseline
+
+Existing findings can be accepted once, so that only new ones fail a PR. Create the baseline from the
+default branch and commit it:
+
+```bash
+uvx checkov@3.4.3 --directory . --framework terraform github_actions --create-baseline
+mkdir -p .ayasee && mv .checkov.baseline .ayasee/checkov.baseline
+```
+
+When `.ayasee/checkov.baseline` exists, the workflow passes `--baseline .ayasee/checkov.baseline`.
+Use the Checkov version the workflow runs (input `checkov-version`) so the baseline format matches.
+
+## SARIF never contains values
+
+`ayasee sarif-scrub --in F --out F` rebuilds the file from an allow-list instead of removing known
+fields. Kept: `version`, `$schema`; the tool driver and extensions (name, version, rules with id,
+name, short description, default level); each result's rule reference, level, kind, partial
+fingerprints (derived from rule, file and line when the scanner gave none) and locations reduced to a file URI plus line and column numbers; and per-run base URIs.
+`result.message.text` is always the rule's short description (the rule id when there is none).
+Snippets, region messages, code flows, fixes, properties, notifications, artifact contents and
+anything else a scanner may add are dropped. The output keeps the fields GitHub's upload requires
+(`version`, `$schema`, `runs[].tool.driver.name`, `results[].message.text`). Only scrubbed files leave
+the job and the job log lists rule ids and file names only.

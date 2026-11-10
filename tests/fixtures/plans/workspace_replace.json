@@ -1,0 +1,29 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "azurerm_databricks_workspace.x",
+      "mode": "managed",
+      "type": "azurerm_databricks_workspace",
+      "name": "x",
+      "provider_name": "registry.opentofu.org/hashicorp/azurerm",
+      "change": {
+        "actions": [
+          "delete",
+          "create"
+        ],
+        "before": {
+          "name": "ws",
+          "sku": "premium"
+        },
+        "after": {
+          "name": "ws",
+          "sku": "premium"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}
