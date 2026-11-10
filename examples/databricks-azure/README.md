@@ -90,12 +90,12 @@ It is written as `AYASEE_KEY_VAULT_KEY_ID` on those three environments.
 
 ### 5. Set the release SHA
 
-The callers in `.github/workflows/` carry a placeholder: `OWNER/ayasee/...@0000000000000000000000000000000000000000 # replace with a ayasee release SHA`.
-Pick a ayasee release, take the full 40-character commit SHA of its tag
+The callers in `.github/workflows/` carry a placeholder: `OWNER/ayasee/...@0000000000000000000000000000000000000000 # replace with an ayasee release SHA`.
+Pick an ayasee release, take the full 40-character commit SHA of its tag
 (`git rev-parse vX.Y.Z^{commit}`), and replace both the owner and the pin. Never use a branch or tag name.
 
 ```bash
-sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with a ayasee release SHA#@<40-hex SHA> \# ayasee vX.Y.Z#' \
+sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with an ayasee release SHA#@<40-hex SHA> \# ayasee vX.Y.Z#' \
   .github/workflows/*.yml
 ```
 

@@ -9,6 +9,9 @@ released version into the GitHub release notes.
 
 ### Added
 
+- A documentation site on GitHub Pages, <https://tttao.github.io/ayasee/>: the `docs` workflow
+  assembles the repository's Markdown with `scripts/build-docs-site.py` and builds it with mkdocs
+  in strict mode. The landing page and theme are in `website/`.
 - `python -m e2e.ephemeral up|pr|status|down`: create and delete a throwaway `*-sandbox` repository
   for trying out and demonstrating ayasee, with no Azure account and no released commit. See
   [the e2e README](e2e/README.md#ephemeral-sandbox-one-command-no-cloud).

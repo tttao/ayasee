@@ -24,7 +24,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: OWNER/ayasee/.github/workflows/cockpit-collect.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    uses: OWNER/ayasee/.github/workflows/cockpit-collect.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
     with:
       renderer: pages
       data-repository: OWNER/cockpit-data

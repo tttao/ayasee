@@ -17,6 +17,9 @@ htmlcov/
 # Node (cockpit-site)
 node_modules/
 
+# Documentation site (assembled by scripts/build-docs-site.py)
+website/.src/
+
 # Terraform / OpenTofu
 .terraform/
 *.tfstate

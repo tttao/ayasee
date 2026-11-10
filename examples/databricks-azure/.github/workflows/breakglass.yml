@@ -26,7 +26,7 @@ jobs:
       deployments: write
       issues: write
       actions: read
-    uses: OWNER/ayasee/.github/workflows/iac-breakglass.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    uses: OWNER/ayasee/.github/workflows/iac-breakglass.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
     with:
       incident: ${{ inputs.incident }}
       sha: ${{ inputs.sha }}

@@ -26,6 +26,9 @@ dev = [
     "respx>=0.23.1",
     "ruff>=0.8",
 ]
+docs = [
+    "mkdocs-material>=9.8.1",
+]
 
 [build-system]
 requires = ["hatchling"]

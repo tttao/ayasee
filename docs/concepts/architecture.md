@@ -117,7 +117,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 5. After approval, `prod` runs the guard again (a newer SHA that reached uat makes this run
    `superseded`), reads the approvers, verifies the artifact against the manifest, applies the exact
    plan files, converge-checks each unit and writes the ledger and the Deployments projection.
-6. A failed apply opens a `ayasee:stop-the-line` issue; the guard holds later stages until it is
+6. A failed apply opens an `ayasee:stop-the-line` issue; the guard holds later stages until it is
    closed.
 7. Every night `iac-nightly` plans each environment at its live SHA and opens or updates the drift
    issue.

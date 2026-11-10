@@ -73,6 +73,17 @@ relative links and `#anchor` fragments offline, with GitHub's heading slugs, and
 fetch. A test runs it over the repository, so a broken link fails CI. Follow the style of the existing
 pages: plain, concrete, and every behavioural claim backed by a file you can name.
 
+The same Markdown is published as a site by the `docs` workflow. To build it locally:
+
+```bash
+uv run --group docs python scripts/build-docs-site.py
+uv run --group docs mkdocs build --strict -f website/mkdocs.yml   # output in build/site
+```
+
+A new page must be added to `nav` in `website/mkdocs.yml` and, if it is outside `docs/`, to `PAGES`
+in `scripts/build-docs-site.py`. The strict build fails on a page that is copied but missing from
+`nav`, and on a broken link or anchor.
+
 ## Commit style
 
 [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): subject`, imperative, no

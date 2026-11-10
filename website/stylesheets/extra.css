@@ -1,0 +1,123 @@
+/* ayasee documentation site: colours and the landing page. */
+
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #12343b;
+  --md-primary-fg-color--light: #1d4d57;
+  --md-primary-fg-color--dark: #0c2429;
+  --md-primary-bg-color: #f4f1ea;
+  --md-primary-bg-color--light: #f4f1eab3;
+  --md-accent-fg-color: #c2571a;
+  --md-typeset-a-color: #0f6b78;
+  --ay-hero-bg: linear-gradient(160deg, #f4f1ea 0%, #e6efe9 100%);
+  --ay-hero-border: #12343b1f;
+  --ay-muted: #4c5b5e;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 190;
+  --md-primary-fg-color: #0c2429;
+  --md-primary-fg-color--light: #1d4d57;
+  --md-primary-fg-color--dark: #071619;
+  --md-primary-bg-color: #f4f1ea;
+  --md-primary-bg-color--light: #f4f1eab3;
+  --md-accent-fg-color: #f08a4b;
+  --md-typeset-a-color: #6fc6d1;
+  --ay-hero-bg: linear-gradient(160deg, #10282d 0%, #132a24 100%);
+  --ay-hero-border: #f4f1ea1f;
+  --ay-muted: #a9b8ba;
+}
+
+.md-typeset {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.md-typeset code,
+.md-typeset pre {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+/* Reference tables are wide: let them use the page. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+
+.md-grid {
+  max-width: 76rem;
+}
+
+/* Landing page */
+.ay-hero {
+  margin: 0 0 2.2rem;
+  padding: 2.2rem 2rem 1.6rem;
+  border: 1px solid var(--ay-hero-border);
+  border-radius: 0.6rem;
+  background: var(--ay-hero-bg);
+}
+
+.md-typeset .ay-hero h1 {
+  margin: 0 0 0.4rem;
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset .ay-hero h1 .headerlink {
+  display: none;
+}
+
+.md-typeset .ay-tagline {
+  margin: 0 0 1rem;
+  max-width: 44rem;
+  font-size: 1.15rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.md-typeset .ay-hero > p {
+  max-width: 46rem;
+}
+
+.md-typeset .ay-hero .md-button {
+  margin: 0.3rem 0.4rem 0.3rem 0;
+}
+
+.md-typeset .ay-status {
+  margin: 1.1rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ay-muted);
+}
+
+.md-typeset .ay-name {
+  margin-top: 2.4rem;
+  font-size: 0.72rem;
+  color: var(--ay-muted);
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 0.5rem;
+}
+
+.md-typeset .mermaid {
+  overflow-x: auto;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .ay-hero {
+    padding: 1.4rem 1rem 1.1rem;
+  }
+
+  .md-typeset .ay-hero h1 {
+    font-size: 2rem;
+  }
+
+  .md-typeset .ay-tagline {
+    font-size: 1rem;
+  }
+}
+
+/* Three cards per row on a wide screen, so six cards make two full rows. */
+.md-typeset .grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+}

@@ -80,5 +80,8 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
   rulings made during implementation. They are cited so you can trace a behaviour to its reason.
 - Where a page names a file such as `src/ayasee/ledger.py` or `actions/apply/apply.sh`, that file
   is the authority; the page describes it.
+- These pages are also published as a site at <https://tttao.github.io/ayasee/>. It is assembled
+  by `scripts/build-docs-site.py` and built by the `docs` workflow; the Markdown here stays the
+  source.
 - Links in `docs/`, `README.md`, the root policy files and `examples/` are checked offline by
   `scripts/check-links.py` in CI.

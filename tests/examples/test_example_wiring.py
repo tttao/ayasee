@@ -27,7 +27,7 @@ CALLS = {
     "breakglass.yml": "iac-breakglass.yml",
     "cockpit.yml": "cockpit-collect.yml",
 }
-PLACEHOLDER = "@0000000000000000000000000000000000000000 # replace with a ayasee release SHA"
+PLACEHOLDER = "@0000000000000000000000000000000000000000 # replace with an ayasee release SHA"
 USES = re.compile(r"^\s*uses:\s*(\S+)(.*)$", re.M)
 RELEASED = re.compile(r"^@[0-9a-f]{40} # ayasee v\d+(\.\d+)*$")
 UNITS = ("workspace", "unity-catalog", "grants")

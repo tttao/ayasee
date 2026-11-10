@@ -15,6 +15,6 @@ jobs:
       deployments: write
       issues: write
       actions: read
-    uses: OWNER/ayasee/.github/workflows/iac-staged.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    uses: OWNER/ayasee/.github/workflows/iac-staged.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
     secrets:
       teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}

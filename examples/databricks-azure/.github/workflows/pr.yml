@@ -16,4 +16,4 @@ jobs:
       pull-requests: write
       security-events: write
       actions: read
-    uses: OWNER/ayasee/.github/workflows/iac-pr.yml@0000000000000000000000000000000000000000 # replace with a ayasee release SHA
+    uses: OWNER/ayasee/.github/workflows/iac-pr.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA

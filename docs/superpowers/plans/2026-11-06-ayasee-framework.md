@@ -425,7 +425,7 @@ Policies (deny unless noted):
 - Test: `tests/workflows/test_breakglass.py`
 
 **Interfaces:**
-- `workflow_call` + `workflow_dispatch` inputs: `incident` (required, pattern `^[A-Z]+-\d+$|^INC\d+$`), `units` (list), `sha`. Environment: `prod-breakglass`. Steps: plan → apply (same job) → ledger with `breakglass_incident` → open a `ayasee:post-approval` issue with a checklist for after-the-fact approval (Art. 17(1)(g)).
+- `workflow_call` + `workflow_dispatch` inputs: `incident` (required, pattern `^[A-Z]+-\d+$|^INC\d+$`), `units` (list), `sha`. Environment: `prod-breakglass`. Steps: plan → apply (same job) → ledger with `breakglass_incident` → open an `ayasee:post-approval` issue with a checklist for after-the-fact approval (Art. 17(1)(g)).
 
 - [ ] **Step 1: Write failing tests:** `test_incident_required`, `test_uses_breakglass_environment`, and `test_opens_post_approval_issue_step`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.

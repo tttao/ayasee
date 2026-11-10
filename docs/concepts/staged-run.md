@@ -31,7 +31,7 @@ jobs:
 | `prod` | `prod-plan` | `has-changes == 'true'` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
 | `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
 
-Every stage job has `environment: <name>`, a `ayasee-<repo>-<env>` concurrency group with
+Every stage job has `environment: <name>`, an `ayasee-<repo>-<env>` concurrency group with
 `cancel-in-progress: false`, and `github.ref == 'refs/heads/main'` in its `if:`. `prod-plan` runs in
 its own `prod-plan` environment, so prod reviewers approve once, on the `prod` job, after the plan
 has already been produced and scanned; `prod-in-sync` also runs in `prod-plan` and shares the

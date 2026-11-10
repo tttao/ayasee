@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tttao/ayasee/main/schema/snapshot.v1.json",
+  "$id": "https://tttao.github.io/ayasee/schema/snapshot.v1.json",
   "title": "ayasee cockpit snapshot v1",
   "description": "Counts, addresses and links only (D8): never plan values, never finding details.",
   "type": "object",

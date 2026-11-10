@@ -122,7 +122,7 @@ uses: <owner>/ayasee/.github/workflows/iac-staged.yml@<release SHA> # ayasee v0.
 ```
 
 The own-action references inside that commit already point at the source SHA. The
-[quickstart](quickstart.md#2-pin-a-ayasee-release) shows the `sed` that replaces `OWNER` and the
+[quickstart](quickstart.md#2-pin-an-ayasee-release) shows the `sed` that replaces `OWNER` and the
 placeholder SHA in an adopter's callers. The `setup` action installs the CLI from the pinned
 ayasee checkout; PyPI is for people who want the CLI on their own machine.
 

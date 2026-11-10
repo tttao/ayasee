@@ -57,7 +57,7 @@ Copy `examples/databricks-azure/` into a new repository. It contains:
 Search for the placeholders and replace them: `OWNER`, the all-zero subscription and tenant GUIDs,
 `stgayaseestate` (state storage) and `stgayaseeledger` (ledger storage).
 
-## 2. Pin a ayasee release
+## 2. Pin an ayasee release
 
 The callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
 cannot reference its own actions by a relative path from another repository, so the workflow files hold
@@ -81,7 +81,7 @@ commit by full SHA, never by branch or tag. Do the same for `iac-pr.yml`, `iac-n
 last argument. Then, in your adopter repository:
 
 ```bash
-sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with a ayasee release SHA#@<40-hex SHA> \# ayasee vX.Y.Z#' \
+sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with an ayasee release SHA#@<40-hex SHA> \# ayasee vX.Y.Z#' \
   .github/workflows/*.yml
 ```
 
