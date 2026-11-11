@@ -1,0 +1,962 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T11:02:05+00:00",
+  "title": "Design System: ayasee",
+  "extensions": {
+    "colorMeta": {
+      "signal-teal": {
+        "role": "primary",
+        "displayName": "Signal Teal",
+        "canonical": "oklch(30.3% 0.041 213.3)",
+        "tonalRamp": [
+          "#060c0e",
+          "#1a282b",
+          "#31464b",
+          "#49676e",
+          "#698890",
+          "#92aab0",
+          "#bbcdd1",
+          "#e7f1f3"
+        ]
+      },
+      "signal-teal-light": {
+        "role": "primary",
+        "displayName": "Signal Teal Light",
+        "canonical": "oklch(39.2% 0.054 213.6)",
+        "tonalRamp": [
+          "#050d0f",
+          "#16282d",
+          "#2a474e",
+          "#406972",
+          "#608a94",
+          "#8bacb3",
+          "#b7ced3",
+          "#e4f1f4"
+        ]
+      },
+      "signal-teal-deep": {
+        "role": "primary",
+        "displayName": "Signal Teal Deep",
+        "canonical": "oklch(24.4% 0.031 213.2)",
+        "tonalRamp": [
+          "#070c0d",
+          "#1d2729",
+          "#354549",
+          "#4f666b",
+          "#70878c",
+          "#97a9ad",
+          "#bfcccf",
+          "#e8f0f2"
+        ]
+      },
+      "lamp-orange": {
+        "role": "secondary",
+        "displayName": "Lamp Orange",
+        "canonical": "oklch(58.3% 0.153 45.4)",
+        "tonalRamp": [
+          "#190500",
+          "#411601",
+          "#6d2b02",
+          "#9d4105",
+          "#c46433",
+          "#dc8f6c",
+          "#f3bba2",
+          "#ffe7d8"
+        ]
+      },
+      "rail-link-teal": {
+        "role": "secondary",
+        "displayName": "Rail Link Teal",
+        "canonical": "oklch(48.5% 0.080 210.0)",
+        "tonalRamp": [
+          "#020e10",
+          "#092a2f",
+          "#164a52",
+          "#246c78",
+          "#498e9a",
+          "#7cafb8",
+          "#add1d7",
+          "#dff3f7"
+        ]
+      },
+      "ballast-cream": {
+        "role": "neutral",
+        "displayName": "Ballast Cream",
+        "canonical": "oklch(95.9% 0.010 87.5)",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#262522",
+          "#43423e",
+          "#63615c",
+          "#84827c",
+          "#a7a5a0",
+          "#cac9c6",
+          "#efeeec"
+        ]
+      },
+      "lichen-wash": {
+        "role": "neutral",
+        "displayName": "Lichen Wash",
+        "canonical": "oklch(94.4% 0.012 157.0)",
+        "tonalRamp": [
+          "#0a0c0b",
+          "#232624",
+          "#3e4340",
+          "#5c635f",
+          "#7d8480",
+          "#a1a7a3",
+          "#c6cac7",
+          "#edefed"
+        ]
+      },
+      "slate-muted": {
+        "role": "neutral",
+        "displayName": "Slate Muted",
+        "canonical": "oklch(46.0% 0.019 211.1)",
+        "tonalRamp": [
+          "#090c0c",
+          "#202628",
+          "#3a4446",
+          "#566467",
+          "#778588",
+          "#9ca7aa",
+          "#c3cbcc",
+          "#ebeff0"
+        ]
+      },
+      "signal-teal-night": {
+        "role": "primary",
+        "displayName": "Signal Teal (dark)",
+        "canonical": "oklch(24.4% 0.031 213.2)",
+        "tonalRamp": [
+          "#070c0d",
+          "#1d2729",
+          "#354549",
+          "#4f666b",
+          "#70878c",
+          "#97a9ad",
+          "#bfcccf",
+          "#e8f0f2"
+        ]
+      },
+      "lamp-orange-night": {
+        "role": "secondary",
+        "displayName": "Lamp Orange (dark)",
+        "canonical": "oklch(73.2% 0.146 50.4)",
+        "tonalRamp": [
+          "#180600",
+          "#3f1800",
+          "#6a2e00",
+          "#994600",
+          "#bf6830",
+          "#d8926a",
+          "#f0bda0",
+          "#ffe8d7"
+        ]
+      },
+      "rail-link-teal-night": {
+        "role": "secondary",
+        "displayName": "Rail Link Teal (dark)",
+        "canonical": "oklch(77.6% 0.085 206.1)",
+        "tonalRamp": [
+          "#010e10",
+          "#052b2f",
+          "#0f4b51",
+          "#1a6d77",
+          "#438f99",
+          "#79b0b7",
+          "#abd1d6",
+          "#ddf3f6"
+        ]
+      },
+      "slate-muted-night": {
+        "role": "neutral",
+        "displayName": "Slate Muted (dark)",
+        "canonical": "oklch(77.2% 0.017 206.4)",
+        "tonalRamp": [
+          "#090c0c",
+          "#212627",
+          "#3b4445",
+          "#586465",
+          "#788587",
+          "#9da7a9",
+          "#c3cbcc",
+          "#ebeff0"
+        ]
+      },
+      "desk-grey": {
+        "role": "neutral",
+        "displayName": "Desk Grey",
+        "canonical": "oklch(97.6% 0.003 264.5)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252526",
+          "#414243",
+          "#606163",
+          "#818284",
+          "#a4a5a6",
+          "#c9c9ca",
+          "#eeeeef"
+        ]
+      },
+      "panel-white": {
+        "role": "neutral",
+        "displayName": "Panel White",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(23.7% 0.011 254.1)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#232528",
+          "#3f4246",
+          "#5d6267",
+          "#7e8388",
+          "#a2a5aa",
+          "#c7c9cd",
+          "#edeff0"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Ink Muted",
+        "canonical": "oklch(42.9% 0.015 255.6)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232529",
+          "#3e4248",
+          "#5c6269",
+          "#7d838b",
+          "#a1a5ac",
+          "#c6c9ce",
+          "#edeff1"
+        ]
+      },
+      "rule-grey": {
+        "role": "neutral",
+        "displayName": "Rule Grey",
+        "canonical": "oklch(85.2% 0.012 252.1)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#232528",
+          "#3f4246",
+          "#5d6267",
+          "#7e8389",
+          "#a1a5aa",
+          "#c6c9cd",
+          "#edeff0"
+        ]
+      },
+      "cobalt-link": {
+        "role": "primary",
+        "displayName": "Cobalt Link",
+        "canonical": "oklch(45.4% 0.171 259.6)",
+        "tonalRamp": [
+          "#020a1e",
+          "#0a234c",
+          "#173f7f",
+          "#255db6",
+          "#4780dd",
+          "#78a6ef",
+          "#aacbff",
+          "#dcf0ff"
+        ]
+      },
+      "synced-fg": {
+        "role": "tertiary",
+        "displayName": "Synced foreground",
+        "canonical": "oklch(41.1% 0.108 149.9)",
+        "tonalRamp": [
+          "#030f05",
+          "#102c17",
+          "#214d2c",
+          "#337043",
+          "#559363",
+          "#84b38c",
+          "#b2d3b8",
+          "#e1f4e4"
+        ]
+      },
+      "synced-bg": {
+        "role": "tertiary",
+        "displayName": "Synced background",
+        "canonical": "oklch(93.2% 0.035 155.9)",
+        "tonalRamp": [
+          "#080c09",
+          "#1f2822",
+          "#38463d",
+          "#53675a",
+          "#74887b",
+          "#9aaa9f",
+          "#c1cdc5",
+          "#eaf0ec"
+        ]
+      },
+      "pending-fg": {
+        "role": "tertiary",
+        "displayName": "Pending foreground",
+        "canonical": "oklch(37.7% 0.144 260.7)",
+        "tonalRamp": [
+          "#030b1b",
+          "#102446",
+          "#214076",
+          "#345fa9",
+          "#5481cf",
+          "#81a6e3",
+          "#b0caf7",
+          "#e0f0ff"
+        ]
+      },
+      "pending-bg": {
+        "role": "tertiary",
+        "displayName": "Pending background",
+        "canonical": "oklch(92.5% 0.030 260.7)",
+        "tonalRamp": [
+          "#090b0f",
+          "#21252c",
+          "#3c424d",
+          "#596271",
+          "#798393",
+          "#9ea5b2",
+          "#c4c9d3",
+          "#ebeff4"
+        ]
+      },
+      "waiting-fg": {
+        "role": "tertiary",
+        "displayName": "Waiting foreground",
+        "canonical": "oklch(39.8% 0.088 66.9)",
+        "tonalRamp": [
+          "#120902",
+          "#33210d",
+          "#583b1c",
+          "#7f582c",
+          "#a2794d",
+          "#bf9e7d",
+          "#ddc4ad",
+          "#faecde"
+        ]
+      },
+      "waiting-bg": {
+        "role": "tertiary",
+        "displayName": "Waiting background",
+        "canonical": "oklch(94.6% 0.050 84.0)",
+        "tonalRamp": [
+          "#0e0b05",
+          "#2b2418",
+          "#4b412d",
+          "#6d5f44",
+          "#8f8164",
+          "#afa48d",
+          "#d1c8b8",
+          "#f3eee5"
+        ]
+      },
+      "drift-fg": {
+        "role": "tertiary",
+        "displayName": "Drift foreground",
+        "canonical": "oklch(38.9% 0.171 304.2)",
+        "tonalRamp": [
+          "#10061b",
+          "#2e1845",
+          "#502e73",
+          "#7545a6",
+          "#9767cb",
+          "#b592e1",
+          "#d5bcf5",
+          "#f5e7ff"
+        ]
+      },
+      "drift-bg": {
+        "role": "tertiary",
+        "displayName": "Drift background",
+        "canonical": "oklch(92.3% 0.039 308.8)",
+        "tonalRamp": [
+          "#0c0a0f",
+          "#28232c",
+          "#463e4d",
+          "#675c71",
+          "#887d93",
+          "#aaa1b2",
+          "#cdc6d3",
+          "#f0edf4"
+        ]
+      },
+      "failed-fg": {
+        "role": "tertiary",
+        "displayName": "Failed foreground",
+        "canonical": "oklch(39.8% 0.149 22.0)",
+        "tonalRamp": [
+          "#190404",
+          "#411315",
+          "#6e2628",
+          "#9f3b3d",
+          "#c55e5d",
+          "#de8b88",
+          "#f5b7b4",
+          "#ffe5e2"
+        ]
+      },
+      "failed-bg": {
+        "role": "tertiary",
+        "displayName": "Failed background",
+        "canonical": "oklch(91.7% 0.037 11.6)",
+        "tonalRamp": [
+          "#0f090a",
+          "#2d2223",
+          "#4f3d3e",
+          "#735a5c",
+          "#957b7d",
+          "#b49fa1",
+          "#d4c5c6",
+          "#f5eced"
+        ]
+      },
+      "held-fg": {
+        "role": "tertiary",
+        "displayName": "Held foreground",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "held-bg": {
+        "role": "tertiary",
+        "displayName": "Held background",
+        "canonical": "oklch(40.8% 0.153 21.2)",
+        "tonalRamp": [
+          "#190404",
+          "#421315",
+          "#702528",
+          "#a1393e",
+          "#c75c5d",
+          "#e08a88",
+          "#f6b7b4",
+          "#ffe4e2"
+        ]
+      },
+      "unknown-fg": {
+        "role": "tertiary",
+        "displayName": "Unknown foreground",
+        "canonical": "oklch(38.9% 0.015 259.8)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232529",
+          "#3f4248",
+          "#5d6269",
+          "#7e838b",
+          "#a1a5ac",
+          "#c6c9ce",
+          "#edeef1"
+        ]
+      },
+      "unknown-bg": {
+        "role": "tertiary",
+        "displayName": "Unknown background",
+        "canonical": "oklch(93.0% 0.005 258.3)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242526",
+          "#414244",
+          "#606164",
+          "#818285",
+          "#a4a5a7",
+          "#c8c9ca",
+          "#eeeeef"
+        ]
+      },
+      "desk-grey-night": {
+        "role": "neutral",
+        "displayName": "Desk Grey (dark)",
+        "canonical": "oklch(17.5% 0.006 237.0)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#242526",
+          "#404244",
+          "#5e6264",
+          "#7f8385",
+          "#a2a5a7",
+          "#c7c9cb",
+          "#edefef"
+        ]
+      },
+      "panel-night": {
+        "role": "neutral",
+        "displayName": "Panel (dark)",
+        "canonical": "oklch(20.3% 0.008 248.2)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#242527",
+          "#404245",
+          "#5e6265",
+          "#7f8386",
+          "#a2a5a8",
+          "#c7c9cb",
+          "#edeef0"
+        ]
+      },
+      "ink-night": {
+        "role": "neutral",
+        "displayName": "Ink (dark)",
+        "canonical": "oklch(93.6% 0.005 258.3)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242526",
+          "#414244",
+          "#606164",
+          "#818285",
+          "#a4a5a7",
+          "#c8c9ca",
+          "#eeeeef"
+        ]
+      },
+      "ink-muted-night": {
+        "role": "neutral",
+        "displayName": "Ink Muted (dark)",
+        "canonical": "oklch(75.5% 0.013 255.5)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232528",
+          "#3f4247",
+          "#5d6268",
+          "#7e838a",
+          "#a1a5ab",
+          "#c6c9cd",
+          "#edeff1"
+        ]
+      },
+      "rule-grey-night": {
+        "role": "neutral",
+        "displayName": "Rule Grey (dark)",
+        "canonical": "oklch(34.6% 0.015 252.3)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232528",
+          "#3e4247",
+          "#5c6269",
+          "#7d838a",
+          "#a1a6ab",
+          "#c6c9ce",
+          "#eceff1"
+        ]
+      },
+      "cobalt-link-night": {
+        "role": "primary",
+        "displayName": "Cobalt Link (dark)",
+        "canonical": "oklch(76.9% 0.117 261.6)",
+        "tonalRamp": [
+          "#050b19",
+          "#152440",
+          "#29416d",
+          "#3f609d",
+          "#5f82c1",
+          "#89a6d8",
+          "#b5caef",
+          "#e3efff"
+        ]
+      },
+      "synced-fg-night": {
+        "role": "tertiary",
+        "displayName": "Synced foreground (dark)",
+        "canonical": "oklch(86.7% 0.104 154.7)",
+        "tonalRamp": [
+          "#030f06",
+          "#0e2c1a",
+          "#1d4d30",
+          "#2e7149",
+          "#519369",
+          "#81b391",
+          "#b0d3bb",
+          "#e0f5e6"
+        ]
+      },
+      "synced-bg-night": {
+        "role": "tertiary",
+        "displayName": "Synced background (dark)",
+        "canonical": "oklch(29.0% 0.054 154.5)",
+        "tonalRamp": [
+          "#070d08",
+          "#1b291f",
+          "#324839",
+          "#4c6a55",
+          "#6c8b76",
+          "#94ac9b",
+          "#bdcec2",
+          "#e7f2ea"
+        ]
+      },
+      "pending-fg-night": {
+        "role": "tertiary",
+        "displayName": "Pending foreground (dark)",
+        "canonical": "oklch(85.3% 0.073 260.7)",
+        "tonalRamp": [
+          "#070b14",
+          "#1b2536",
+          "#33425d",
+          "#4c6286",
+          "#6c83aa",
+          "#93a6c5",
+          "#bccae0",
+          "#e7effc"
+        ]
+      },
+      "pending-bg-night": {
+        "role": "tertiary",
+        "displayName": "Pending background (dark)",
+        "canonical": "oklch(28.2% 0.073 261.5)",
+        "tonalRamp": [
+          "#070b14",
+          "#1b2536",
+          "#33425d",
+          "#4c6187",
+          "#6d83aa",
+          "#94a6c5",
+          "#bdcae1",
+          "#e7effc"
+        ]
+      },
+      "waiting-fg-night": {
+        "role": "tertiary",
+        "displayName": "Waiting foreground (dark)",
+        "canonical": "oklch(90.1% 0.101 83.4)",
+        "tonalRamp": [
+          "#110a01",
+          "#302305",
+          "#543e0d",
+          "#7a5c18",
+          "#9d7d3d",
+          "#baa272",
+          "#d9c7a6",
+          "#f8edda"
+        ]
+      },
+      "waiting-bg-night": {
+        "role": "tertiary",
+        "displayName": "Waiting background (dark)",
+        "canonical": "oklch(32.7% 0.060 76.7)",
+        "tonalRamp": [
+          "#0f0a04",
+          "#2d2315",
+          "#4f3f28",
+          "#735d3e",
+          "#957e5e",
+          "#b4a288",
+          "#d4c7b5",
+          "#f5ede3"
+        ]
+      },
+      "drift-fg-night": {
+        "role": "tertiary",
+        "displayName": "Drift foreground (dark)",
+        "canonical": "oklch(85.4% 0.089 304.4)",
+        "tonalRamp": [
+          "#0d0913",
+          "#2a2036",
+          "#49395c",
+          "#6b5586",
+          "#8d76a9",
+          "#ad9cc5",
+          "#cfc3e0",
+          "#f2ebfc"
+        ]
+      },
+      "drift-bg-night": {
+        "role": "tertiary",
+        "displayName": "Drift background (dark)",
+        "canonical": "oklch(29.6% 0.084 302.1)",
+        "tonalRamp": [
+          "#0d0913",
+          "#292035",
+          "#483a5c",
+          "#695785",
+          "#8b78a8",
+          "#ac9dc4",
+          "#cec3e0",
+          "#f1ebfc"
+        ]
+      },
+      "failed-fg-night": {
+        "role": "tertiary",
+        "displayName": "Failed foreground (dark)",
+        "canonical": "oklch(85.8% 0.078 11.9)",
+        "tonalRamp": [
+          "#130709",
+          "#351d20",
+          "#5b363a",
+          "#845057",
+          "#a87177",
+          "#c4989c",
+          "#e0c0c3",
+          "#fce9eb"
+        ]
+      },
+      "failed-bg-night": {
+        "role": "tertiary",
+        "displayName": "Failed background (dark)",
+        "canonical": "oklch(29.5% 0.089 16.9)",
+        "tonalRamp": [
+          "#140708",
+          "#371c1d",
+          "#5e3436",
+          "#894e51",
+          "#ad6e71",
+          "#c99697",
+          "#e4bfbf",
+          "#ffe8e9"
+        ]
+      },
+      "held-bg-night": {
+        "role": "tertiary",
+        "displayName": "Held background (dark)",
+        "canonical": "oklch(50.1% 0.180 18.1)",
+        "tonalRamp": [
+          "#1b0204",
+          "#460c14",
+          "#761b28",
+          "#a92b3d",
+          "#d1515d",
+          "#e88387",
+          "#fdb3b4",
+          "#ffe2e2"
+        ]
+      },
+      "unknown-fg-night": {
+        "role": "tertiary",
+        "displayName": "Unknown foreground (dark)",
+        "canonical": "oklch(86.8% 0.008 253.9)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#242527",
+          "#404245",
+          "#5e6165",
+          "#7f8387",
+          "#a3a5a8",
+          "#c7c9cc",
+          "#edeef0"
+        ]
+      },
+      "unknown-bg-night": {
+        "role": "tertiary",
+        "displayName": "Unknown background (dark)",
+        "canonical": "oklch(33.1% 0.012 258.4)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232528",
+          "#3f4246",
+          "#5e6167",
+          "#7e8389",
+          "#a2a5aa",
+          "#c7c9cd",
+          "#edeef1"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "docs-display": {
+        "displayName": "Docs Display",
+        "purpose": "Hero wordmark only; 2rem below 45em."
+      },
+      "docs-tagline": {
+        "displayName": "Docs Tagline",
+        "purpose": "One-sentence promise under the wordmark."
+      },
+      "docs-fine-print": {
+        "displayName": "Docs Fine Print",
+        "purpose": "Status line, name note, wide reference tables."
+      },
+      "docs-code": {
+        "displayName": "Docs Code",
+        "purpose": "Code blocks and inline code."
+      },
+      "cockpit-title": {
+        "displayName": "Cockpit Title",
+        "purpose": "Top bar title; drawer heading at 1.1rem."
+      },
+      "cockpit-body": {
+        "displayName": "Cockpit Body",
+        "purpose": "Root size for the whole cockpit."
+      },
+      "cockpit-label": {
+        "displayName": "Cockpit Label",
+        "purpose": "Uppercase matrix column headers; pills use the size and weight in sentence case."
+      },
+      "cockpit-mono": {
+        "displayName": "Cockpit Mono",
+        "purpose": "SHAs and identifiers; break anywhere."
+      }
+    },
+    "shadows": [
+      {
+        "name": "material-z2",
+        "value": "0 0.2rem 0.5rem #0000001a, 0 0 0.05rem #00000040",
+        "purpose": "Material default, docs only: grid card hover and scrolled header. Not to be reused elsewhere."
+      }
+    ],
+    "motion": [
+      {
+        "name": "cell-border",
+        "value": "border-color 0.15s ease",
+        "purpose": "Matrix cell hover; removed under prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "docs-mobile",
+        "value": "44.9375em"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Status Pills",
+      "kind": "chip",
+      "refersTo": "status-pill-synced",
+      "description": "The seven status aspects in precedence order; glyph plus word, never colour alone. Held is the only filled aspect.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-pill ds-pill--held\"><span aria-hidden=\"true\">■</span>Held</span><span class=\"ds-pill ds-pill--failed\"><span aria-hidden=\"true\">✕</span>Failed</span><span class=\"ds-pill ds-pill--drift\"><span aria-hidden=\"true\">△</span>Drift</span><span class=\"ds-pill ds-pill--waiting\"><span aria-hidden=\"true\">◔</span>Waiting</span><span class=\"ds-pill ds-pill--pending\"><span aria-hidden=\"true\">↑</span>Pending</span><span class=\"ds-pill ds-pill--synced\"><span aria-hidden=\"true\">✓</span>Synced</span><span class=\"ds-pill ds-pill--unknown\"><span aria-hidden=\"true\">?</span>Unknown</span></div>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.1rem .55rem;border-radius:999px;font:600 .8rem/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;white-space:nowrap}.ds-row{display:flex;flex-wrap:wrap;gap:.5rem}.ds-pill--held{color:#ffffff;background:#8a1022}.ds-pill--failed{color:#85101f;background:#fbdadd}.ds-pill--drift{color:#5a1d8c;background:#eddffa}.ds-pill--waiting{color:#663c00;background:#fdebc8}.ds-pill--pending{color:#0b3b8c;background:#dbe7fb}.ds-pill--synced{color:#0a5a28;background:#d7f0df}.ds-pill--unknown{color:#40454d;background:#e6e8eb}"
+    },
+    {
+      "name": "Matrix Cell",
+      "kind": "custom",
+      "refersTo": "matrix-cell",
+      "description": "A full-width button inside an environment column: pill, live SHA, muted pending line. Opens the detail drawer.",
+      "html": "<button class=\"ds-cell\"><span class=\"ds-pill ds-pill--waiting\"><span aria-hidden=\"true\">◔</span>Waiting</span><span class=\"ds-sha\">7be40d1</span><span class=\"ds-sub\">3 commits pending · since 08:10</span></button>",
+      "css": ":host{--ink:#1b1f24;--muted:#4a5058;--rule:#c9cfd6;--panel:#fff;--cobalt:#0b4fb3}.ds-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.1rem .55rem;border-radius:999px;font:600 .8rem/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;white-space:nowrap}.ds-pill--waiting{color:#663c00;background:#fdebc8}.ds-cell{display:grid;gap:.2rem;justify-items:start;min-width:9.5rem;padding:.4rem .5rem;font:15px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink);text-align:left;background:transparent;border:1px solid transparent;border-radius:6px;cursor:pointer;transition:border-color .15s ease}.ds-cell:hover{border-color:var(--rule)}.ds-cell:focus-visible{outline:3px solid var(--cobalt);outline-offset:1px}.ds-sha{font:.9rem ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.ds-sub{font-size:.8rem;color:var(--muted)}"
+    },
+    {
+      "name": "Cockpit Top Bar",
+      "kind": "nav",
+      "refersTo": "cockpit-panel",
+      "description": "Sticky header: title, snapshot age as a live status, legend toggle on the right.",
+      "html": "<header class=\"ds-topbar\"><h1>IaC cockpit</h1><p class=\"ds-age\">Snapshot 12 minutes old</p><a class=\"ds-legend\" href=\"#\">Legend</a></header>",
+      "css": ":host{--ink:#1b1f24;--muted:#4a5058;--rule:#c9cfd6;--panel:#fff;--cobalt:#0b4fb3}.ds-topbar{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem 1.25rem;padding:.6rem 1rem;background:var(--panel);border-bottom:1px solid var(--rule);font:15px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink)}.ds-topbar h1{margin:0;font-size:1.15rem}.ds-age{margin:0;color:var(--muted);font-size:.9rem}.ds-legend{margin-left:auto;color:var(--cobalt)}.ds-legend:focus-visible{outline:3px solid var(--cobalt);outline-offset:2px}"
+    },
+    {
+      "name": "Cockpit Close Button",
+      "kind": "button",
+      "refersTo": "cockpit-button",
+      "description": "The cockpit's only button style; quiet, bordered. The cockpit has no primary action.",
+      "html": "<button class=\"ds-btn\">Close</button>",
+      "css": ":host{--ink:#1b1f24;--muted:#4a5058;--rule:#c9cfd6;--panel:#fff;--cobalt:#0b4fb3}.ds-btn{font:15px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;padding:.35rem .8rem;border:1px solid var(--rule);border-radius:4px;background:var(--panel);color:var(--ink);cursor:pointer}.ds-btn:hover{border-color:var(--muted)}.ds-btn:focus-visible{outline:3px solid var(--cobalt);outline-offset:1px}"
+    },
+    {
+      "name": "Stale Banner",
+      "kind": "custom",
+      "refersTo": "cockpit-panel",
+      "description": "Full-width amber warning when the snapshot is older than expected.",
+      "html": "<p class=\"ds-banner\" role=\"alert\">This snapshot is 3 days old. The collector may have stopped.</p>",
+      "css": ".ds-banner{margin:0;padding:.6rem 1rem;font:600 15px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#fdebc8;color:#663c00}"
+    },
+    {
+      "name": "Docs Primary Button",
+      "kind": "button",
+      "refersTo": "docs-button-primary",
+      "description": "Material primary button: cream on Signal Teal, Lamp Orange on hover.",
+      "html": "<a class=\"ds-md-btn ds-md-btn--primary\" href=\"#\">Quickstart</a>",
+      "css": ".ds-md-btn{display:inline-block;padding:.625em 2em;border:.1rem solid #12343b;border-radius:.1rem;font:700 .8rem system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#12343b;text-decoration:none;transition:color 125ms,background-color 125ms,border-color 125ms}.ds-md-btn--primary{background:#12343b;color:#f4f1ea}.ds-md-btn:hover,.ds-md-btn:focus-visible{background:#c2571a;border-color:#c2571a;color:#fff}"
+    },
+    {
+      "name": "Docs Secondary Button",
+      "kind": "button",
+      "refersTo": "docs-button",
+      "description": "Material outline button in Signal Teal; fills Lamp Orange on hover.",
+      "html": "<a class=\"ds-md-btn\" href=\"#\">Architecture</a>",
+      "css": ".ds-md-btn{display:inline-block;padding:.625em 2em;border:.1rem solid #12343b;border-radius:.1rem;font:700 .8rem system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#12343b;text-decoration:none;transition:color 125ms,background-color 125ms,border-color 125ms}.ds-md-btn:hover,.ds-md-btn:focus-visible{background:#c2571a;border-color:#c2571a;color:#fff}"
+    },
+    {
+      "name": "Docs Hero",
+      "kind": "card",
+      "refersTo": "docs-hero",
+      "description": "Landing hero: wordmark, tagline, pre-alpha fine print on the cream-to-lichen wash.",
+      "html": "<div class=\"ds-hero\"><h1>ayasee</h1><p class=\"ds-tag\">One trunk. One run per merge. Dev, uat, then the exact plan a reviewer approved, applied to prod.</p><p class=\"ds-status\"><strong>Status: pre-alpha.</strong> Implemented and tested, no published release yet.</p></div>",
+      "css": ".ds-hero{padding:2.2rem 2rem 1.6rem;border:1px solid #12343b1f;border-radius:.6rem;background:linear-gradient(160deg,#f4f1ea 0%,#e6efe9 100%);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#12343b}.ds-hero h1{margin:0 0 .4rem;font-size:2.6rem;font-weight:700;letter-spacing:-.03em}.ds-tag{margin:0 0 1rem;max-width:44rem;font-size:1.15rem;line-height:1.45;font-weight:600}.ds-status{margin:1.1rem 0 0;font-size:.72rem;color:#4c5b5e}"
+    },
+    {
+      "name": "Docs Card",
+      "kind": "card",
+      "refersTo": "docs-card",
+      "description": "Material grid card: bold title, rule, short paragraph, one link.",
+      "html": "<div class=\"ds-card\"><p class=\"ds-card-title\">Plan binding</p><hr><p>Prod applies the encrypted plan file the reviewer saw. A stale plan stops the run.</p><a href=\"#\">Plan binding</a></div>",
+      "css": ".ds-card{max-width:20rem;padding:.8rem;border:.05rem solid #0000001f;border-radius:.5rem;font:.8rem/1.6 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#000000de;transition:border-color 250ms,box-shadow 250ms}.ds-card:hover{border-color:#0000;box-shadow:0 0.2rem 0.5rem #0000001a,0 0 0.05rem #00000040}.ds-card-title{margin:0;font-weight:700}.ds-card hr{border:0;border-top:.05rem solid #0000001f;margin:.6rem 0}.ds-card a{color:#0f6b78}.ds-card a:hover{color:#c2571a}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Signal Box",
+    "overview": "A railway signal box is a quiet room. It has instruments you can trust, labelled levers and a diagram of the line, and each signal shows one clear aspect. The signaller watches the state of the line and sets the route. The trains, and the danger, are outside. ayasee has the same split: the cockpit and the documentation show the state of an estate and explain the line, and every action happens elsewhere, in GitHub. The design is sober and exact, with a little warmth. Information comes first, every state is spelled out, and nothing is decoration for its own sake.\n\nThere are two surfaces, and each speaks the same grammar at its own volume. The **documentation site** is the signal box's notice board. Its palette is a deep signal teal on warm ballast cream, with one lamp-orange accent that appears only when you point at something. Its warmth is deliberate: this is where an engineer reads, evaluates and decides. The **cockpit** is the instrument panel. It uses cool desk greys, plain white panels and a cobalt link, and its colour is reserved for the seven status aspects. Neither surface adds shadows, decorative gradients, web fonts or anything loaded from another origin. Depth comes from 1px rules and tonal surfaces; the only shadows are the two Material keeps on the docs site by default.\n\nDensity follows the job. The docs give prose room (76rem grid, cards three to a row on wide screens). The cockpit packs a repository-by-environment matrix tightly. It keeps the repository column sticky, so the row you are reading never loses its name.",
+    "keyCharacteristics": [
+      "System fonts only, on both surfaces. Monospace is for SHAs, code and identifiers.",
+      "Flat and ruled: 1px borders and tonal backgrounds. The cockpit has no shadows; the docs keep only",
+      "Every state carries a word and a glyph as well as a colour.",
+      "Light and dark schemes on both surfaces, following `prefers-color-scheme`.",
+      "Colour is a signal, not a mood. The docs have one accent, and the cockpit's colours mean status."
+    ],
+    "rules": [
+      {
+        "name": "The Aspect Rule",
+        "body": "In the cockpit, saturated colour means status and nothing else. A new decorative colour, or a status colour used for emphasis, breaks the panel.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Lamp Rule",
+        "body": "On the docs site, Lamp Orange is the only accent, and it appears as a response to the pointer, not at rest.",
+        "section": "colors"
+      },
+      {
+        "name": "The Danger Is Filled Rule",
+        "body": "Only Held gets a filled, white-on-crimson pill. Every other aspect is tinted. Do not fill another aspect.",
+        "section": "colors"
+      },
+      {
+        "name": "The Platform Voice Rule",
+        "body": "Use no web fonts and no font files. If a surface needs character, get it from weight, size and spacing.",
+        "section": "typography"
+      },
+      {
+        "name": "The Mono Means Machine Rule",
+        "body": "Monospace is only for values a machine produced or reads: SHAs, paths, YAML and identifiers. Never use it for decoration or headings.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled Not Raised Rule",
+        "body": "Separate things with a 1px rule or a tonal step, never with a shadow. A layer that overlaps content (legend, drawer) gets a border, and the drawer also gets the backdrop. Material's two default shadows on the docs site may stay, but don't add more.",
+        "section": "elevation & depth"
+      }
+    ],
+    "dos": [
+      "Do pair every status colour with its glyph and word (■ Held, ✕ Failed, △ Drift, ◔ Waiting, ↑ Pending, ✓ Synced, ? Unknown).",
+      "Do define every colour as a token in both light and dark schemes and check contrast in both.",
+      "Do separate surfaces with a 1px rule or a tonal step.",
+      "Do give every interactive element in the cockpit a 3px Cobalt Link `:focus-visible` outline.",
+      "Do set SHAs and identifiers in monospace and let them break anywhere.",
+      "Do keep motion to short state transitions (0.15s), and remove it under `prefers-reduced-motion: reduce`.",
+      "Do show limitations and \"pre-alpha\" status in the docs' own muted fine print."
+    ],
+    "donts": [
+      "Don't load web fonts, icon fonts, images or scripts from another origin. Both surfaces must work on air-gapped Pages, and the cockpit's CSP is `default-src 'self'`.",
+      "Don't add a `box-shadow` for depth. Material's own header and card-hover shadows on the docs site are the only exceptions.",
+      "Don't use a status colour for decoration or emphasis, and don't add new saturated colours to the cockpit.",
+      "Don't give the cockpit a primary or \"action\" button. Actions are links into GitHub.",
+      "Don't use Lamp Orange at rest or as a fill on the docs site; it answers the pointer.",
+      "Don't add adopter logos, testimonial blocks or metric counters. There is nothing true to put in them."
+    ]
+  }
+}
