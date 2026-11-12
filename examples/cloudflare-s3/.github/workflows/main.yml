@@ -1,0 +1,25 @@
+# Staged promotion on every merge to main: test, then a gated prod apply of the approved plan.
+name: main
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  staged:
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+      issues: write
+      actions: read
+    uses: OWNER/ayasee/.github/workflows/iac-staged.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
+    secrets:
+      teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}
+      ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}
+      AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

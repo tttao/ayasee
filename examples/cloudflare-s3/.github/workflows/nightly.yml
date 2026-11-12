@@ -1,0 +1,25 @@
+# Nightly drift check of every stage and a rescan of main.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  nightly:
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      security-events: write
+      actions: read
+    uses: OWNER/ayasee/.github/workflows/iac-nightly.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
+    secrets:
+      teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}
+      ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

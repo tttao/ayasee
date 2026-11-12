@@ -290,8 +290,14 @@ remote_state {
 }
 ```
 
-**Ledger.** Use `github-branch://` (or `git-branch://` with the `ledger-token` secret): it needs no
-cloud at all, and it is the store the cockpit reads. There is no `s3://` ledger store.
+**Ledger.** Use the `git-branch://` store on an orphan branch of the repository: it needs no cloud.
+The workflows write it through the runner's checkout, so its URL holds the checkout path and goes in
+the `AYASEE_LEDGER_URL` variable of each environment, and the push needs the `ledger-token` secret
+(a fine-grained token with Contents read and write on the repository). The cockpit reads the same
+branch with `github-branch://`, which is read-only. There is no `s3://` ledger store.
+
+All of this, worked out for a Cloudflare and S3 estate with a tunnel shared by two stages, is the
+second reference repository, [`examples/cloudflare-s3/`](../../examples/cloudflare-s3/README.md).
 
 ## If something is red
 

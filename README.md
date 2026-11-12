@@ -16,7 +16,9 @@ behaviour and the end-to-end sandbox are unverified, and governance is not settl
 - Documentation index: [`docs/README.md`](docs/README.md)
 - Start: [quickstart](docs/guides/quickstart.md), [architecture](docs/concepts/architecture.md),
   [comparison with other tools](docs/comparison.md)
-- Reference adopter repository: [`examples/databricks-azure/`](examples/databricks-azure/README.md)
+- Reference adopter repositories: [`examples/databricks-azure/`](examples/databricks-azure/README.md)
+  (Azure, OIDC) and [`examples/cloudflare-s3/`](examples/cloudflare-s3/README.md) (Cloudflare and
+  S3, no cloud identity, a tunnel shared by two stages)
 - Security, contributing, governance: [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`GOVERNANCE.md`](GOVERNANCE.md)
 - Implementation plans: [`docs/superpowers/plans/`](docs/superpowers/plans/)
