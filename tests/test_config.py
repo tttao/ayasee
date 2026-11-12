@@ -301,6 +301,26 @@ def test_key_provider_accepts_the_wired_providers(tmp_path, provider):
 
 
 @pytest.mark.parametrize(
+    ("iac_root", "units_root", "want"),
+    [
+        (None, None, (".", "stages")),
+        ("infra/iac", "infra/iac/stages", ("infra/iac", "infra/iac/stages")),
+        ("infra/iac/", "infra/iac/stages/", ("infra/iac", "infra/iac/stages")),
+        ("./infra/iac", "infra/iac/live", ("infra/iac", "infra/iac/live")),
+        (".", "infra/iac/stages", (".", "infra/iac/stages")),
+    ],
+)
+def test_iac_root_is_normalised(tmp_path, iac_root, units_root, want):
+    lines = []
+    if iac_root is not None:
+        lines.append(f"iac_root: {iac_root}")
+    if units_root is not None:
+        lines.append(f"units_root: {units_root}")
+    cfg = load_config(write(tmp_path, "\n".join(lines) + "\n"))
+    assert (cfg.iac_root, cfg.units_root) == want
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "plan_encryption: pbkdf2",
@@ -351,3 +371,24 @@ def test_cli_labels_invalid_config_exit_1(tmp_path, monkeypatch, capsys):
     p = write(tmp_path, "identity: maybe\n")
     assert _cli(monkeypatch, "labels", "--path", str(p)) == 1
     assert "config error" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "iac_root: 3",
+        "iac_root: ''",
+        "iac_root: /infra",
+        "iac_root: ../elsewhere",
+        "iac_root: infra/../../x",
+        "units_root: /abs",
+        "units_root: ../x",
+        # units_root must sit inside iac_root
+        "iac_root: infra/iac",  # default units_root 'stages' is outside it
+        "{iac_root: infra/iac, units_root: infra/iacx/stages}",
+        "{iac_root: infra/iac, units_root: infra/iac}",
+    ],
+)
+def test_invalid_iac_root_rejected(tmp_path, text):
+    with pytest.raises(ConfigError):
+        load_config(write(tmp_path, text + "\n"))

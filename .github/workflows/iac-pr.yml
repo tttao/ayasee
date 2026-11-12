@@ -79,12 +79,21 @@ jobs:
           CONFIG_PATH: ${{ inputs.config-path }}
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
-          echo "units-root=$(jq -r '.units_root' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
+          {
+            echo "units-root=$(jq -r '.units_root' "$RUNNER_TEMP/ayasee-config.json")"
+            echo "iac-root=$(jq -r '.iac_root' "$RUNNER_TEMP/ayasee-config.json")"
+          } >>"$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/sarif"
+      # Every check below is scoped to iac_root, so in a monorepo the application code beside the
+      # estate (Dockerfiles, Compose files, its own workflows) is not judged by the IaC check.
       - name: Format check (OpenTofu)
-        run: tofu fmt -check -recursive
+        env:
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: tofu fmt -check -recursive "$IAC_ROOT"
       - name: Format check (Terragrunt)
-        run: terragrunt hcl format --check
+        env:
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: terragrunt hcl format --check --working-dir "$IAC_ROOT"
       - name: Validate the Terragrunt configuration
         env:
           UNITS_ROOT: ${{ steps.config.outputs.units-root }}
@@ -95,7 +104,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
-          scan-ref: .
+          scan-ref: ${{ steps.config.outputs.iac-root }}
           severity: HIGH,CRITICAL
           limit-severities-for-sarif: "true"
           exit-code: "1"
@@ -107,25 +116,32 @@ jobs:
         env:
           SARIF_IN: ${{ runner.temp }}/sarif/trivy.raw.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/trivy.sarif
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT"
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - id: checkov
         name: Checkov
         if: ${{ !cancelled() }}
         env:
           CHECKOV_VERSION: ${{ inputs.checkov-version }}
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
         run: |
           args=()
           if [ -f .ayasee/checkov.baseline ]; then
             args+=(--baseline .ayasee/checkov.baseline)
           fi
-          uvx "checkov@$CHECKOV_VERSION" --directory . --framework terraform github_actions \
+          # the github_actions framework judges the repository's workflows: only when the
+          # repository is the estate (iac_root "."), never an application's workflows
+          frameworks=(terraform)
+          if [ "$IAC_ROOT" = . ]; then frameworks+=(github_actions); fi
+          uvx "checkov@$CHECKOV_VERSION" --directory "$IAC_ROOT" --framework "${frameworks[@]}" \
             --output sarif --output-file-path "$RUNNER_TEMP/sarif/checkov" --quiet "${args[@]}"
       - name: Scrub the Checkov SARIF
         if: ${{ !cancelled() && steps.checkov.outcome != 'skipped' }}
         env:
           SARIF_IN: ${{ runner.temp }}/sarif/checkov/results_sarif.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/checkov.sarif
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT"
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - name: Keep the scrubbed SARIF for the upload job
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -239,7 +255,10 @@ jobs:
           # the first configured stage (dev by default) is the one a pull request plans
           stage="$(jq -er '.stages[0]' "$RUNNER_TEMP/ayasee-config.json")"
           identity="$(jq -er '.identity' "$RUNNER_TEMP/ayasee-config.json")"
-          units="$(ayasee changed-units --base "$BASE_SHA" --head "$HEAD_SHA" --units-root "$units_root" --env "$stage")"
+          iac_root="$(jq -r '.iac_root' "$RUNNER_TEMP/ayasee-config.json")"
+          # a change outside iac_root (application code in a monorepo) plans nothing
+          units="$(ayasee changed-units --base "$BASE_SHA" --head "$HEAD_SHA" --units-root "$units_root" \
+            --iac-root "$iac_root" --config-path "$CONFIG_PATH" --env "$stage")"
           {
             echo "units-root=$units_root"
             echo "stage=$stage"

@@ -217,3 +217,82 @@ def test_missing_fingerprints_are_derived_from_rule_file_and_line_only():
     assert second["partialFingerprints"] == first["partialFingerprints"]  # stable
     assert "partialFingerprints" not in third  # no location, nothing to derive from
     assert SECRET not in json.dumps(first)
+
+
+def test_uri_prefix_makes_paths_repository_relative():
+    """Issue #4: scanners run on iac_root report paths relative to it; alerts need repo paths."""
+
+    def doc(uri, base=None):
+        art = {"uri": uri} | ({"uriBaseId": base} if base else {})
+        return {
+            "runs": [
+                {
+                    "tool": {"driver": {"rules": [{"id": "R1"}]}},
+                    "results": [
+                        {
+                            "ruleId": "R1",
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": art,
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+    def uri(out):
+        return out["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+
+    assert (
+        uri(scrub(doc("stages/dev/a.tf"), uri_prefix="infra/iac"))["uri"]
+        == "infra/iac/stages/dev/a.tf"
+    )
+    assert (
+        uri(scrub(doc("/stages/dev/a.tf"), uri_prefix="infra/iac/"))["uri"]
+        == "infra/iac/stages/dev/a.tf"
+    )
+    kept = uri(scrub(doc("stages/a.tf", base="ROOTPATH"), uri_prefix="infra/iac"))
+    assert kept == {"uri": "infra/iac/stages/a.tf", "uriBaseId": "ROOTPATH"}
+    # absolute URIs and the default prefix are left alone
+    assert uri(scrub(doc("file:///x/a.tf"), uri_prefix="infra/iac"))["uri"] == "file:///x/a.tf"
+    assert uri(scrub(doc("stages/a.tf"), uri_prefix="."))["uri"] == "stages/a.tf"
+    assert uri(scrub(doc("/stages/a.tf")))["uri"] == "/stages/a.tf"
+    # the derived fingerprint follows the repository path
+    a = scrub(doc("stages/a.tf"), uri_prefix="infra/iac")["runs"][0]["results"][0]
+    b = scrub(doc("infra/iac/stages/a.tf"))["runs"][0]["results"][0]
+    assert a["partialFingerprints"] == b["partialFingerprints"]
+
+
+def test_scrub_command_takes_a_uri_prefix(tmp_path):
+    src = tmp_path / "in.sarif"
+    src.write_text(
+        json.dumps(
+            {
+                "runs": [
+                    {
+                        "tool": {"driver": {}},
+                        "results": [
+                            {
+                                "ruleId": "R",
+                                "locations": [
+                                    {"physicalLocation": {"artifactLocation": {"uri": "a.tf"}}}
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    out = tmp_path / "out.sarif"
+    assert (
+        cli.main(["sarif-scrub", "--in", str(src), "--out", str(out), "--uri-prefix", "infra/iac"])
+        == 0
+    )
+    loc = json.loads(out.read_text())["runs"][0]["results"][0]["locations"][0]
+    assert loc["physicalLocation"]["artifactLocation"]["uri"] == "infra/iac/a.tf"

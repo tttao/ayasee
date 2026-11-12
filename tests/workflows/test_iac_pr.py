@@ -391,3 +391,39 @@ def test_no_uv_cache_anywhere():
                     assert step["with"]["enable-cache"] is False, path.name
     pr = yaml.safe_load(PATH.read_text())
     assert pr["jobs"]["checks"]["env"]["UV_NO_CACHE"] == "1"  # uvx checkov
+
+
+def test_checks_are_scoped_to_the_iac_root(wf):
+    """Issue #4: in a monorepo, application code beside the estate is not judged (iac_root)."""
+    steps = _steps(wf, "checks")
+    cfg = steps[_index(steps, lambda s: s.get("id") == "config")]
+    assert "iac-root=" in cfg["run"] and ".iac_root" in cfg["run"]
+    root = "${{ steps.config.outputs.iac-root }}"
+    fmt = [
+        s for s in steps if "format --check" in s.get("run", "") or "fmt -check" in s.get("run", "")
+    ]
+    assert len(fmt) == 2
+    for s in fmt:
+        assert s["env"]["IAC_ROOT"] == root and '"$IAC_ROOT"' in s["run"], s["name"]
+    trivy = steps[_index(steps, lambda s: "trivy-action" in _uses(s))]["with"]
+    assert trivy["scan-ref"] == root
+    checkov = steps[_index(steps, lambda s: s.get("id") == "checkov")]
+    assert checkov["env"]["IAC_ROOT"] == root
+    assert '--directory "$IAC_ROOT"' in checkov["run"] and "--directory ." not in checkov["run"]
+    # the workflows framework runs only when the repository is the estate
+    assert 'if [ "$IAC_ROOT" = . ]; then frameworks+=(github_actions); fi' in checkov["run"]
+
+
+def test_changed_units_ignores_code_outside_the_iac_root(wf):
+    steps = _steps(wf, "plan-dev")
+    changed = steps[_index(steps, lambda s: s.get("id") == "changed")]
+    assert '--iac-root "$iac_root"' in changed["run"]
+    assert '--config-path "$CONFIG_PATH"' in changed["run"]
+
+
+def test_sarif_paths_are_made_repository_relative(wf):
+    scrubs = [s for s in _steps(wf, "checks") if "ayasee sarif-scrub" in s.get("run", "")]
+    assert len(scrubs) == 2
+    for s in scrubs:
+        assert s["env"]["IAC_ROOT"] == "${{ steps.config.outputs.iac-root }}"
+        assert '--uri-prefix "$IAC_ROOT"' in s["run"]

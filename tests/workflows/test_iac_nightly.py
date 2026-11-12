@@ -275,3 +275,21 @@ def test_header_does_not_claim_local_mode():
     head = TEXT.split("name: iac-nightly")[0]
     assert "not supported" in head and "--local" in head
     assert "(or to ./actions for in-repo runs)" not in head
+
+
+def test_rescan_is_scoped_to_the_iac_root(wf):
+    steps = _steps(wf, "rescan")
+    cfg = steps[_index(steps, lambda s: s.get("id") == "config")]
+    assert "ayasee config show" in cfg["run"] and ".iac_root" in cfg["run"]
+    root = "${{ steps.config.outputs.iac-root }}"
+    trivy = steps[_index(steps, lambda s: "trivy-action" in _uses(s))]
+    assert trivy["with"]["scan-ref"] == root
+    checkov = steps[_index(steps, lambda s: s.get("id") == "checkov")]
+    assert checkov["env"]["IAC_ROOT"] == root
+    assert '--directory "$IAC_ROOT"' in checkov["run"]
+
+
+def test_rescan_sarif_paths_are_made_repository_relative(wf):
+    scrubs = [s for s in _steps(wf, "rescan") if "ayasee sarif-scrub" in s.get("run", "")]
+    assert len(scrubs) == 2
+    assert all('--uri-prefix "$IAC_ROOT"' in s["run"] for s in scrubs)

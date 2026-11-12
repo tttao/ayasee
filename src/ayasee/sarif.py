@@ -10,6 +10,10 @@ id, name, shortDescription, defaultConfiguration.level), originalUriBaseIds (uri
 and results with ruleId, ruleIndex, rule, level, kind, partialFingerprints, locations reduced to
 artifactLocation{uri, uriBaseId} + region{startLine, startColumn, endLine, endColumn}, and
 message.text, which is always the rule's short description (the rule id when there is none).
+
+``--uri-prefix DIR`` rewrites relative location URIs to ``DIR/<uri>``: a scanner run on a
+sub-directory (``iac_root`` in a monorepo) reports paths relative to it, and code scanning needs
+paths relative to the repository root.
 """
 
 from __future__ import annotations
@@ -17,6 +21,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import posixpath
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,6 +31,7 @@ from ayasee import cli
 
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 _REGION = ("startLine", "startColumn", "endLine", "endColumn")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -70,11 +77,19 @@ def _component(raw: Any) -> dict[str, Any]:
     return out
 
 
-def _location(raw: Any) -> dict[str, Any] | None:
+def _prefixed(uri: str, prefix: str) -> str:
+    if prefix == "." or _SCHEME.match(uri):
+        return uri  # no prefix, or an absolute URI (file:///...)
+    return posixpath.join(prefix, uri.lstrip("/"))
+
+
+def _location(raw: Any, prefix: str = ".") -> dict[str, Any] | None:
     phys = _dict(_dict(raw).get("physicalLocation"))
     art = _pick(_dict(phys.get("artifactLocation")), ("uri", "uriBaseId"), str)
     if not art:
         return None  # logical-only location
+    if "uri" in art:
+        art["uri"] = _prefixed(art["uri"], prefix)
     out: dict[str, Any] = {"artifactLocation": art}
     if region := _pick(_dict(phys.get("region")), _REGION, int):
         out["region"] = region
@@ -103,7 +118,9 @@ def _component_for(ref: Any, driver: dict[str, Any], extensions: list[dict[str, 
     return driver
 
 
-def _result(raw: Any, driver: dict[str, Any], extensions: list[dict[str, Any]]) -> dict[str, Any]:
+def _result(
+    raw: Any, driver: dict[str, Any], extensions: list[dict[str, Any]], prefix: str = "."
+) -> dict[str, Any]:
     raw = _dict(raw)
     out: dict[str, Any] = {}
     rule_id = _str(raw.get("ruleId"))
@@ -130,7 +147,7 @@ def _result(raw: Any, driver: dict[str, Any], extensions: list[dict[str, Any]]) 
     fingerprints = {
         k: v for k, v in _dict(raw.get("partialFingerprints")).items() if isinstance(v, str)
     }
-    locations = [loc for r in raw.get("locations") or [] if (loc := _location(r))]
+    locations = [loc for r in raw.get("locations") or [] if (loc := _location(r, prefix))]
     if not fingerprints and rule_id is not None and locations:
         # upload-sarif has no checkout to compute these from: derive a stable one from
         # rule + file + line. Never from code text.
@@ -146,7 +163,7 @@ def _result(raw: Any, driver: dict[str, Any], extensions: list[dict[str, Any]]) 
     return out
 
 
-def _run(raw: Any) -> dict[str, Any]:
+def _run(raw: Any, prefix: str = ".") -> dict[str, Any]:
     raw = _dict(raw)
     tool = _dict(raw.get("tool"))
     driver = _component(tool.get("driver"))
@@ -161,16 +178,20 @@ def _run(raw: Any) -> dict[str, Any]:
     }
     if bases:
         out["originalUriBaseIds"] = bases
-    out["results"] = [_result(r, driver, extensions) for r in raw.get("results") or []]
+    out["results"] = [_result(r, driver, extensions, prefix) for r in raw.get("results") or []]
     return out
 
 
-def scrub(doc: dict[str, Any]) -> dict[str, Any]:
-    """A new SARIF document holding only the allow-listed fields of ``doc``."""
+def scrub(doc: dict[str, Any], uri_prefix: str = ".") -> dict[str, Any]:
+    """A new SARIF document holding only the allow-listed fields of ``doc``.
+
+    Relative location URIs are rewritten to ``uri_prefix/<uri>`` (unchanged for ``.``).
+    """
+    prefix = posixpath.normpath(uri_prefix.strip("/") or ".")
     return {
         "version": _str(doc.get("version")) or "2.1.0",
         "$schema": _str(doc.get("$schema")) or SCHEMA,
-        "runs": [_run(r) for r in doc.get("runs") or []],
+        "runs": [_run(r, prefix) for r in doc.get("runs") or []],
     }
 
 
@@ -179,7 +200,8 @@ def _main(args: argparse.Namespace) -> int:
         doc = json.loads(Path(args.infile).read_text())
         if not isinstance(doc, dict):
             raise ValueError("not a SARIF object")
-        Path(args.outfile).write_text(json.dumps(scrub(doc), indent=2) + "\n")
+        out = scrub(doc, uri_prefix=args.uri_prefix)
+        Path(args.outfile).write_text(json.dumps(out, indent=2) + "\n")
     except (OSError, ValueError) as exc:
         print(f"sarif-scrub: error: {type(exc).__name__}", file=sys.stderr)
         return 1
@@ -189,6 +211,11 @@ def _main(args: argparse.Namespace) -> int:
 def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--in", dest="infile", required=True)
     parser.add_argument("--out", dest="outfile", required=True)
+    parser.add_argument(
+        "--uri-prefix",
+        default=".",
+        help="directory the scanner ran on; relative URIs become DIR/<uri> (default: .)",
+    )
     parser.set_defaults(handler=_main)
 
 

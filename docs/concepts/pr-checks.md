@@ -32,7 +32,7 @@ result to small jobs that run no PR code (R39).
 
 | Job | Permissions | What it does |
 |---|---|---|
-| `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on the repository (SARIF, no cache); Checkov via `uvx checkov@<version>` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
+| `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on `iac_root` (the repository by default; SARIF, no cache); Checkov via `uvx checkov@<version>` on `iac_root` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
 | `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs. |
 | `plan-dev` | `contents: read`, `id-token: write` | Environment `dev-plan`. Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default; the environment is `dev-plan` whatever that stage is called), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives the `dev-plan` environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text to artifact `ayasee-pr-comment` (1 day). |
 | `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` and runs `ayasee pr-comment`. Plan-dev refuses settings that are not supported yet before its Azure login. |
@@ -45,9 +45,13 @@ the PR against its base (merge base) and prints:
 - a comma list of changed dev units, planned through the plan action's `only-units` input;
 - an empty line when nothing changed, or when only documentation changed (`*.md`, `docs/**`,
   `LICENSE`): the plan is skipped and the comment says there are no IaC changes;
-- `ALL` when any changed file that is not documentation is outside `stages/dev/` (modules,
+- `ALL` when any changed file that is not documentation is inside `iac_root` but outside `stages/dev/` (modules,
   `root.hcl`, `.ayasee.yaml`, other environments), when a changed file under `stages/dev/` belongs to no unit (for example a
-  removed unit), or when the diff cannot be computed. Every dev unit is then planned.
+  removed unit), or when the diff cannot be computed. Every dev unit is then planned. A change to
+  the configuration file (`--config-path`) always gives `ALL`.
+
+Files outside `iac_root` are ignored like documentation (see [monorepos](#monorepos)). With the
+default `iac_root: .` nothing is outside it.
 
 Dependents of a changed unit are not added to the list; they are planned only when `ALL` applies.
 
@@ -98,6 +102,33 @@ A fork PR gets a read-only token and no OIDC token. For those PRs `plan-dev` is 
 (`github.event.pull_request.head.repo.full_name == github.repository`), and so is `upload-sarif`;
 fmt, validate, Trivy and Checkov still run, and their failures fail the check.
 
+## Monorepos
+
+When the IaC sits beside application code, set `iac_root` in `.ayasee.yaml` to the directory that
+holds `root.hcl`, the modules and `units_root`:
+
+```yaml
+iac_root: infra/iac
+units_root: infra/iac/stages
+```
+
+Then:
+
+- the format checks, `terragrunt hcl validate`, Trivy and Checkov look only at `iac_root`, so a
+  finding in an application Dockerfile or Compose file does not fail the IaC check, and the
+  `ayasee-trivy` and `ayasee-checkov` SARIF categories hold IaC findings only. Checkov's
+  `github_actions` framework is not run, because the workflows under `.github/workflows` belong to
+  the applications too. The nightly rescan uses the same scope. The scanners report paths
+  relative to `iac_root`, so `ayasee sarif-scrub --uri-prefix <iac_root>` rewrites them to
+  repository paths and the alerts point at the right files;
+- `changed-units` ignores a changed file outside `iac_root`, except the configuration file. A pull
+  request that only touches application code gets the "No IaC changes" comment and no cloud login,
+  and stays green, so `iac-pr` can be a required check. Do not add a `paths:` filter to the caller:
+  a skipped workflow cannot satisfy a required check.
+
+Create the Checkov baseline with `--directory <iac_root>` (next section), because Checkov records
+file paths relative to the directory it scanned.
+
 ## The Checkov baseline
 
 Existing findings can be accepted once, so that only new ones fail a PR. Create the baseline from the
@@ -107,6 +138,10 @@ default branch and commit it:
 uvx checkov@3.4.3 --directory . --framework terraform github_actions --create-baseline
 mkdir -p .ayasee && mv .checkov.baseline .ayasee/checkov.baseline
 ```
+
+With `iac_root` set (a monorepo), scan that directory instead and leave out `github_actions`:
+`uvx checkov@3.4.3 --directory infra/iac --framework terraform --create-baseline`, then move
+`infra/iac/.checkov.baseline` to `.ayasee/checkov.baseline`.
 
 When `.ayasee/checkov.baseline` exists, the workflow passes `--baseline .ayasee/checkov.baseline`.
 Use the Checkov version the workflow runs (input `checkov-version`) so the baseline format matches.
