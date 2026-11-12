@@ -73,6 +73,9 @@ identity with a federated credential for `environment:<name>`. `ARM_USE_OIDC=tru
 `DATABRICKS_AUTH_TYPE=github-oidc-azure` replace keys. The only optional secrets are a Teams webhook and
 a fine-grained `ledger-token` for a `git-branch://` ledger, and they are declared explicitly, never
 inherited.
+`identity: secrets` in `.ayasee.yaml` is the documented exception, for providers that cannot federate
+with GitHub OIDC: the workflows skip `azure/login`, and every configuration load prints a `DEVIATION:`
+line, in the same way `solo_mode` is labelled.
 
 **Prod needs a human who is not the author (D2).**
 - The `prod` environment has required reviewers, `prevent_self_review = true` and admins cannot bypass.

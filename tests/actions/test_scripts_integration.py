@@ -214,11 +214,11 @@ def test_replan_mode_verifies_and_reports_no_changes(sandbox):
 
 
 @pytest.mark.parametrize("script", ["plan/plan.sh", "apply/apply.sh"])
-def test_same_job_is_refused_outside_dev_and_uat(sandbox, script):
+def test_same_job_is_refused_outside_pre_prod_stages(sandbox, script):
     _, env = sandbox
     proc, _ = _run(Path(script), env, SG_ENV="prod", SG_BINDING_MODE="same-job")
     assert proc.returncode != 0
-    assert "only allowed for dev and uat" in proc.stderr
+    assert "only allowed for a pre-prod stage, not prod" in proc.stderr
 
 
 def test_apply_refuses_unencrypted_encrypted_plan_mode(sandbox):

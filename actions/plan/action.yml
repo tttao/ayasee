@@ -11,13 +11,13 @@ inputs:
   encrypt:
     description: >-
       Encrypt plan files (OpenTofu aes_gcm, enforced). With true, key-vault-key-id is required.
-      false is allowed only with binding-mode replan, or same-job for dev and uat. With false and
+      false is allowed only with binding-mode replan, or same-job for a pre-prod stage. With false and
       a mode other than same-job the plan files are deleted after planning and no plan-dir is output.
     required: false
     default: "true"
   binding-mode:
     description: >-
-      How the later apply binds to this plan - same-job (dev and uat only), breakglass (prod only,
+      How the later apply binds to this plan - same-job (pre-prod stages only, never prod), breakglass (prod only,
       needs breakglass-incident; plan and apply in one job), encrypted_plan (needs encrypt=true),
       replan, or drift (only with drift true).
     required: false

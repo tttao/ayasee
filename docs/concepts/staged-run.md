@@ -13,20 +13,43 @@ jobs:
   iac:
     uses: <owner>/ayasee/.github/workflows/iac-staged.yml@<sha>
     with:
-      start-stage: dev            # dev | uat | prod-plan
+      start-stage: ""             # empty (first stage) | a pre-prod stage | prod-plan
     secrets:
       teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}   # optional
       ledger-token: ${{ secrets.LEDGER_TOKEN }}     # optional; git-branch:// ledger store only
     # never `secrets: inherit`
 ```
 
+## Stages
+
+The run promotes through the `stages` of `.ayasee.yaml`. `iac-staged` accepts two layouts, and
+`resolve` refuses any other list (`ayasee config staged`):
+
+| `stages` | `dev` job slot | `uat` job slot | Guard of `prod-plan` and `prod` chains from |
+|---|---|---|---|
+| `[dev, uat, prod]` (default), or any `[<first>, <pre-prod>, prod]` | `<first>` | `<pre-prod>` | `<pre-prod>` |
+| `[<pre-prod>, prod]` | skipped | `<pre-prod>` | `<pre-prod>` |
+
+The job ids stay `dev` and `uat`; each job's display name, `environment`, concurrency group,
+units directory (`<units_root>/<stage>`), ledger record, stop-the-line label and notifications use
+the configured stage name. `prod` must be the last stage. A pre-prod stage name must match
+`[a-z0-9][a-z0-9_-]*` and must not be `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` or
+start with `drift-`, because those environments have a fixed role. With two stages the `dev` slot is
+skipped exactly as `start-stage` skips it, so `prod-plan` still runs. The guard reads the stage
+order from the same list, so `prod-plan` and `prod` require the stage just before prod to have this
+SHA live and converged, whatever it is called. Lists of four or more stages are not supported yet.
+`iac-pr` plans the first configured stage, and `iac-nightly` drifts every listed stage.
+
+These layouts are covered by unit tests of the CLI, the guard and the workflow definition; no
+two-stage run has been executed on GitHub yet.
+
 ## Flow
 
 | Job | Needs | Runs when | What it does |
 |---|---|---|---|
-| `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` (R70, `ayasee main-tip`: the run of the newer commit promotes the change; a redrive dispatches on the tip), refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `start-stage` (only `dev`, `uat` or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`). |
-| `dev` | `resolve` | `start-stage` is `dev` | setup, guard, plan, apply (binding mode `same-job`), ledger write. |
-| `uat` | `dev` | `start-stage` is `dev` or `uat`; `dev` succeeded, or was skipped by `start-stage` | Same as `dev`. |
+| `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` (R70, `ayasee main-tip`: the run of the newer commit promotes the change; a redrive dispatches on the tip), refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `stages` and `start-stage` (`ayasee config staged`: empty for the first stage, a pre-prod stage name, or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`, `identity`). |
+| `dev` | `resolve` | three stages, and `start-stage` is empty or the first stage | Runs the first stage: setup, guard, plan, apply (binding mode `same-job`), ledger write. |
+| `uat` | `dev` | `start-stage` is not `prod-plan`; `dev` succeeded, or was skipped (by `start-stage` or a two-stage list) | Runs the stage just before prod. Same as `dev`. |
 | `prod-plan` | `dev`, `uat` | after `dev` and `uat` succeeded or were skipped by `start-stage` | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
 | `prod` | `prod-plan` | `has-changes == 'true'` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
 | `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
@@ -42,12 +65,12 @@ Every plan and apply that takes the state lock (including the converge re-plan a
 apply actions to change it). A nightly drift plan (see `drift.md`) holds the same lock, so an overlapping
 run waits instead of failing on the blob lease. Plans run with `lock: false` do not use it.
 
-A stage job is skipped only when `start-stage` says so. A skipped predecessor counts as passed only
-if `start-stage` skipped it on purpose; a predecessor skipped because *its* predecessor failed
+A stage job is skipped only when `start-stage` (or a two-stage list, for the `dev` slot) says so. A
+skipped predecessor counts as passed only if it was skipped on purpose; a predecessor skipped because *its* predecessor failed
 stops the chain.
 
-dev and uat plan and apply in one job, so they use `binding-mode: same-job` with plan encryption
-off: the plan file never leaves the job. A failed apply still writes the ledger (the units that
+The pre-prod stages plan and apply in one job, so they use `binding-mode: same-job` with plan
+encryption off (the actions refuse `same-job` for `prod` and the fixed-role environments): the plan file never leaves the job. A failed apply still writes the ledger (the units that
 were applied are recorded) and then fails the job, opens or extends the `ayasee:stop-the-line`
 issue for the environment, and sends a `stage_failed` notification. The stop-the-line issue blocks
 later stages through the guard until it is closed. A prod job that stops before anything is
@@ -86,8 +109,9 @@ checks that all placeholders share one ref.
 
 ## Environments and their controls
 
-The staged run uses four GitHub environments: `dev`, `uat`, `prod-plan` and `prod`. The whole set
-the workflows expect is nine (add `dev-plan` for pull requests, `prod-breakglass` for emergencies, and
+The staged run uses four GitHub environments with the default stages: `dev`, `uat`, `prod-plan` and
+`prod` (three with a two-stage list: `<pre-prod>`, `prod-plan`, `prod`). The whole set the workflows
+expect with the default stages is nine (add `dev-plan` for pull requests, `prod-breakglass` for emergencies, and
 `drift-dev`, `drift-uat` and `drift-prod` for the nightly check); the
 [`github-environments`](../../modules/github-environments/README.md) module creates all of them, and
 [architecture](architecture.md#environments-and-identities) lists what each may do. On every staged
@@ -103,9 +127,9 @@ merged cannot approve the production apply. `dev`, `uat` and `prod-plan` have no
 
 ## Environment variables (per environment)
 
-There are no cloud secrets. Set these as **variables** on each GitHub environment, each backed by
-its own Entra user-assigned managed identity with a federated credential for
-`environment:<name>`:
+With `identity: oidc` (the default) there are no cloud secrets. Set these as **variables** on each
+GitHub environment, each backed by its own Entra user-assigned managed identity with a federated
+credential for `environment:<name>`:
 
 | Variable | Purpose |
 |---|---|
@@ -117,7 +141,10 @@ The `prod-plan` identity reads and plans prod; it must not be able to apply. It 
 write on the prod ledger record, because `prod-in-sync` records an unchanged prod from that
 environment.
 
-The workflow sets `ARM_USE_OIDC=true` and `DATABRICKS_AUTH_TYPE=github-oidc-azure`. Two optional
+With `identity: oidc` the workflow runs `azure/login` and sets `ARM_USE_OIDC=true`, `ARM_CLIENT_ID`,
+`ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID` and `DATABRICKS_AUTH_TYPE=github-oidc-azure`. With
+`identity: secrets` it skips `azure/login` and sets those variables to empty strings, for providers
+that cannot federate with GitHub OIDC (see [the reference](../reference/ayasee-yaml.md#keys)). Two optional
 secrets are declared explicitly under `on.workflow_call.secrets`, never inherited: `teams-webhook`
 (without it, notifications are skipped) and `ledger-token`, a fine-grained token with contents
 write on the repository, needed only for a `git-branch://` ledger store. Jobs keep `contents: read`;

@@ -12,8 +12,9 @@ PATH = WORKFLOWS / "iac-staged.yml"
 STAGE_JOBS = ["dev", "uat", "prod-plan", "prod", "prod-in-sync"]
 # prod-plan and prod-in-sync never wait for prod reviewers (R31)
 EXPECTED_ENV = {
-    "dev": "dev",
-    "uat": "uat",
+    # the two pre-prod slots run the stages named in `stages` (issue #1)
+    "dev": "${{ needs.resolve.outputs.first-stage }}",
+    "uat": "${{ needs.resolve.outputs.pre-prod-stage }}",
     "prod-plan": "prod-plan",
     "prod": "prod",
     "prod-in-sync": "prod-plan",
@@ -164,10 +165,14 @@ def test_prod_plan_outputs(wf):
 
 
 def test_start_stage_validated_in_resolve(wf):
-    job = wf["jobs"]["resolve"]
-    text = "\n".join(str(s) for s in job["steps"])
-    assert "dev|uat|prod-plan" in text
-    assert wf[True]["workflow_call"]["inputs"]["start-stage"]["default"] == "dev"
+    step = next(s for s in wf["jobs"]["resolve"]["steps"] if s.get("id") == "resolve")
+    run = step["run"]
+    assert step["env"]["START_STAGE"] == "${{ inputs.start-stage }}"
+    assert 'ayasee config staged --path "$CONFIG_PATH" --start-stage "$START_STAGE"' in run
+    assert "::error::$line" in run and "exit 1" in run
+    assert "if" not in step and "continue-on-error" not in step
+    # empty means the first configured stage
+    assert wf[True]["workflow_call"]["inputs"]["start-stage"]["default"] == ""
 
 
 def test_dev_uat_use_same_job_and_write_ledger_with_mirror(wf):
@@ -182,11 +187,45 @@ def test_dev_uat_use_same_job_and_write_ledger_with_mirror(wf):
 
 
 def test_oidc_environment(wf):
+    """ARM_* and the Databricks auth type are set for identity: oidc only (issue #1)."""
+    oidc = "needs.resolve.outputs.identity == 'oidc'"
     for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
         env = wf["jobs"][name]["env"]
-        assert env["ARM_USE_OIDC"] == "true"
-        assert env["DATABRICKS_AUTH_TYPE"] == "github-oidc-azure"
-        assert env["ARM_CLIENT_ID"] == "${{ vars.AZURE_CLIENT_ID }}"
+        assert env["ARM_USE_OIDC"] == f"${{{{ {oidc} && 'true' || '' }}}}"
+        assert env["DATABRICKS_AUTH_TYPE"] == f"${{{{ {oidc} && 'github-oidc-azure' || '' }}}}"
+        for var in ("CLIENT_ID", "TENANT_ID", "SUBSCRIPTION_ID"):
+            assert env[f"ARM_{var}"] == f"${{{{ {oidc} && vars.AZURE_{var} || '' }}}}"
+        assert "resolve" in wf["jobs"][name]["needs"]
+
+
+def test_azure_login_only_for_the_oidc_identity(wf):
+    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+        logins = [s for s in _steps(wf, name) if "azure/login" in s.get("uses", "")]
+        assert len(logins) == 1, name
+        assert logins[0]["if"] == "${{ needs.resolve.outputs.identity == 'oidc' }}", name
+    out = wf["jobs"]["resolve"]["outputs"]
+    assert out["identity"] == "${{ steps.resolve.outputs.identity }}"
+
+
+def test_pre_prod_slots_run_the_configured_stage(wf):
+    for job, output in (("dev", "first-stage"), ("uat", "pre-prod-stage")):
+        j = wf["jobs"][job]
+        expr = f"${{{{ needs.resolve.outputs.{output} }}}}"
+        assert j["env"]["STAGE"] == expr
+        assert j["name"] == f"${{{{ needs.resolve.outputs.{output} || '{job}' }}}}"
+        assert j["concurrency"]["group"] == f"ayasee-${{{{ github.repository }}}}-{expr}"
+        steps = _steps(wf, job)
+        for kind in ("plan", "apply", "ledger", "notify"):
+            step = next(s for s in steps if f"/actions/{kind}@" in s.get("uses", ""))
+            assert step["with"]["env"] == "${{ env.STAGE }}", (job, kind)
+        guard = next(s for s in steps if "/actions/guard@" in s.get("uses", ""))
+        assert guard["with"]["stage"] == "${{ env.STAGE }}"
+        assert guard["with"]["order"] == "${{ needs.resolve.outputs.order }}"
+        text = PATH.read_text()
+        assert f"stage: {job}\n" not in text and f"env: {job}\n" not in text
+    out = wf["jobs"]["resolve"]["outputs"]
+    assert out["first-stage"] == "${{ steps.resolve.outputs.first-stage }}"
+    assert out["pre-prod-stage"] == "${{ steps.resolve.outputs.pre-prod-stage }}"
 
 
 def test_prod_in_sync_mirrors_and_notifies_failure(wf):
@@ -491,3 +530,57 @@ def test_check_supported_step_prints_one_error_per_line(wf, tmp_path):
     ]
     ok = _run_step(tmp_path, step, "exit 0\n", CONFIG_PATH=".ayasee.yaml")
     assert ok.returncode == 0 and ok.stdout == ""
+
+
+# ---- issue #1: configurable stages and identity profile, with the real CLI ----
+
+_REAL_AYASEE = (
+    f'PYTHONPATH="{ROOT / "src"}" exec "{__import__("sys").executable}" '
+    '-c "from ayasee.cli import entrypoint; entrypoint()" "$@"\n'
+)
+
+
+def _resolve(wf, tmp_path, config_text, start=""):
+    step = next(s for s in wf["jobs"]["resolve"]["steps"] if s.get("id") == "resolve")
+    cfg = tmp_path / "ayasee.yaml"
+    cfg.write_text(config_text)
+    out = tmp_path / "out.txt"
+    out.write_text("")
+    proc = _run_step(
+        tmp_path,
+        step,
+        _REAL_AYASEE,
+        CONFIG_PATH=str(cfg),
+        START_STAGE=start,
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_OUTPUT=str(out),
+    )
+    outputs = dict(line.split("=", 1) for line in out.read_text().splitlines())
+    return proc, outputs
+
+
+def test_resolve_step_defaults_keep_dev_uat_prod(wf, tmp_path):
+    proc, out = _resolve(wf, tmp_path, "")
+    assert proc.returncode == 0, proc.stderr
+    assert out["run-dev"] == out["run-uat"] == out["run-prod-plan"] == "true"
+    assert (out["first-stage"], out["pre-prod-stage"]) == ("dev", "uat")
+    assert out["order"] == "dev,uat,prod" and out["identity"] == "oidc"
+
+
+def test_resolve_step_two_stages_and_secrets_identity(wf, tmp_path):
+    proc, out = _resolve(wf, tmp_path, "stages: [staging, prod]\nidentity: secrets\n")
+    assert proc.returncode == 0, proc.stderr
+    assert (out["run-dev"], out["run-uat"]) == ("false", "true")
+    assert (out["first-stage"], out["pre-prod-stage"]) == ("", "staging")
+    assert out["order"] == "staging,prod" and out["identity"] == "secrets"
+
+
+@pytest.mark.parametrize(
+    ("text", "start"),
+    [("stages: [a, b, c, prod]\n", ""), ("stages: [prod-plan, prod]\n", ""), ("", "qa")],
+)
+def test_resolve_step_refuses_an_unsupported_layout(wf, tmp_path, text, start):
+    proc, out = _resolve(wf, tmp_path, text, start)
+    assert proc.returncode == 1
+    assert proc.stdout.startswith("::error::ayasee: config error:")
+    assert out == {}

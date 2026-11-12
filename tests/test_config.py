@@ -189,3 +189,99 @@ def test_check_supported_invalid_config_exit_1(tmp_path, capsys):
 
 def test_unsupported_is_empty_for_defaults():
     assert config.unsupported(Config()) == []
+
+
+# ---- identity profile (issue #1) --------------------------------------------------------
+
+
+def test_identity_defaults_to_oidc_and_is_strict(tmp_path, capsys):
+    assert Config().identity == "oidc"
+    assert load_config(write(tmp_path, "identity: oidc\n")).identity == "oidc"
+    assert capsys.readouterr().err == ""
+    with pytest.raises(ConfigError, match="identity"):
+        load_config(write(tmp_path, "identity: keys\n"))
+
+
+def test_identity_secrets_prints_the_deviation(tmp_path, capsys):
+    cfg = load_config(write(tmp_path, "identity: secrets\n"))
+    assert cfg.identity == "secrets"
+    assert capsys.readouterr().err == config.DEVIATION_SECRETS + "\n"
+    assert config.DEVIATION_SECRETS.startswith("DEVIATION: identity: secrets")
+
+
+def test_cli_show_has_identity(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: secrets\n")
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    assert json.loads(capsys.readouterr().out)["identity"] == "secrets"
+
+
+# ---- iac-staged stage layout (issue #1) -------------------------------------------------
+
+
+def _layout(run_dev, run_uat, first, pre):
+    return {
+        "run-dev": run_dev,
+        "run-uat": run_uat,
+        "first-stage": first,
+        "pre-prod-stage": pre,
+    }
+
+
+@pytest.mark.parametrize(
+    ("stages", "start", "expected"),
+    [
+        (["dev", "uat", "prod"], "", _layout("true", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "dev", _layout("true", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "uat", _layout("false", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "prod-plan", _layout("false", "false", "dev", "uat")),
+        (["staging", "prod"], "", _layout("false", "true", "", "staging")),
+        (["staging", "prod"], "staging", _layout("false", "true", "", "staging")),
+        (["staging", "prod"], "prod-plan", _layout("false", "false", "", "staging")),
+        (["test", "pre_prod", "prod"], "", _layout("true", "true", "test", "pre_prod")),
+    ],
+)
+def test_staged_layout(stages, start, expected):
+    out = config.staged_layout(stages, start)
+    assert out == {**expected, "order": ",".join(stages)}
+
+
+@pytest.mark.parametrize(
+    ("stages", "start", "match"),
+    [
+        (["prod"], "", "two or three stages"),
+        (["a", "b", "c", "prod"], "", "two or three stages"),
+        (["dev", "prod", "uat"], "", "last"),
+        (["prod-plan", "prod"], "", "reserved"),
+        (["prod-breakglass", "prod"], "", "reserved"),
+        (["dev-plan", "prod"], "", "reserved"),
+        (["drift-dev", "prod"], "", "reserved"),
+        (["Dev", "prod"], "", "stage name"),
+        (["../x", "prod"], "", "stage name"),
+        (["dev x", "prod"], "", "stage name"),
+        (["dev", "uat", "prod"], "prod", "start-stage"),
+        (["dev", "uat", "prod"], "staging", "start-stage"),
+        (["staging", "prod"], "dev", "start-stage"),
+    ],
+)
+def test_staged_layout_refuses(stages, start, match):
+    with pytest.raises(ConfigError, match=match):
+        config.staged_layout(stages, start)
+
+
+def test_cli_staged_prints_github_outputs(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [staging, prod]\n")
+    assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "run-dev=false",
+        "run-uat=true",
+        "first-stage=",
+        "pre-prod-stage=staging",
+        "order=staging,prod",
+    ]
+
+
+def test_cli_staged_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [a, b, c, prod]\n")
+    assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 1
+    cap = capsys.readouterr()
+    assert cap.out == "" and "two or three stages" in cap.err

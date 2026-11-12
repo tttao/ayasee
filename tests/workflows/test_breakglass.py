@@ -100,11 +100,11 @@ def test_uses_breakglass_environment(wf):
 
 
 def test_prod_vars_come_from_the_breakglass_environment(wf):
-    env = wf["jobs"][JOB]["env"]
     for var in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
         assert f"vars.{var}" in TEXT
-    assert env["ARM_CLIENT_ID"] == "${{ vars.AZURE_CLIENT_ID }}"
     plan = _steps(wf, JOB)[_idx(wf, _ayasee("plan"))]
+    oidc = "steps.cfg.outputs.identity == 'oidc'"
+    assert plan["env"]["ARM_CLIENT_ID"] == f"${{{{ {oidc} && vars.AZURE_CLIENT_ID || '' }}}}"
     assert plan["with"]["key-vault-key-id"] == "${{ vars.AYASEE_KEY_VAULT_KEY_ID }}"
 
 

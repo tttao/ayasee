@@ -63,6 +63,7 @@ jobs:
       ledger-url: ${{ steps.resolve.outputs.ledger-url }}
       units-root: ${{ steps.resolve.outputs.units-root }}
       engine: ${{ steps.resolve.outputs.engine }}
+      identity: ${{ steps.resolve.outputs.identity }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -91,6 +92,7 @@ jobs:
             echo "ledger-url=$(jq -r '.ledger.url // ""' "$cfg")"
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
+            echo "identity=$(jq -r '.identity' "$cfg")"
           } >>"$GITHUB_OUTPUT"
 
   drift:
@@ -113,11 +115,12 @@ jobs:
       group: ayasee-drift-${{ github.repository }}-${{ matrix.env }}
       cancel-in-progress: false
     env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      DATABRICKS_AUTH_TYPE: github-oidc-azure
+      # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+      ARM_USE_OIDC: ${{ needs.resolve.outputs.identity == 'oidc' && 'true' || '' }}
+      ARM_CLIENT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+      ARM_TENANT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+      ARM_SUBSCRIPTION_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+      DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
       AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.resolve.outputs.ledger-url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       DRIFT_ENV: ${{ matrix.env }}
@@ -137,6 +140,7 @@ jobs:
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ needs.resolve.outputs.identity == 'oidc' }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}

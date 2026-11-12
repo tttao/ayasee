@@ -9,6 +9,16 @@ released version into the GitHub release notes.
 
 ### Added
 
+- `iac-staged` runs a configurable stage list (issue #1): `[<first>, <pre-prod>, prod]` or
+  `[<pre-prod>, prod]`, with any pre-prod names. The `dev` and `uat` jobs are the two pre-prod
+  slots and take their environment, concurrency group, units directory and ledger record from the
+  configured names; with two stages the `dev` slot is skipped and the guard of `prod-plan` chains
+  from the stage just before prod. `ayasee config staged` validates the layout and `start-stage`.
+  `iac-pr` plans the first configured stage. Not yet run on GitHub with a two-stage list.
+- `identity: oidc | secrets` in `.ayasee.yaml` (default `oidc`). With `secrets`, the stage jobs of
+  every reusable workflow skip `azure/login` and leave the `ARM_*` variables and
+  `DATABRICKS_AUTH_TYPE` empty; every load prints a `DEVIATION:` line (D7).
+
 - A documentation site on GitHub Pages, <https://tttao.github.io/ayasee/>: the `docs` workflow
   assembles the repository's Markdown with `scripts/build-docs-site.py` and builds it with mkdocs
   in strict mode. The landing page and theme are in `website/`.
@@ -19,6 +29,11 @@ released version into the GitHub release notes.
   that the docs and the code cite.
 
 ### Changed
+
+- `iac-staged`'s `start-stage` input defaults to empty (the first configured stage) instead of
+  `dev`; `dev`, `uat` and `prod-plan` keep working with the default stages.
+- `binding-mode: same-job` is allowed for any pre-prod stage, not only `dev` and `uat`; it is still
+  refused for `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` and `drift-*`.
 
 - The licence is settled: Apache-2.0, stated in
   [`docs/governance/PROVENANCE.md`](docs/governance/PROVENANCE.md). `scripts/check-provenance.sh`,

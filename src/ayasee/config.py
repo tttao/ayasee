@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -17,8 +18,17 @@ DEFAULT_PATH = Path(".ayasee.yaml")
 NON_COMPLIANT = (
     "NON-COMPLIANT: solo_mode disables independent approval (DORA RTS 2024/1774 Art. 17(1)(b))"
 )
+DEVIATION_SECRETS = (
+    "DEVIATION: identity: secrets stores provider API tokens as GitHub environment secrets "
+    "instead of OIDC federation (D7)"
+)
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")
+IDENTITIES = ("oidc", "secrets")
+# Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
+STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+# Environments with a fixed role that a pre-prod stage of iac-staged must never run in.
+RESERVED_ENVIRONMENTS = frozenset({"prod-plan", "prod-breakglass", "dev-plan"})
 
 
 class ConfigError(Exception):
@@ -48,6 +58,7 @@ class Config:
     extra_rules: list[str] = field(default_factory=list)
     drift_noise: dict[str, list[str]] = field(default_factory=dict)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
+    identity: str = "oidc"
 
     @property
     def binding_mode(self) -> str:
@@ -129,6 +140,8 @@ def _parse(raw: Any) -> Config:
         section = _mapping(top["notify"], "notify", {"teams"})
         if "teams" in section:
             cfg.notify.teams = _bool(section["teams"], "notify.teams")
+    if "identity" in top:
+        cfg.identity = _literal(top["identity"], "identity", IDENTITIES)
     return cfg
 
 
@@ -144,7 +157,61 @@ def load_config(path: Path = DEFAULT_PATH) -> Config:
     cfg = _parse({} if raw is None else raw)
     if cfg.solo_mode:
         print(NON_COMPLIANT, file=sys.stderr)
+    if cfg.identity == "secrets":
+        print(DEVIATION_SECRETS, file=sys.stderr)
     return cfg
+
+
+def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
+    """Map ``stages`` onto the fixed jobs of ``iac-staged`` (issue #1), or raise ConfigError.
+
+    ``iac-staged`` has two pre-prod job slots, ``dev`` and ``uat``. Three stages ``[a, b, prod]``
+    use both; two stages ``[b, prod]`` use only the ``uat`` slot, so the job just before
+    ``prod-plan`` always runs the stage just before prod and the guard of ``prod-plan`` chains from
+    it. ``start_stage`` is empty (the first stage), a pre-prod stage name, or ``prod-plan``.
+    The returned mapping is written to ``$GITHUB_OUTPUT`` as ``key=value`` lines.
+    """
+    if len(stages) not in (2, 3):
+        raise ConfigError(
+            f"stages: iac-staged runs two or three stages ([<pre-prod>, prod] or "
+            f"[<first>, <pre-prod>, prod]), got {len(stages)}"
+        )
+    if stages[-1] != "prod":
+        raise ConfigError("stages: iac-staged needs prod as the last stage")
+    pre = stages[:-1]
+    for name in pre:
+        if not STAGE_NAME.match(name):
+            raise ConfigError(f"stages: invalid stage name {name!r} (use [a-z0-9][a-z0-9_-]*)")
+        if name in RESERVED_ENVIRONMENTS or name.startswith("drift-") or name == "prod":
+            raise ConfigError(f"stages: {name!r} is a reserved environment name")
+    first = pre[0] if len(pre) == 2 else ""
+    preprod = pre[-1]
+    start = start_stage or pre[0]
+    if start not in (*pre, "prod-plan"):
+        raise ConfigError(
+            f"start-stage must be empty, one of {', '.join(pre)} or prod-plan; got {start!r}"
+        )
+    run_dev = bool(first) and start == first
+    run_uat = start != "prod-plan"
+    return {
+        "run-dev": "true" if run_dev else "false",
+        "run-uat": "true" if run_uat else "false",
+        "first-stage": first,
+        "pre-prod-stage": preprod,
+        "order": ",".join(stages),
+    }
+
+
+def _staged(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_config(Path(args.path))
+        layout = staged_layout(cfg.stages, args.start_stage)
+    except ConfigError as exc:
+        print(f"ayasee: config error: {exc}", file=sys.stderr)
+        return 1
+    for key, value in layout.items():
+        print(f"{key}={value}")
+    return 0
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -203,6 +270,13 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     )
     check.add_argument("--path", default=str(DEFAULT_PATH))
     check.set_defaults(handler=_check_supported)
+    staged = sub.add_parser(
+        "staged",
+        help="print the iac-staged job layout (key=value lines) or exit 1 for an unsupported one",
+    )
+    staged.add_argument("--path", default=str(DEFAULT_PATH))
+    staged.add_argument("--start-stage", default="", help="empty, a pre-prod stage or prod-plan")
+    staged.set_defaults(handler=_staged)
 
 
 cli.register("config", _setup)

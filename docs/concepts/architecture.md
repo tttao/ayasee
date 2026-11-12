@@ -12,7 +12,8 @@ execution plane writes the ledger, issues and workflow runs. The observation pla
 
 - One trunk. Environments are folders (`stages/<env>/<unit>`), not branches.
 - A push to `main` starts one `iac-staged` run pinned to the merge SHA. It goes
-  dev, uat, prod-plan, then a gated prod apply (see [the staged run](staged-run.md)).
+  dev, uat, prod-plan, then a gated prod apply (see [the staged run](staged-run.md)); the pre-prod
+  stages are configurable (two or three stages in all).
 - Prod applies the exact approved plan: an encrypted saved plan checked against a SHA-256 manifest
   ([plan binding](plan-binding.md)). A stale or mismatched plan stops the run and asks for a re-plan
   and a new approval. It is never re-planned silently.
@@ -20,7 +21,8 @@ execution plane writes the ledger, issues and workflow runs. The observation pla
   projection of it.
 - A [risk gate](risk-gate.md) puts critical and high changes first and shows which principals gain
   or lose access.
-- Cloud access is OIDC only: one managed identity per environment, no stored cloud secrets.
+- Cloud access is OIDC by default: one managed identity per environment, no stored cloud secrets.
+  `identity: secrets` is an opt-in, labelled deviation for providers that cannot federate.
 - The [cockpit](cockpit.md) is a read-only repository by environment matrix built from
   snapshots in git.
 
@@ -214,8 +216,11 @@ flowchart LR
   actions and the CLI, but `iac-staged` always runs prod in `encrypted_plan` mode, which needs
   OpenTofu, and the setup action installs only OpenTofu. See [plan binding](plan-binding.md#the-replan-fallback).
 - **Azure first.** The wired pieces are Entra identities, Azure Key Vault plan encryption and the
-  `azure-blob://` ledger store. A `git-branch://` ledger works without Azure, but plan encryption
-  has no other key provider yet.
+  `azure-blob://` ledger store. A `git-branch://` ledger works without Azure, and `identity: secrets`
+  skips the Azure login, but plan encryption has no other key provider yet.
+- **Two or three stages only.** `iac-staged` runs `[<pre-prod>, prod]` or
+  `[<first>, <pre-prod>, prod]`; longer lists are refused in `resolve`. No two-stage run has been
+  executed on GitHub yet.
 - **`extra_rules` is not forwarded by the workflows.** Adopter risk rule files work in the `risk`
   action and the CLI (`--rules`), but `iac-staged` does not pass the `extra_rules` key through yet.
 - **Not a write UI.** The cockpit is read-only. It never approves, syncs or re-drives.

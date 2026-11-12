@@ -10,7 +10,7 @@ inputs:
     default: stages
   binding-mode:
     description: >-
-      same-job (dev and uat only; plan and apply in one job, no verification), breakglass (prod only,
+      same-job (pre-prod stages only, never prod; plan and apply in one job, no verification), breakglass (prod only,
       needs breakglass-incident; plan and apply in one job, no verification), encrypted_plan (verify the approved
       encrypted plans against the manifest, then apply them) or replan (re-plan, compare with the
       manifest, then apply the fresh plans).

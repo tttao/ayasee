@@ -81,7 +81,9 @@ sg_check_incident() {
 }
 
 # sg_check_mode ENV MODE ENCRYPT ENGINE [DRIFT]: the one place that allows or refuses a combination.
-#   same-job       only for dev and uat (plan and apply in one job, no verification).
+#   same-job       only for a pre-prod stage (plan and apply in one job, no verification): never
+#                  prod, nor an environment with a fixed role (prod-plan, prod-breakglass,
+#                  dev-plan, drift-*). Pre-prod stage names come from `stages` (issue #1).
 #   breakglass     only for prod, and only with SG_BREAKGLASS_INCIDENT set to an incident reference
 #                  (ABC-123 or INC123): plan and apply in one job like same-job, for the documented
 #                  emergency path (iac-breakglass.yml, R44).
@@ -100,8 +102,10 @@ sg_check_mode() {
   case "$encrypt" in true | false) ;; *) sg_die "encrypt must be true or false, got: $encrypt" ;; esac
   case "$mode" in
     same-job)
-      [ "$env" = dev ] || [ "$env" = uat ] ||
-        sg_die "binding-mode same-job is only allowed for dev and uat, not $env"
+      case "$env" in
+        prod | prod-plan | prod-breakglass | dev-plan | drift-*)
+          sg_die "binding-mode same-job is only allowed for a pre-prod stage, not $env" ;;
+      esac
       ;;
     breakglass)
       [ "$env" = prod ] || sg_die "binding-mode breakglass is only allowed for prod, not $env"

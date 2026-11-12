@@ -151,11 +151,6 @@ jobs:
       group: ayasee-${{ github.repository }}-prod
       cancel-in-progress: false
     env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      DATABRICKS_AUTH_TYPE: github-oidc-azure
       AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -208,8 +203,10 @@ jobs:
           {
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
+            echo "identity=$(jq -r '.identity' "$cfg")"
           } >>"$GITHUB_OUTPUT"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ steps.cfg.outputs.identity == 'oidc' }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -281,6 +278,12 @@ jobs:
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
           SG_SHA: ${{ needs.validate.outputs.sha }}
+          # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+          ARM_USE_OIDC: ${{ steps.cfg.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
@@ -291,6 +294,11 @@ jobs:
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
           SG_SHA: ${{ needs.validate.outputs.sha }} # the sha that was checked out, not the dispatching ref's
+          ARM_USE_OIDC: ${{ steps.cfg.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
         with:
           env: prod
           units-root: ${{ steps.cfg.outputs.units-root }}

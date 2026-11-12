@@ -10,7 +10,12 @@ Print the resolved configuration, including the derived `binding_mode`, as JSON:
 ```bash
 ayasee config show [--path FILE]
 ayasee config check-supported [--path FILE]
+ayasee config staged [--path FILE] [--start-stage STAGE]
 ```
+
+`staged` prints how `iac-staged` maps `stages` onto its jobs, as `key=value` lines for
+`$GITHUB_OUTPUT` (`run-dev`, `run-uat`, `first-stage`, `pre-prod-stage`, `order`), or exits 1 with
+a configuration error for a stage list or `start-stage` that `iac-staged` cannot run.
 
 `check-supported` exits 1 and prints one line per setting that the parser accepts but no workflow
 implements yet (R35, R73): `gate: risky`, `engine: terraform`, `terragrunt: false`, a non-empty
@@ -23,7 +28,7 @@ such setting, so it never silently runs something else.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `stages` | list of strings | `[dev, uat, prod]` | Promotion order. Names must be unique, the list must be non-empty and it must contain `prod`. `iac-staged` currently accepts only `[dev, uat, prod]` and fails the run on any other list; `iac-nightly` drifts every listed stage and the cockpit reads its own `stages` from `repos.yaml`. |
+| `stages` | list of strings | `[dev, uat, prod]` | Promotion order. Names must be unique, the list must be non-empty and it must contain `prod`. `iac-staged` accepts two or three stages with `prod` last, `[<pre-prod>, prod]` or `[<first>, <pre-prod>, prod]`, and fails the run on any other list (`ayasee config staged`; pre-prod names match `[a-z0-9][a-z0-9_-]*` and are not `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`); see [the staged run](../concepts/staged-run.md#stages). `iac-pr` plans the first stage, `iac-nightly` drifts every listed stage and the cockpit reads its own `stages` from `repos.yaml`. |
 | `engine` | `opentofu` or `terraform` | `opentofu` | IaC engine. `opentofu` binds prod to the exact approved encrypted plan (D1). `terraform` selects the replan fallback, which compares `(address, actions)` plus a hash of non-sensitive `after` values (D1b), in the actions and the CLI. **Not supported by the workflows yet**: every reusable workflow refuses it in its first job with "engine: not supported yet" (R73). See [plan binding](../concepts/plan-binding.md#the-replan-fallback). |
 | `terragrunt` | boolean | `true` | Units are always discovered and driven through Terragrunt. `false` (plain OpenTofu layouts) is **not supported yet**: the workflows refuse it with "terragrunt: not supported yet" (R73). |
 | `units_root` | string | `stages` | Directory that contains the stage units. |
@@ -33,6 +38,7 @@ such setting, so it never silently runs something else.
 | `allow_cascade` | boolean | `false` | **UNSAFE.** `prod-plan` refuses a plan in which a unit with changes depends (through a `dependency` block, directly or transitively) on another unit with changes, because the saved plan of the dependent was made against the upstream's old outputs (R52). `true` disables that refusal; the converge check after each apply then catches a dependent that no longer matches the code, but only after the upstream was applied. Land the upstream unit in its own merge instead. |
 | `extra_rules` | list of strings | `[]` | Extra risk-rule files, merged after the packaged rules; a file can only raise a tier (see [the risk gate](../concepts/risk-gate.md#rule-files)). Works with `ayasee changeset --rules` and the `rules` input of the `risk` action. A non-empty list is **not supported by the workflows yet**: they refuse it with "extra_rules: not supported yet" rather than ignore it (R73). |
 | `drift_noise` | map of string to list of strings | `{}` | Resource type to attribute paths ignored when judging drift. Read by `iac-nightly` at the live SHA ([drift](../concepts/drift.md#what-counts-as-drift)). |
+| `identity` | `oidc` or `secrets` | `oidc` | How stage jobs reach the cloud (D7). `oidc` is the Entra OIDC profile: `azure/login` and the `ARM_*` variables, one managed identity per environment, no stored cloud secret. `secrets` skips `azure/login` and leaves `ARM_*` and `DATABRICKS_AUTH_TYPE` empty, for providers that cannot federate with GitHub OIDC. **DEVIATION**: every load prints `DEVIATION: identity: secrets stores provider API tokens as GitHub environment secrets instead of OIDC federation (D7)` to stderr. |
 | `notify.teams` | boolean | `true` | A Teams card is sent whenever the `teams-webhook` secret is set, and skipped otherwise. `false` is **not supported yet** (the workflows refuse it with "notify.teams: not supported yet", R73): to turn Teams off, leave the secret unset. |
 
 ### Derived value
@@ -52,6 +58,7 @@ ledger:
   url: azure-blob://account/container/ledger
 gate: always
 solo_mode: false
+identity: oidc
 allow_cascade: false
 extra_rules:
   - rules/team-rules.yaml
