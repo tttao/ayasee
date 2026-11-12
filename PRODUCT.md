@@ -55,7 +55,7 @@ all runs in the adopter's own GitHub Actions. There is no SaaS, no backend and n
   origin, so they work on GHES and air-gapped Pages.
 - **The snapshot carries counts, addresses and links only.** It has no plan values, finding details
   or resource attributes. A renderer refuses a snapshot with any other `schema` value.
-- Status: pre-alpha. The first release candidate is `v0.1.0-rc.1`, and governance is not settled. Known
+- Status: pre-alpha. The first release candidate is `v0.1.0-rc.2`, and governance is not settled. Known
   limitations are listed in `docs/concepts/architecture.md#known-limitations`.
 
 ## Brand Commitments

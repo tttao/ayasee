@@ -22,7 +22,7 @@ your own Actions, with OIDC identities and no stored cloud secrets.
 { .ay-actions }
 
 <p class="ay-status"><strong>Status: pre-alpha.</strong> Implemented and tested; first release
-candidate <code>v0.1.0-rc.1</code>. Read the <a href="docs/concepts/architecture/#known-limitations">known limitations</a>
+candidate <code>v0.1.0-rc.2</code>. Read the <a href="docs/concepts/architecture/#known-limitations">known limitations</a>
 before you adopt it.</p>
 
 </div>

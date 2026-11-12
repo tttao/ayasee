@@ -9,8 +9,8 @@ released version into the GitHub release notes.
 
 ## [0.1.0] - unreleased
 
-First release (pre-alpha), published first as the release candidate `v0.1.0-rc.1`. The date is set
-when the final version is tagged, see [releasing](docs/guides/releasing.md).
+First release (pre-alpha), published first as the release candidate `v0.1.0-rc.2` (the run of
+`v0.1.0-rc.1` failed before publishing anything). The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
 
 ### Added
 
@@ -149,6 +149,10 @@ when the final version is tagged, see [releasing](docs/guides/releasing.md).
 
 ### Changed
 
+- Releases: the maintainer pushes `release/<tag>` with the new `scripts/pin-release.sh`, before the
+  tag; the release workflow makes the same commit and only verifies the pushed branch (parent and
+  tree). A GitHub Actions token cannot push a change to `.github/workflows/`, so the workflow's own
+  push always failed. The `pin` job now needs only `contents: read`.
 - `iac-staged`'s `start-stage` input defaults to empty (the first configured stage) instead of
   `dev`; `dev`, `uat` and `prod-plan` keep working with the default stages.
 - `binding-mode: same-job` is allowed for any pre-prod stage, not only `dev` and `uat`; it is still
