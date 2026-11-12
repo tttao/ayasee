@@ -1,5 +1,6 @@
 import { ageLabel, ageWords, safeHttpsUrl, shortSha } from "./format.ts";
 import type { EnvState, Snapshot, Status } from "./status.ts";
+import type { Label } from "./model.ts";
 import { cellStatus, STATUS_META, STATUS_ORDER, statusIcon, svgIcon } from "./status.ts";
 
 export interface SelectDetail {
@@ -18,6 +19,19 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = text;
   return n;
+}
+
+const LABEL_NAMES: Record<string, string> = { solo_mode: "solo mode", identity: "secrets identity" };
+const LABEL_HELP: Record<string, string> = {
+  solo_mode: "solo_mode: one person can merge and approve production (no independent approval, D2)",
+  identity: "identity: secrets: provider tokens are stored as environment secrets instead of OIDC (D7)",
+};
+
+/** An opt-in that weakens a compliant default, shown under the repository name. Text only. */
+function labelTag(l: Label): HTMLElement {
+  const tag = el("span", `repo-label repo-label--${l.kind}`, `${LABEL_NAMES[l.setting] ?? l.setting} · ${l.kind}`);
+  tag.title = LABEL_HELP[l.setting] ?? l.setting;
+  return tag;
 }
 
 export function pill(status: Status): HTMLElement {
@@ -233,6 +247,7 @@ export function renderMatrix(s: Snapshot, root: HTMLElement, now: Date = new Dat
     else name.textContent = r.repo;
     th.append(name);
     if (r.main_sha) th.append(el("span", "main-sha", shortSha(r.main_sha)));
+    for (const l of r.labels ?? []) th.append(labelTag(l));
     tr.append(th);
     const line: (HTMLButtonElement | null)[] = [];
     grid.push(line);

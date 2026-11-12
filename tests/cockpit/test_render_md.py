@@ -430,3 +430,31 @@ def test_issue_mode_needs_a_repo(snap_file, gh_env):
     assert (
         cli.main(["cockpit", "render-md", "--snapshot", str(snap_file), "--issue-number", "7"]) == 2
     )
+
+
+def test_labels_are_listed_per_repository():
+    from ayasee.cockpit.render_md import render
+
+    snap = {
+        "schema": "ayasee.snapshot/v1",
+        "generated_at": "2026-11-12T00:00:00Z",
+        "repos": [
+            {
+                "repo": "a/one",
+                "main_sha": None,
+                "findings": {},
+                "envs": [],
+                "labels": [
+                    {"kind": "non-compliant", "setting": "solo_mode"},
+                    {"kind": "deviation", "setting": "identity"},
+                ],
+            },
+            {"repo": "a/two", "main_sha": None, "findings": {}, "envs": [], "labels": []},
+            {"repo": "a/three", "main_sha": None, "findings": {}, "envs": []},
+        ],
+    }
+    text = render(snap)
+    assert "- a/one: solo mode (NON-COMPLIANT), secrets identity (DEVIATION)" in text
+    assert "a/two:" not in text.split("Labels")[1] and "a/three:" not in text.split("Labels")[1]
+    snap["repos"][0]["labels"] = []
+    assert "Labels" not in render(snap)

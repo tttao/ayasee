@@ -9,6 +9,17 @@ const good = readFileSync(join(import.meta.dirname, "./fixtures/snapshot.json"),
 const respond = (body: string, ok = true, status = 200) => (async () => ({ ok, status, text: async () => body })) as never;
 
 describe("loadSnapshot", () => {
+  it("accepts labels and rejects malformed ones", () => {
+    const withLabels = (labels: unknown) => {
+      const s = JSON.parse(good);
+      s.repos[0].labels = labels;
+      return s;
+    };
+    expect(validateSnapshot(withLabels([{ kind: "deviation", setting: "identity" }])).repos[0]!.labels).toHaveLength(1);
+    expect(validateSnapshot(withLabels([])).repos[0]!.labels).toEqual([]);
+    for (const bad of [{}, "x", [{ kind: "bad", setting: "identity" }], [{ kind: "deviation" }], [null]])
+      expect(() => validateSnapshot(withLabels(bad))).toThrow(/invalid labels/);
+  });
   it("accepts a valid snapshot", async () => {
     const s = await loadSnapshot("./snapshot.json", respond(good));
     expect(s.repos).toHaveLength(4);

@@ -131,6 +131,15 @@ def _cell(env: Env) -> str:
     return text
 
 
+LABEL_NAMES = {"solo_mode": "solo mode", "identity": "secrets identity"}
+
+
+def _label(item: dict[str, Any]) -> str:
+    setting = str(item.get("setting", "?"))
+    kind = str(item.get("kind", "?")).upper()
+    return f"{escape_md(LABEL_NAMES.get(setting, setting))} ({escape_md(kind)})"
+
+
 def render(snapshot: dict[str, Any]) -> str:
     repos = [r for r in snapshot.get("repos", []) if isinstance(r, dict)]
     columns = merge_env_order(
@@ -162,6 +171,12 @@ def render(snapshot: dict[str, Any]) -> str:
         if href:
             text += f" ({_link('code scanning', href)})"
         lines.append(text)
+    labelled = [r for r in repos if isinstance(r.get("labels"), list) and r["labels"]]
+    if labelled:
+        lines += ["", "Labels (opt-ins that weaken a compliant default):", ""]
+        for r in labelled:
+            text = ", ".join(_label(x) for x in r["labels"] if isinstance(x, dict))
+            lines.append(f"- {escape_md(r.get('repo', '?'))}: {text}")
     errors = [r for r in repos if r.get("error")]
     if errors:
         lines += ["", "Errors:", ""]

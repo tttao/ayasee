@@ -9,6 +9,9 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const RESULTS = ["applied", "failed", "no_changes", "unknown"];
 const isCount = (v: unknown) => v === null || (typeof v === "number" && Number.isInteger(v) && v >= 0);
 const isBoolOrNull = (v: unknown) => v === null || typeof v === "boolean";
+const LABEL_KINDS = ["non-compliant", "deviation"];
+const isLabel = (v: unknown) =>
+  isObj(v) && LABEL_KINDS.includes(v.kind as string) && typeof v.setting === "string" && v.setting !== "";
 
 function checkEnv(e: Record<string, unknown>): void {
   const bad = (what: string) => new SnapshotError(`The snapshot has an invalid ${what}.`);
@@ -32,6 +35,8 @@ export function validateSnapshot(v: unknown): Snapshot {
       throw new SnapshotError("The snapshot contains a malformed repo entry.");
     if (!isObj(r.findings) || !isCount(r.findings.critical ?? null) || !isCount(r.findings.high ?? null))
       throw new SnapshotError("The snapshot has invalid findings counts.");
+    if (r.labels !== undefined && !(Array.isArray(r.labels) && r.labels.every(isLabel)))
+      throw new SnapshotError("The snapshot has invalid labels.");
     for (const e of r.envs) {
       if (!isObj(e) || typeof e.env !== "string") throw new SnapshotError("The snapshot contains a malformed environment entry.");
       checkEnv(e);

@@ -118,6 +118,9 @@ p.summary { color: var(--muted); }
 .matrix thead th.repo-head { z-index: 3; }
 .repo-name { display: block; font-weight: 600; overflow-wrap: break-word; }
 .main-sha { display: block; color: var(--muted); font: 0.8rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.repo-label { display: inline-block; margin: 0.2rem 0.25rem 0 0; padding: 0 0.35rem; border-radius: 3px; font-size: 0.75rem; line-height: 1.4; }
+.repo-label--non-compliant { background: var(--err-bg); color: var(--err-text); }
+.repo-label--deviation { background: var(--warn-bg); color: var(--warn-text); }
 .env-cell { min-width: 9.5rem; color: var(--muted); }
 .findings { white-space: nowrap; font-size: 0.9rem; }
 .findings--critical { font-weight: 700; color: var(--err-text); }
