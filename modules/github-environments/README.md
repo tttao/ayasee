@@ -16,6 +16,12 @@ Every environment sets `prevent_self_review = true` and `can_admins_bypass = fal
 `prod_reviewers` and `breakglass_reviewers` must be non-empty, and the break-glass set must differ
 from the prod set.
 
+`solo_mode` (default `false`) is the bootstrap side of `solo_mode: true` in `.ayasee.yaml`, and
+is **NON-COMPLIANT** in the same way: it allows `prod_reviewers` and `breakglass_reviewers` to be the
+same person and turns `prevent_self_review` off on `prod`, `prod-breakglass` and `prod-pr-plan`, so
+that person can approve their own change. Reviewers are still required and admins still cannot
+bypass, so every prod apply still waits for a deliberate approval.
+
 `shared_units_pr_plan` (default `false`) adds `prod-pr-plan`, where `iac-pr` plans the shared prod
 units of a pull request read-only ([shared units](../../docs/concepts/pr-checks.md#shared-units)).
 

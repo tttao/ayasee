@@ -30,6 +30,8 @@ locals {
     local.pr_plan,
   )
 
+  self_reviewed = ["prod", "prod-breakglass", "prod-pr-plan"]
+
   main_only = { for k, v in local.environments : k => v if !contains(keys(local.pr_plan), k) }
 
   variables = merge([
@@ -46,9 +48,10 @@ locals {
 resource "github_repository_environment" "this" {
   for_each = local.environments
 
-  repository          = var.repository
-  environment         = each.key
-  prevent_self_review = true
+  repository  = var.repository
+  environment = each.key
+  # solo_mode (NON-COMPLIANT): the one maintainer approves their own prod change
+  prevent_self_review = !(var.solo_mode && contains(local.self_reviewed, each.key))
   can_admins_bypass   = false
 
   dynamic "reviewers" {

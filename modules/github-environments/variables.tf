@@ -40,11 +40,11 @@ variable "breakglass_reviewers" {
   }
 
   validation {
-    condition = !(
+    condition = var.solo_mode || !(
       toset(var.breakglass_reviewers.teams) == toset(var.prod_reviewers.teams) &&
       toset(var.breakglass_reviewers.users) == toset(var.prod_reviewers.users)
     )
-    error_message = "breakglass_reviewers must differ from prod_reviewers."
+    error_message = "breakglass_reviewers must differ from prod_reviewers (unless solo_mode)."
   }
 }
 
@@ -56,6 +56,12 @@ variable "variables" {
 
 variable "shared_units_pr_plan" {
   description = "Create prod-pr-plan: the environment of the iac-pr job that plans shared prod units (shared_units in .ayasee.yaml) read-only. It accepts pull-request branches and carries prod_reviewers, so a prod reviewer approves before PR code runs with the read-only prod identity."
+  type        = bool
+  default     = false
+}
+
+variable "solo_mode" {
+  description = "NON-COMPLIANT single-maintainer setup, to match solo_mode: true in .ayasee.yaml (DORA RTS 2024/1774 Art. 17(1)(b)). Lets prod_reviewers and breakglass_reviewers be the same person and turns prevent_self_review off on prod, prod-breakglass and prod-pr-plan, so that person can approve their own change. Reviewers are still required and admins still cannot bypass."
   type        = bool
   default     = false
 }

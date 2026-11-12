@@ -19,6 +19,14 @@ released version into the GitHub release notes.
   set per environment, and the tunnel ingress and Access application as `shared_units`. Its README
   gives the token scopes per environment and the worked no-cloud ledger setup.
 
+- The solo-maintainer path, end to end (#1): `solo_mode` in the `github-environments` module lets
+  the prod and break-glass reviewers be the same person and turns `prevent_self_review` off on
+  `prod`, `prod-breakglass` and `prod-pr-plan` (reviewers stay required, no admin bypass); without
+  it the module refused a single maintainer outright. A new e2e scenario, `solo`, checks the
+  NON-COMPLIANT label, a self-approved prod gate with the maintainer recorded as approver, and a
+  self-approved break-glass with its post-approval issue. `Sandbox.review(as_self=True)`,
+  `Sandbox.login` and `Sandbox.read_file` support it.
+
 ### Fixed
 
 - The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that

@@ -122,6 +122,7 @@ class Sandbox:
         poll_start: float = 2.0,
         poll_max: float = 30.0,
     ) -> None:
+        self._login: str | None = None
         self.gh = gh
         self.approver_gh = approver_gh
         self.repo = check_repo(repo)
@@ -305,12 +306,25 @@ class Sandbox:
 
         return self._poll(f"run {run_id} to wait for environment {env}", timeout, probe)
 
-    def review(self, run_id: int, env: str, approve: bool) -> None:
-        """Approve or reject the ``env`` gate of a run as the second identity."""
-        for d in self.approver_gh.pending_deployments(self.repo, run_id):
+    @property
+    def login(self) -> str:
+        """Login of the identity that pushes and merges (E2E_TOKEN)."""
+        if self._login is None:
+            self._login = self.gh.current_login()
+        return self._login
+
+    def read_file(self, path: str, ref: str = "main") -> str | None:
+        return self.gh.get_file(self.repo, path, ref)
+
+    def review(self, run_id: int, env: str, approve: bool, *, as_self: bool = False) -> None:
+        """Approve or reject the ``env`` gate of a run as the second identity, or with
+        ``as_self`` as the identity that pushed (solo mode: GitHub refuses it unless the
+        environment has ``prevent_self_review`` off)."""
+        gh = self.gh if as_self else self.approver_gh
+        for d in gh.pending_deployments(self.repo, run_id):
             environment = d.get("environment", {})
             if environment.get("name") == env:
-                self.approver_gh.review_pending_deployments(
+                gh.review_pending_deployments(
                     self.repo,
                     run_id,
                     [int(environment["id"])],
