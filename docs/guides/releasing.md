@@ -12,7 +12,7 @@ false, and every write step requires a tag ref.
 | Wheel and sdist | GitHub release assets and PyPI (`ayasee`) |
 | Cockpit site tarball | GitHub release asset |
 | Build provenance attestation for each of the three files | GitHub attestations |
-| Release branch `release/<tag>` with one extra commit that pins the own-action references | the repository |
+| Release branch `release/<tag>` with one extra commit that pins the own-action references, pushed by the maintainer and verified by the workflow | the repository |
 | Release notes naming both SHAs, with the CHANGELOG section | the GitHub release |
 
 Two commits matter. The **source SHA** is the tagged commit, the code that is released. The
@@ -71,7 +71,7 @@ uv build --out-dir /tmp/dist && unzip -l /tmp/dist/*.whl | grep rules/databricks
 
 ## 4. One-time repository setup
 
-Mandatory, because the pin job pushes a branch and the workflow trusts the tag:
+Mandatory, because adopters pin a commit on `release/<tag>` and the workflow trusts the tag:
 
 - **Tag ruleset on `v*`**: only maintainers can create tags, and nobody can move or delete one.
 - **Branch protection on `release/*`**: no deletion and no force push. The release SHA that
@@ -81,15 +81,27 @@ Mandatory, because the pin job pushes a branch and the workflow trusts the tag:
 - **PyPI trusted publisher** for the project `ayasee`: owner and repository of this
   repository, workflow `release.yml`, environment `pypi`. No API token is ever created or stored.
 
-## 5. Push the tag
+## 5. Push the release branch, then the tag
+
+The release commit rewrites `.github/workflows/`, and GitHub never lets an Actions token push such
+a change, so the maintainer pushes it (a token with the `workflow` scope, or SSH). The workflow
+makes the same commit and refuses unless the pushed one has the tagged commit as parent and the
+same tree.
 
 ```bash
 git switch main && git pull --ff-only
-git tag -s v0.1.0 -m "ayasee v0.1.0"
+scripts/pin-release.sh tttao/ayasee v0.1.0   # creates release/v0.1.0 at main + one pin commit
+git push origin release/v0.1.0
+git switch main
+git tag -s v0.1.0 -m "ayasee v0.1.0"          # -a when no signing key is set up
 git push origin v0.1.0
 ```
 
-Try `v0.1.0-rc.1` first; a tag with a hyphen is published as a pre-release.
+Try a release candidate (`v0.1.0-rc.N`) first; a tag with a hyphen is published as a pre-release.
+A `v*` tag cannot be moved or deleted (the tag ruleset): when a release run fails after the tag is
+pushed, fix the cause on `main` and release the next version. `v0.1.0-rc.1` is such a tag: its run
+failed at the pin step, which then still tried to push the release commit itself, and it has no
+release.
 
 ## 6. Approve the pypi environment
 
@@ -153,7 +165,8 @@ An estate whose runners cannot reach github.com keeps a mirror and pins the mirr
 ## If something fails
 
 - **Provenance gate fails**: the confirmation is incomplete. Nothing was built.
-- **Version mismatch**: delete the tag locally and remotely, fix `__version__`, tag again.
-- **A job after `pin` fails**: `release/<tag>` may already exist. Delete the branch before a
-  re-run, or bump to the next version.
+- **Version mismatch** or **`release/<tag>` missing or different**: the tag cannot be moved or
+  deleted. Fix the cause and release the next version (for a release candidate, the next `rc`).
+- **A job after `pin` fails**: re-run the failed jobs; `release/<tag>` is not touched by the
+  workflow. A `release/*` branch cannot be deleted or force-pushed (the branch ruleset).
 - **PyPI rejected**: check the trusted publisher settings (owner, repository, workflow, environment).
