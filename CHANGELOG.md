@@ -7,7 +7,14 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+## [0.1.0] - unreleased
+
+First release (pre-alpha), published first as the release candidate `v0.1.0-rc.1`. The date is set
+when the final version is tagged, see [releasing](docs/guides/releasing.md).
+
 ### Added
+
+#### Provider-neutral profile, monorepos and shared units
 
 - `iac-staged` runs a configurable stage list (issue #1): `[<first>, <pre-prod>, prod]` or
   `[<pre-prod>, prod]`, with any pre-prod names. The `dev` and `uat` jobs are the two pre-prod
@@ -64,40 +71,6 @@ released version into the GitHub release notes.
   [the e2e README](e2e/README.md#ephemeral-sandbox-one-command-no-cloud).
 - [`docs/governance/decisions.md`](docs/governance/decisions.md): the design decisions D1 to D14
   that the docs and the code cite.
-
-### Changed
-
-- `iac-staged`'s `start-stage` input defaults to empty (the first configured stage) instead of
-  `dev`; `dev`, `uat` and `prod-plan` keep working with the default stages.
-- `binding-mode: same-job` is allowed for any pre-prod stage, not only `dev` and `uat`; it is still
-  refused for `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` and `drift-*`.
-
-- The licence is settled: Apache-2.0, stated in
-  [`docs/governance/PROVENANCE.md`](docs/governance/PROVENANCE.md). `scripts/check-provenance.sh`,
-  the first job of the release, now checks that this statement, `pyproject.toml` and `LICENSE`
-  agree and that `NOTICE` is present. `CONTRIBUTING.md` states the licence of contributions.
-
-### Fixed
-
-- `python -m e2e.ephemeral up` sets `AYASEE_LEDGER_URL` on the `prod-breakglass` environment.
-  Break-glass reads the ledger URL from its environment only, so it failed at its first step in an
-  ephemeral sandbox.
-- `state-sync.sh` resolves a relative state directory against the hook directory, not the
-  repository top.
-- Documentation links to a report that is not part of the repository are gone.
-
-- The e2e fixture's `state-sync.sh` resolved git paths against the Terragrunt hook directory
-  (`.terragrunt-cache/...`), so restoring saved state failed and every converge check after the
-  first apply broke. Found by the first live sandbox run.
-- The setup and policy actions retry tool downloads for about 90 seconds instead of 7: GitHub
-  release downloads return 504 for minutes at a time.
-
-## [0.1.0] - unreleased
-
-First release (pre-alpha). The date is set when the version is bumped, see
-[releasing](docs/guides/releasing.md).
-
-### Added
 
 #### Pipeline
 
@@ -173,6 +146,33 @@ First release (pre-alpha). The date is set when the version is bumped, see
 
 - Concepts, guides, reference, comparison, DORA mapping and a Databricks on Azure example
   repository.
+
+### Changed
+
+- `iac-staged`'s `start-stage` input defaults to empty (the first configured stage) instead of
+  `dev`; `dev`, `uat` and `prod-plan` keep working with the default stages.
+- `binding-mode: same-job` is allowed for any pre-prod stage, not only `dev` and `uat`; it is still
+  refused for `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` and `drift-*`.
+
+- The licence is settled: Apache-2.0, stated in
+  [`docs/governance/PROVENANCE.md`](docs/governance/PROVENANCE.md). `scripts/check-provenance.sh`,
+  the first job of the release, now checks that this statement, `pyproject.toml` and `LICENSE`
+  agree and that `NOTICE` is present. `CONTRIBUTING.md` states the licence of contributions.
+
+### Fixed
+
+- `python -m e2e.ephemeral up` sets `AYASEE_LEDGER_URL` on the `prod-breakglass` environment.
+  Break-glass reads the ledger URL from its environment only, so it failed at its first step in an
+  ephemeral sandbox.
+- `state-sync.sh` resolves a relative state directory against the hook directory, not the
+  repository top.
+- Documentation links to a report that is not part of the repository are gone.
+
+- The e2e fixture's `state-sync.sh` resolved git paths against the Terragrunt hook directory
+  (`.terragrunt-cache/...`), so restoring saved state failed and every converge check after the
+  first apply broke. Found by the first live sandbox run.
+- The setup and policy actions retry tool downloads for about 90 seconds instead of 7: GitHub
+  release downloads return 504 for minutes at a time.
 
 ### Known limitations
 
