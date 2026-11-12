@@ -138,3 +138,79 @@ def test_cli_prints_comma_list_or_all(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "ALL\n"
     assert cli.main(["changed-units", *args[1:2], head, *args[3:4], head, *args[5:]]) == 0
     assert capsys.readouterr().out == "\n"
+
+
+def test_classify_ignores_files_outside_the_iac_root(tmp_path):
+    (tmp_path / "infra/iac/stages/dev/app").mkdir(parents=True)
+    (tmp_path / "infra/iac/stages/dev/app/terragrunt.hcl").write_text("")
+    isu = _is_unit(tmp_path)
+
+    def cls(files):
+        return classify(files, "infra/iac/stages", "dev", isu, iac_root="infra/iac")
+
+    # application code beside the estate never changes infrastructure
+    assert cls(["server/src/a.py", "web/Dockerfile", ".github/workflows/app.yml"]) == []
+    assert cls(["server/src/a.py", "infra/iac/stages/dev/app/main.tf"]) == ["app"]
+    # inside the IaC root, the fail-safe stays: modules, root.hcl, other stages
+    assert cls(["server/src/a.py", "infra/iac/modules/m/main.tf"]) is ALL
+    assert cls(["infra/iac/root.hcl"]) is ALL
+    assert cls(["infra/iac/stages/prod/app/main.tf"]) is ALL
+    # a sibling directory that only shares the prefix is outside
+    assert cls(["infra/iacx/main.tf"]) == []
+    # the configuration file always widens, wherever it lives
+    assert cls([".ayasee.yaml"]) is ALL
+    assert (
+        classify(
+            ["cfg/ayasee.yaml"],
+            "infra/iac/stages",
+            "dev",
+            isu,
+            iac_root="infra/iac",
+            config_path="cfg/ayasee.yaml",
+        )
+        is ALL
+    )
+    assert (
+        classify(
+            ["cfg/ayasee.yaml"],
+            "infra/iac/stages",
+            "dev",
+            isu,
+            iac_root="infra/iac",
+            config_path="./cfg/ayasee.yaml",
+        )
+        is ALL
+    )
+
+
+def test_default_iac_root_keeps_the_whole_repository_in_scope(tmp_path):
+    (tmp_path / "stages/dev/app").mkdir(parents=True)
+    (tmp_path / "stages/dev/app/terragrunt.hcl").write_text("")
+    assert classify(["server/src/a.py"], "stages", "dev", _is_unit(tmp_path)) is ALL
+    assert classify(["server/src/a.py"], "stages", "dev", _is_unit(tmp_path), iac_root=".") is ALL
+
+
+def test_cli_accepts_iac_root_and_config_path(tmp_path, monkeypatch, capsys):
+    def git(*a):
+        return subprocess.run(
+            ["git", "-C", tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q")
+    unit = tmp_path / "infra/iac/stages/dev/app"
+    unit.mkdir(parents=True)
+    (unit / "terragrunt.hcl").write_text("")
+    (tmp_path / "app.py").write_text("a")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    monkeypatch.chdir(tmp_path)
+    base, head = _commit(git, tmp_path, {"app.py": "b"})
+    common = ["--units-root", "infra/iac/stages", "--env", "dev", "--iac-root", "infra/iac"]
+    assert cli.main(["changed-units", "--base", base, "--head", head, *common]) == 0
+    assert capsys.readouterr().out == "\n"
+    base, head = _commit(git, tmp_path, {"app.py": "c", "infra/iac/stages/dev/app/x.tf": "x"})
+    assert cli.main(["changed-units", "--base", base, "--head", head, *common]) == 0
+    assert capsys.readouterr().out == "app\n"

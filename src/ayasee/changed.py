@@ -7,12 +7,17 @@ Prints a comma-separated list of unit names (a unit's name is its path below
 file that belongs to no unit (a removed unit, a shared file), or a diff that cannot be computed.
 Documentation-only files (``*.md``, ``docs/**``, ``LICENSE``) are ignored (R38): a PR that
 changes nothing else gives the empty result, and in a mixed PR they do not widen it.
+
+In a monorepo, ``--iac-root`` names the directory that holds the estate (``root.hcl``, the
+modules and the units root). A changed file outside it is application code and is ignored the
+same way, except the configuration file (``--config-path``), which always gives ``ALL``.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import posixpath
 import re
 import subprocess
 from collections.abc import Callable
@@ -26,6 +31,7 @@ IGNORABLE_NAMES = ("LICENSE",)
 ALL = None  # classify()/changed_units() return this when every unit must be planned
 _REV = re.compile(r"^[0-9a-fA-F]{7,64}$")
 UNIT_FILE = "terragrunt.hcl"
+DEFAULT_CONFIG = ".ayasee.yaml"
 
 
 def _ignorable(f: str) -> bool:
@@ -42,16 +48,23 @@ def classify(
     units_root: str,
     env: str,
     is_unit_dir: Callable[[str], bool],
+    iac_root: str = ".",
+    config_path: str = DEFAULT_CONFIG,
 ) -> list[str] | None:
     """Unit names touched by ``files``; ``ALL`` (None) when any file cannot be tied to a unit.
 
     ``is_unit_dir(rel)`` says whether the repository-relative directory ``rel`` is a unit.
+    Files outside ``iac_root`` are ignored, except ``config_path``.
     """
     prefix = PurePosixPath(units_root) / env
+    root = PurePosixPath(posixpath.normpath(iac_root))
+    config = PurePosixPath(posixpath.normpath(config_path))
     names: set[str] = set()
     for f in files:
         path = PurePosixPath(f)
-        if _ignorable(f):
+        if path == config:
+            return ALL
+        if _ignorable(f) or not path.is_relative_to(root):
             continue
         if not path.is_relative_to(prefix) or path == prefix:
             return ALL
@@ -86,18 +99,37 @@ def _diff_files(base: str, head: str) -> list[str] | None:
     return [f.decode("utf-8", "surrogateescape") for f in proc.stdout.split(b"\0") if f]
 
 
-def changed_units(base: str, head: str, units_root: str, env: str) -> list[str] | None:
+def changed_units(
+    base: str,
+    head: str,
+    units_root: str,
+    env: str,
+    iac_root: str = ".",
+    config_path: str = DEFAULT_CONFIG,
+) -> list[str] | None:
     """Changed units of ``env`` between ``base`` and ``head`` (run in the checked-out head)."""
     files = _diff_files(base, head)
     if files is None:
         return ALL
     return classify(
-        files, units_root, env, lambda rel: os.path.isfile(os.path.join(rel, UNIT_FILE))
+        files,
+        units_root,
+        env,
+        lambda rel: os.path.isfile(os.path.join(rel, UNIT_FILE)),
+        iac_root=iac_root,
+        config_path=config_path,
     )
 
 
 def _run(args: argparse.Namespace) -> int:
-    units = changed_units(args.base, args.head, args.units_root.strip("/"), args.env)
+    units = changed_units(
+        args.base,
+        args.head,
+        args.units_root.strip("/"),
+        args.env,
+        iac_root=args.iac_root.rstrip("/") or ".",
+        config_path=args.config_path,
+    )
     print("ALL" if units is ALL else ",".join(units))
     return 0
 
@@ -107,6 +139,16 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--head", required=True, help="head commit SHA")
     parser.add_argument("--units-root", required=True)
     parser.add_argument("--env", required=True)
+    parser.add_argument(
+        "--iac-root",
+        default=".",
+        help="directory that holds the estate; changes outside it are ignored (default: .)",
+    )
+    parser.add_argument(
+        "--config-path",
+        default=DEFAULT_CONFIG,
+        help="the ayasee configuration file; a change to it always plans every unit",
+    )
     parser.set_defaults(handler=_run)
 
 

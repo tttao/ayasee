@@ -37,6 +37,12 @@ released version into the GitHub release notes.
 - A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
   stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
   remains the ledger that needs no cloud.
+- `iac_root` in `.ayasee.yaml` (default `.`) for monorepos where the IaC sits beside application
+  code (#4). The `iac-pr` format checks, Trivy and Checkov, and the nightly rescan, are scoped to
+  it; `ayasee changed-units --iac-root DIR --config-path FILE` ignores changes outside it, so an
+  application-only pull request plans nothing. `units_root` must be inside `iac_root`, and both
+  must be relative paths inside the repository. `ayasee sarif-scrub --uri-prefix DIR` turns the
+  scanners' `iac_root`-relative paths back into repository paths.
 
 - A documentation site on GitHub Pages, <https://tttao.github.io/ayasee/>: the `docs` workflow
   assembles the repository's Markdown with `scripts/build-docs-site.py` and builds it with mkdocs

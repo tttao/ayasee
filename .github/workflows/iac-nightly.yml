@@ -300,14 +300,21 @@ jobs:
       - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
-      - name: Prepare the SARIF directory
-        run: mkdir -p "$RUNNER_TEMP/sarif"
+      - id: config
+        name: Read the IaC root and prepare the SARIF directory
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # written to a file first so a configuration error fails the step
+          ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
+          echo "iac-root=$(jq -r '.iac_root' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/sarif"
       - id: trivy
         name: Trivy config scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
-          scan-ref: .
+          scan-ref: ${{ steps.config.outputs.iac-root }}
           severity: HIGH,CRITICAL
           limit-severities-for-sarif: "true"
           exit-code: "0" # findings are reported as alerts, they do not fail the nightly run
@@ -318,23 +325,29 @@ jobs:
         env:
           SARIF_IN: ${{ runner.temp }}/sarif/trivy.raw.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/trivy.sarif
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT"
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - id: checkov
         name: Checkov
         env:
           CHECKOV_VERSION: ${{ inputs.checkov-version }}
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
         run: |
           args=()
           if [ -f .ayasee/checkov.baseline ]; then
             args+=(--baseline .ayasee/checkov.baseline)
           fi
-          uvx "checkov@$CHECKOV_VERSION" --directory . --framework terraform github_actions \
+          # same scope as iac-pr: the workflows are judged only when the repository is the estate
+          frameworks=(terraform)
+          if [ "$IAC_ROOT" = . ]; then frameworks+=(github_actions); fi
+          uvx "checkov@$CHECKOV_VERSION" --directory "$IAC_ROOT" --framework "${frameworks[@]}" \
             --output sarif --output-file-path "$RUNNER_TEMP/sarif/checkov" --quiet --soft-fail "${args[@]}"
       - name: Scrub the Checkov SARIF
         env:
           SARIF_IN: ${{ runner.temp }}/sarif/checkov/results_sarif.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/checkov.sarif
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT"
+          IAC_ROOT: ${{ steps.config.outputs.iac-root }}
+        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - name: Upload the Trivy SARIF
         uses: github/codeql-action/upload-sarif@f3bbb05694c2f74569081c28664c0866d64dec21 # v4.39.3
         with:

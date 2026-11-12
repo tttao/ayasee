@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import sys
 from dataclasses import asdict, dataclass, field
@@ -57,6 +58,7 @@ class Config:
     stages: list[str] = field(default_factory=lambda: ["dev", "uat", "prod"])
     engine: str = "opentofu"
     terragrunt: bool = True
+    iac_root: str = "."
     units_root: str = "stages"
     ledger: LedgerConfig = field(default_factory=LedgerConfig)
     gate: str = "always"
@@ -107,6 +109,23 @@ def _str_list(value: Any, where: str) -> list[str]:
     return [_str(v, f"{where}[{i}]") for i, v in enumerate(value)]
 
 
+def _rel_dir(value: Any, where: str) -> str:
+    """A repository-relative directory, normalised (``./a/b/`` gives ``a/b``; the root is ``.``)."""
+    text = _str(value, where)
+    if not text:
+        raise ConfigError(f"{where}: must not be empty")
+    if text.startswith("/"):
+        raise ConfigError(f"{where}: must be relative to the repository root, got {text!r}")
+    norm = posixpath.normpath(text)
+    if norm == ".." or norm.startswith("../"):
+        raise ConfigError(f"{where}: must stay inside the repository, got {text!r}")
+    return norm
+
+
+def _inside(path: str, root: str) -> bool:
+    return root == "." or path == root or path.startswith(root + "/")
+
+
 def _parse(raw: Any) -> Config:
     top = _mapping(raw, "config", set(Config.__dataclass_fields__))
     cfg = Config()
@@ -123,8 +142,15 @@ def _parse(raw: Any) -> Config:
         cfg.engine = _literal(top["engine"], "engine", ENGINES)
     if "terragrunt" in top:
         cfg.terragrunt = _bool(top["terragrunt"], "terragrunt")
+    if "iac_root" in top:
+        cfg.iac_root = _rel_dir(top["iac_root"], "iac_root")
     if "units_root" in top:
-        cfg.units_root = _str(top["units_root"], "units_root")
+        cfg.units_root = _rel_dir(top["units_root"], "units_root")
+    if cfg.units_root == cfg.iac_root or not _inside(cfg.units_root, cfg.iac_root):
+        raise ConfigError(
+            f"units_root: must be a directory inside iac_root ({cfg.iac_root!r}), "
+            f"got {cfg.units_root!r}"
+        )
     if "ledger" in top:
         section = _mapping(top["ledger"], "ledger", {"url"})
         if section.get("url") is not None:

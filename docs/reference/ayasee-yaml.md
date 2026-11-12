@@ -36,7 +36,8 @@ such setting, so it never silently runs something else.
 | `stages` | list of strings | `[dev, uat, prod]` | Promotion order. Names must be unique, the list must be non-empty and it must contain `prod`. `iac-staged` accepts two or three stages with `prod` last, `[<pre-prod>, prod]` or `[<first>, <pre-prod>, prod]`, and fails the run on any other list (`ayasee config staged`; pre-prod names match `[a-z0-9][a-z0-9_-]*` and are not `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`); see [the staged run](../concepts/staged-run.md#stages). `iac-pr` plans the first stage, `iac-nightly` drifts every listed stage and the cockpit reads its own `stages` from `repos.yaml`. |
 | `engine` | `opentofu` or `terraform` | `opentofu` | IaC engine. `opentofu` binds prod to the exact approved encrypted plan (D1). `terraform` selects the replan fallback, which compares `(address, actions)` plus a hash of non-sensitive `after` values (D1b), in the actions and the CLI. **Not supported by the workflows yet**: every reusable workflow refuses it in its first job with "engine: not supported yet" (R73). See [plan binding](../concepts/plan-binding.md#the-replan-fallback). |
 | `terragrunt` | boolean | `true` | Units are always discovered and driven through Terragrunt. `false` (plain OpenTofu layouts) is **not supported yet**: the workflows refuse it with "terragrunt: not supported yet" (R73). |
-| `units_root` | string | `stages` | Directory that contains the stage units. |
+| `iac_root` | string | `.` | Directory, relative to the repository root, that holds the estate: `root.hcl`, the modules and `units_root`. Set it in a monorepo where the IaC sits beside application code (for example `infra/iac`). The PR and nightly format checks, the Terragrunt validation, Trivy and Checkov are scoped to it, and `changed-units` ignores files outside it (except the configuration file), so an application-only pull request plans nothing. Checkov's `github_actions` framework runs only when `iac_root` is `.`. It must be relative and stay inside the repository. See [monorepos](../concepts/pr-checks.md#monorepos). |
+| `units_root` | string | `stages` | Directory that contains the stage units, relative to the repository root (not to `iac_root`). It must be inside `iac_root`: with `iac_root: infra/iac`, write `units_root: infra/iac/stages`. |
 | `ledger.url` | string or null | `null` | Ledger store URL: `file://`, `git-branch://` or `azure-blob://` ([the ledger](../concepts/ledger.md#stores-and-urls)). The `AYASEE_LEDGER_URL` variable of a GitHub environment takes precedence. |
 | `gate` | `always` or `risky` | `always` | Prod approval gate. `always` requires approval on every prod run (D9). `risky` is accepted by the parser but **not supported**: every reusable workflow rejects it with "gate: risky is not supported yet" (R35). |
 | `solo_mode` | boolean | `false` | Opt-in single-maintainer mode. **NON-COMPLIANT**: it disables independent approval. Every load prints `NON-COMPLIANT: solo_mode disables independent approval (DORA RTS 2024/1774 Art. 17(1)(b))` to stderr (D2), so it appears in the log of every run. The key does not itself change any environment setting; the independent-approval controls are the `prod` environment's reviewers and `prevent_self_review`. |
@@ -59,6 +60,7 @@ such setting, so it never silently runs something else.
 stages: [dev, uat, prod]
 engine: opentofu
 terragrunt: true
+iac_root: .
 units_root: stages
 ledger:
   url: azure-blob://account/container/ledger
