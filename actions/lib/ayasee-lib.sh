@@ -81,7 +81,9 @@ sg_check_incident() {
 }
 
 # sg_check_mode ENV MODE ENCRYPT ENGINE [DRIFT]: the one place that allows or refuses a combination.
-#   same-job       only for dev and uat (plan and apply in one job, no verification).
+#   same-job       only for a pre-prod stage (plan and apply in one job, no verification): never
+#                  prod, nor an environment with a fixed role (prod-plan, prod-breakglass,
+#                  dev-plan, drift-*). Pre-prod stage names come from `stages` (issue #1).
 #   breakglass     only for prod, and only with SG_BREAKGLASS_INCIDENT set to an incident reference
 #                  (ABC-123 or INC123): plan and apply in one job like same-job, for the documented
 #                  emergency path (iac-breakglass.yml, R44).
@@ -100,8 +102,10 @@ sg_check_mode() {
   case "$encrypt" in true | false) ;; *) sg_die "encrypt must be true or false, got: $encrypt" ;; esac
   case "$mode" in
     same-job)
-      [ "$env" = dev ] || [ "$env" = uat ] ||
-        sg_die "binding-mode same-job is only allowed for dev and uat, not $env"
+      case "$env" in
+        prod | prod-plan | prod-breakglass | dev-plan | drift-*)
+          sg_die "binding-mode same-job is only allowed for a pre-prod stage, not $env" ;;
+      esac
       ;;
     breakglass)
       [ "$env" = prod ] || sg_die "binding-mode breakglass is only allowed for prod, not $env"
@@ -121,23 +125,11 @@ sg_check_mode() {
   fi
 }
 
-# sg_setup_encryption TEMPLATE: export TF_ENCRYPTION when SG_ENCRYPT=true, or fail closed.
-# The key source is the Azure Key Vault key (SG_KEY_VAULT_KEY_ID) or, in tests only,
-# AYASEE_TEST_PASSPHRASE; having both is ambiguous and an error. The key URL must not carry
-# a key version (a pinned version would break key rotation) and must be a vault.azure.net
-# host (managed HSM keys are not supported yet).
-sg_setup_encryption() {
-  local tmpl="$1"
-  unset TF_ENCRYPTION
-  [ "${SG_ENCRYPT:-true}" = true ] || return 0
-  if [ -n "${AYASEE_TEST_PASSPHRASE:-}" ] && [ -n "${SG_KEY_VAULT_KEY_ID:-}" ]; then
-    sg_die "both AYASEE_TEST_PASSPHRASE and key-vault-key-id are set; use exactly one"
-  fi
-  if [ -n "${AYASEE_TEST_PASSPHRASE:-}" ]; then
-    [[ "$AYASEE_TEST_PASSPHRASE" =~ ^[A-Za-z0-9_.-]{16,}$ ]] ||
-      sg_die "AYASEE_TEST_PASSPHRASE must be at least 16 chars of [A-Za-z0-9_.-]"
-    TF_ENCRYPTION="key_provider \"pbkdf2\" \"ayasee\" {
-  passphrase = \"${AYASEE_TEST_PASSPHRASE}\"
+# sg_pbkdf2_encryption PASSPHRASE: print a TF_ENCRYPTION body (pbkdf2, aes_gcm, plan enforced).
+# The caller validates PASSPHRASE against a character set that cannot break out of the HCL string.
+sg_pbkdf2_encryption() {
+  printf '%s' "key_provider \"pbkdf2\" \"ayasee\" {
+  passphrase = \"$1\"
 }
 
 method \"aes_gcm\" \"ayasee\" {
@@ -148,6 +140,44 @@ plan {
   method   = method.aes_gcm.ayasee
   enforced = true
 }"
+}
+
+# sg_setup_encryption TEMPLATE: export TF_ENCRYPTION when SG_ENCRYPT=true, or fail closed.
+# SG_KEY_PROVIDER (plan_encryption.key_provider) picks the key source:
+#   azure_vault (default)  the Azure Key Vault key SG_KEY_VAULT_KEY_ID. The key URL must not carry a
+#                          key version (a pinned version would break key rotation) and must be a
+#                          vault.azure.net host (managed HSM keys are not supported yet).
+#   pbkdf2                 the passphrase in AYASEE_PLAN_PASSPHRASE, an environment secret of
+#                          prod-plan, prod and prod-breakglass only: at least 32 characters of
+#                          [A-Za-z0-9+/=_.-] (for example base64 from a random generator).
+# AYASEE_TEST_PASSPHRASE (tests only) replaces either. Any second key source next to the chosen
+# one (a key URL with pbkdf2, a passphrase with azure_vault, the test passphrase with either) is
+# ambiguous and an error.
+sg_setup_encryption() {
+  local tmpl="$1" provider="${SG_KEY_PROVIDER:-azure_vault}"
+  unset TF_ENCRYPTION
+  [ "${SG_ENCRYPT:-true}" = true ] || return 0
+  case "$provider" in azure_vault | pbkdf2) ;; *)
+    sg_die "key-provider must be azure_vault or pbkdf2, got: $provider" ;;
+  esac
+  if [ -n "${AYASEE_TEST_PASSPHRASE:-}" ]; then
+    [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and key-vault-key-id are set; use exactly one"
+    [ -z "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and AYASEE_PLAN_PASSPHRASE are set; use exactly one"
+    [[ "$AYASEE_TEST_PASSPHRASE" =~ ^[A-Za-z0-9_.-]{16,}$ ]] ||
+      sg_die "AYASEE_TEST_PASSPHRASE must be at least 16 chars of [A-Za-z0-9_.-]"
+    TF_ENCRYPTION="$(sg_pbkdf2_encryption "$AYASEE_TEST_PASSPHRASE")"
+  elif [ "$provider" = pbkdf2 ]; then
+    [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
+      sg_die "key-provider pbkdf2 with key-vault-key-id set is ambiguous; unset AYASEE_KEY_VAULT_KEY_ID"
+    [ -n "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
+      sg_die "key-provider pbkdf2 needs AYASEE_PLAN_PASSPHRASE (an environment secret of prod-plan, prod and prod-breakglass)"
+    [[ "$AYASEE_PLAN_PASSPHRASE" =~ ^[A-Za-z0-9+/=_.-]{32,}$ ]] ||
+      sg_die "AYASEE_PLAN_PASSPHRASE must be at least 32 chars of [A-Za-z0-9+/=_.-]"
+    TF_ENCRYPTION="$(sg_pbkdf2_encryption "$AYASEE_PLAN_PASSPHRASE")"
+  elif [ -n "${AYASEE_PLAN_PASSPHRASE:-}" ]; then
+    sg_die "AYASEE_PLAN_PASSPHRASE is set but key-provider is azure_vault; set plan_encryption.key_provider: pbkdf2 or remove the secret"
   elif [ -n "${SG_KEY_VAULT_KEY_ID:-}" ]; then
     local re='^(https://[A-Za-z0-9-]+\.vault\.azure\.net)/keys/([A-Za-z0-9-]+)/?$'
     [[ "$SG_KEY_VAULT_KEY_ID" =~ $re ]] ||

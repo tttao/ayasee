@@ -53,7 +53,8 @@ def test_pr_plan_uses_dev_plan_environment_only(wf):
     plans = [s for s in _steps(wf, "plan-dev") if "/actions/plan@" in _uses(s)]
     assert len(plans) == 1
     with_ = plans[0]["with"]
-    assert with_["env"] == "dev"
+    # the first configured stage (dev by default), issue #1
+    assert with_["env"] == "${{ steps.changed.outputs.stage }}"
     assert with_["binding-mode"] == "same-job" and with_["encrypt"] == "false"
     assert "only-units" in with_
     # no plan file or JSON leaves the runner: the only artifacts are the comment and the SARIF
@@ -192,7 +193,8 @@ def test_login_then_plan_then_policy_then_comment_body(wf):
     assert login < plan < policy < body
     assert not any("ayasee pr-comment" in s.get("run", "") for s in steps)
     pol = steps[policy]["with"]
-    assert pol["stage"] == "dev" and "steps.plan.outputs.json-dir" in pol["plan-json"]
+    assert pol["stage"] == "${{ steps.changed.outputs.stage }}"
+    assert "steps.plan.outputs.json-dir" in pol["plan-json"]
 
 
 def test_comment_body_is_only_the_rendered_summary(wf):
@@ -305,7 +307,10 @@ def test_no_expression_in_run_blocks(wf):
 
 
 def test_workflow_call_only_and_no_secrets_needed(wf):
-    assert "secrets" not in wf[True]["workflow_call"]
+    # only the optional provider tokens of identity: secrets (issue #1)
+    secrets = wf[True]["workflow_call"]["secrets"]
+    assert set(secrets) == {"CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+    assert all(v["required"] is False for v in secrets.values())
     assert "inherit" not in PATH.read_text()
 
 

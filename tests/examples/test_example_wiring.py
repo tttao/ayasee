@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ayasee.config import load_config
+from ayasee.config import load_config, staged_layout
 from ayasee.ledger import open_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -178,8 +178,14 @@ def _called_environments() -> set[str]:
             if env is None:
                 continue
             if "${{" in env:
-                assert env == "drift-${{ matrix.env }}", env
-                found |= {f"drift-{s}" for s in stages}
+                layout = staged_layout(stages, "")
+                if env == "drift-${{ matrix.env }}":
+                    found |= {f"drift-{s}" for s in stages}
+                elif env == "${{ needs.resolve.outputs.first-stage }}":
+                    found |= {layout["first-stage"]} - {""}
+                else:
+                    assert env == "${{ needs.resolve.outputs.pre-prod-stage }}", env
+                    found.add(layout["pre-prod-stage"])
             else:
                 found.add(env)
     return found
@@ -380,9 +386,11 @@ def _conftest(plan: str) -> subprocess.CompletedProcess:
             "test",
             "--no-color",
             "--policy",
-            str(ROOT / "policy" / "databricks"),
+            str(ROOT / "policy"),
             "--namespace",
             "ayasee.databricks",
+            "--namespace",
+            "ayasee.cloudflare",
             "--data",
             str(FIXTURES / "prod.data.json"),
             str(FIXTURES / plan),

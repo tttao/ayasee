@@ -10,9 +10,11 @@
 #   attr_true    optional list of attributes that must be true in `after`
 #                (in `before` when the change has no `after`, e.g. delete/forget)
 #   attr_changed optional list of attributes whose value must differ before vs after
+#   attr_in      optional mapping of attribute to a list of strings; holds when the value in
+#                `before` or in `after` is one of them (used by cloudflare.yaml)
 #
 # A change matches when its type matches, ANY of its actions is in the rule's actions,
-# and every attr_true / attr_changed condition holds. The item tier is the highest tier
+# and every attr_true / attr_changed / attr_in condition holds. The item tier is the highest tier
 # among matched rules. `generic-destroy` is a fallback: it applies only to delete/replace
 # changes that matched no other rule.
 

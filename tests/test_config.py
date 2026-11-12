@@ -189,3 +189,165 @@ def test_check_supported_invalid_config_exit_1(tmp_path, capsys):
 
 def test_unsupported_is_empty_for_defaults():
     assert config.unsupported(Config()) == []
+
+
+# ---- identity profile (issue #1) --------------------------------------------------------
+
+
+def test_identity_defaults_to_oidc_and_is_strict(tmp_path, capsys):
+    assert Config().identity == "oidc"
+    assert load_config(write(tmp_path, "identity: oidc\n")).identity == "oidc"
+    assert capsys.readouterr().err == ""
+    with pytest.raises(ConfigError, match="identity"):
+        load_config(write(tmp_path, "identity: keys\n"))
+
+
+def test_identity_secrets_prints_the_deviation(tmp_path, capsys):
+    cfg = load_config(write(tmp_path, "identity: secrets\n"))
+    assert cfg.identity == "secrets"
+    assert capsys.readouterr().err == config.DEVIATION_SECRETS + "\n"
+    assert config.DEVIATION_SECRETS.startswith("DEVIATION: identity: secrets")
+
+
+def test_cli_show_has_identity(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: secrets\n")
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    assert json.loads(capsys.readouterr().out)["identity"] == "secrets"
+
+
+# ---- iac-staged stage layout (issue #1) -------------------------------------------------
+
+
+def _layout(run_dev, run_uat, first, pre):
+    return {
+        "run-dev": run_dev,
+        "run-uat": run_uat,
+        "first-stage": first,
+        "pre-prod-stage": pre,
+    }
+
+
+@pytest.mark.parametrize(
+    ("stages", "start", "expected"),
+    [
+        (["dev", "uat", "prod"], "", _layout("true", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "dev", _layout("true", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "uat", _layout("false", "true", "dev", "uat")),
+        (["dev", "uat", "prod"], "prod-plan", _layout("false", "false", "dev", "uat")),
+        (["staging", "prod"], "", _layout("false", "true", "", "staging")),
+        (["staging", "prod"], "staging", _layout("false", "true", "", "staging")),
+        (["staging", "prod"], "prod-plan", _layout("false", "false", "", "staging")),
+        (["test", "pre_prod", "prod"], "", _layout("true", "true", "test", "pre_prod")),
+    ],
+)
+def test_staged_layout(stages, start, expected):
+    out = config.staged_layout(stages, start)
+    assert out == {**expected, "order": ",".join(stages)}
+
+
+@pytest.mark.parametrize(
+    ("stages", "start", "match"),
+    [
+        (["prod"], "", "two or three stages"),
+        (["a", "b", "c", "prod"], "", "two or three stages"),
+        (["dev", "prod", "uat"], "", "last"),
+        (["prod-plan", "prod"], "", "reserved"),
+        (["prod-breakglass", "prod"], "", "reserved"),
+        (["dev-plan", "prod"], "", "reserved"),
+        (["drift-dev", "prod"], "", "reserved"),
+        (["Dev", "prod"], "", "stage name"),
+        (["../x", "prod"], "", "stage name"),
+        (["dev x", "prod"], "", "stage name"),
+        (["dev", "uat", "prod"], "prod", "start-stage"),
+        (["dev", "uat", "prod"], "staging", "start-stage"),
+        (["staging", "prod"], "dev", "start-stage"),
+    ],
+)
+def test_staged_layout_refuses(stages, start, match):
+    with pytest.raises(ConfigError, match=match):
+        config.staged_layout(stages, start)
+
+
+def test_cli_staged_prints_github_outputs(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [staging, prod]\n")
+    assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "run-dev=false",
+        "run-uat=true",
+        "first-stage=",
+        "pre-prod-stage=staging",
+        "order=staging,prod",
+    ]
+
+
+def test_cli_staged_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [a, b, c, prod]\n")
+    assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 1
+    cap = capsys.readouterr()
+    assert cap.out == "" and "two or three stages" in cap.err
+
+
+# ---- plan_encryption.key_provider (issue #1) --------------------------------------------
+
+
+def test_key_provider_defaults_to_azure_vault():
+    assert Config().plan_encryption.key_provider == "azure_vault"
+
+
+@pytest.mark.parametrize("provider", ["azure_vault", "pbkdf2"])
+def test_key_provider_accepts_the_wired_providers(tmp_path, provider):
+    cfg = load_config(write(tmp_path, f"plan_encryption:\n  key_provider: {provider}\n"))
+    assert cfg.plan_encryption.key_provider == provider
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "plan_encryption: pbkdf2",
+        "plan_encryption: {key_provider: openbao}",
+        "plan_encryption: {key_provider: aws_kms}",
+        "plan_encryption: {key_provider: 3}",
+        "plan_encryption: {passphrase: x}",
+    ],
+)
+def test_key_provider_rejects_anything_else(tmp_path, text):
+    with pytest.raises(ConfigError, match="plan_encryption"):
+        load_config(write(tmp_path, text + "\n"))
+
+
+def test_cli_show_has_the_key_provider(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "plan_encryption: {key_provider: pbkdf2}\n")
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["plan_encryption"] == {"key_provider": "pbkdf2"}
+
+
+# ---- labels: the deviations a run summary shows (issue #1) ------------------------------
+
+
+def test_labels_are_empty_for_the_defaults():
+    assert config.labels(Config()) == []
+
+
+def test_labels_name_each_deviation():
+    cfg = Config(solo_mode=True, identity="secrets")
+    assert config.labels(cfg) == [config.NON_COMPLIANT, config.DEVIATION_SECRETS]
+    assert config.labels(Config(identity="secrets")) == [config.DEVIATION_SECRETS]
+
+
+def test_cli_labels_prints_one_line_each_on_stdout(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: secrets\nsolo_mode: true\n")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        config.NON_COMPLIANT,
+        config.DEVIATION_SECRETS,
+    ]
+    p = write(tmp_path, "")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_labels_invalid_config_exit_1(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: maybe\n")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 1
+    assert "config error" in capsys.readouterr().err

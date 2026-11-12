@@ -174,6 +174,95 @@ ayasee ledger show --store "azure-blob://<account>.blob.core.windows.net/<contai
 - `breakglass.yml` is the emergency path, see [the DORA mapping](../compliance/dora-art17.md).
 - Optional: `cockpit.yml`, the estate view. Follow [cockpit setup](../cockpit/setup.md).
 
+## Without Azure
+
+The example above is the Azure profile. A repository on another provider changes four things. This
+profile is new and **has not run end to end on GitHub yet**: expect to adjust it.
+
+**Provider tokens instead of OIDC.** Set `identity: secrets` in `.ayasee.yaml`, create
+`CLOUDFLARE_API_TOKEN` (and `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the state bucket) as
+environment secrets of each environment, scoped per environment, and pass them by name from the
+callers. Every run then carries a `DEVIATION:` warning. Read
+[identity: secrets](../concepts/staged-run.md#identity-secrets) for what this costs.
+
+**Plan encryption with a passphrase.** Set the key provider in `.ayasee.yaml` and create one
+environment secret, `AYASEE_PLAN_PASSPHRASE`, on `prod-plan`, `prod` and `prod-breakglass` (never at
+repository or organisation level), then pass it by name from the callers:
+
+```yaml
+# .ayasee.yaml
+plan_encryption:
+  key_provider: pbkdf2
+```
+
+```bash
+passphrase="$(openssl rand -base64 48 | tr -d '\n')"   # 64 characters of [A-Za-z0-9+/=]
+for env in prod-plan prod prod-breakglass; do
+  gh secret set AYASEE_PLAN_PASSPHRASE --env "$env" --body "$passphrase"
+done
+```
+
+```yaml
+# .github/workflows/iac.yml and breakglass.yml
+    secrets:
+      AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}
+```
+
+Leave `AYASEE_KEY_VAULT_KEY_ID` unset: a key URL next to `pbkdf2` is refused as ambiguous. See
+[plan binding](../concepts/plan-binding.md#key-providers).
+
+**State in an S3-compatible bucket.** Replace `root.hcl` with an `s3` backend, keyed per stage and
+unit like the azurerm one. This reference targets an S3-compatible store (MinIO, Scaleway, OVH and
+similar); for AWS S3 itself drop `endpoints`, `use_path_style` and the `skip_*` lines. Locking uses
+`use_lockfile` (a `.tflock` object written with a conditional `PutObject`), so the store must
+support conditional writes and OpenTofu must be 1.10 or later. The backend reads
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; one bucket per stage lets each stage's key reach
+only its own state.
+
+```hcl
+# root.hcl: S3-compatible state backend, one bucket per stage
+locals {
+  # stages/<stage>/<unit>
+  stage = basename(dirname(get_terragrunt_dir()))
+  unit  = basename(get_terragrunt_dir())
+
+  state_bucket_prefix = get_env("AYASEE_STATE_BUCKET_PREFIX", "ayasee-state")
+  state_endpoint      = get_env("AYASEE_STATE_ENDPOINT", "https://s3.example.invalid")
+  state_region        = get_env("AYASEE_STATE_REGION", "us-east-1")
+}
+
+remote_state {
+  backend = "s3"
+
+  # the buckets exist already (created once, by hand or by a bootstrap root); never create them here
+  disable_init = true
+
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite_terragrunt"
+  }
+
+  config = {
+    bucket       = "${local.state_bucket_prefix}-${local.stage}"
+    key          = "${local.stage}/${local.unit}.tfstate"
+    region       = local.state_region
+    use_lockfile = true
+
+    endpoints = {
+      s3 = local.state_endpoint
+    }
+    use_path_style              = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+  }
+}
+```
+
+**Ledger.** Use `github-branch://` (or `git-branch://` with the `ledger-token` secret): it needs no
+cloud at all, and it is the store the cockpit reads. There is no `s3://` ledger store.
+
 ## If something is red
 
 | Symptom | Likely cause |

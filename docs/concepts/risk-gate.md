@@ -10,8 +10,8 @@ Two independent mechanisms work together:
 
 | Mechanism | Question | Effect |
 |---|---|---|
-| **Risk tiers** (`ayasee changeset`, rules in `rules/databricks-azure.yaml`) | How dangerous is this change? | Orders the summary, sets counts for the notification. Never blocks. |
-| **Rego pack** (`policy/databricks/`, conftest) | Is this change allowed at all? | `deny` fails the job before the plan is uploaded. |
+| **Risk tiers** (`ayasee changeset`, rules in `rules/databricks-azure.yaml` and `rules/cloudflare.yaml`) | How dangerous is this change? | Orders the summary, sets counts for the notification. Never blocks. |
+| **Rego packs** (`policy/databricks/`, `policy/cloudflare/`, conftest) | Is this change allowed at all? | `deny` fails the job before the plan is uploaded. |
 
 The code is `src/ayasee/risk.py` and `src/ayasee/changeset.py`.
 
@@ -44,10 +44,31 @@ documentation. They are in `rules/databricks-azure.yaml`.
 | `dbx-unsafe-force-update` | medium | any | any | `force_update` is true |
 | `generic-destroy` | medium | any | delete, replace | Only if no other rule matched |
 
+A second pack, `rules/cloudflare.yaml`, covers Cloudflare edge, DNS and Zero Trust Access. It is
+loaded after the Databricks file, and both always load: a rule only matches its own types. Each
+rule lists the provider v5 type names (`cloudflare_zero_trust_*`, `cloudflare_dns_record`) and the
+v4 ones (`cloudflare_access_*`, `cloudflare_tunnel_*`, `cloudflare_record`); the table shows v5.
+
+| Rule id | Tier | Resource types (v5) | Actions | Condition |
+|---|---|---|---|---|
+| `cf-access-destroy` | critical | `cloudflare_zero_trust_access_application` | delete, replace, forget | |
+| `cf-access` | high | Access applications, policies, groups, identity providers and service tokens | any | |
+| `cf-tunnel-ingress` | high | `cloudflare_zero_trust_tunnel_cloudflared_config`, `cloudflare_zero_trust_tunnel_cloudflared_route` | any | |
+| `cf-firewall-destroy` | critical | `cloudflare_ruleset`, `cloudflare_firewall_rule`, `cloudflare_filter`, `cloudflare_access_rule`, `cloudflare_rate_limit`, `cloudflare_waf_*` | delete, replace, forget | |
+| `cf-firewall` | high | the same | any | |
+| `cf-dns-proxied` | high | `cloudflare_dns_record` | any | `proxied` differs between before and after |
+| `cf-dns-mx` | high | `cloudflare_dns_record` | any | `type` is `MX` before or after |
+| `cf-dns-apex` | high | `cloudflare_dns_record` | any | `name` is `@` before or after (a record named with the full zone name is not recognised) |
+
+These rules come from the provider documentation; they have not been checked against a real
+Cloudflare plan yet.
+
 ### How a change is matched
 
 - A rule matches when the resource type matches (`*` matches any), **any** of the change's actions is
-  in the rule's `actions`, and every `attr_true` and `attr_changed` condition holds. `any` means every
+  in the rule's `actions`, and every `attr_true`, `attr_changed` and `attr_in` condition holds.
+  `attr_in` maps an attribute to a list of strings and holds when the attribute's value in `before`
+  or in `after` is one of them. `any` means every
   action except `no-op` and `read`.
 - A replace is `delete` plus `create`, so a replace matches rules for either. The item's tier is the
   **highest** tier among the rules that matched.
@@ -59,13 +80,20 @@ documentation. They are in `rules/databricks-azure.yaml`.
 
 ## Principal deltas
 
-For `databricks_grants`, `databricks_grant`, `databricks_permissions` and `azurerm_role_assignment`
-the change set lists **who gains and who loses access**, computed from the before and after values:
+For `databricks_grants`, `databricks_grant`, `databricks_permissions`, `azurerm_role_assignment`
+and the Cloudflare Access policies and groups the change set lists **who gains and who loses
+access**, computed from the before and after values:
 
 - `databricks_grants`: pairs of principal and privilege from each `grant` block.
 - `databricks_grant`: principal and privileges.
 - `databricks_permissions`: user, group or service principal and permission level.
 - `azurerm_role_assignment`: principal ID and role.
+- `cloudflare_zero_trust_access_policy` and `cloudflare_zero_trust_access_group` (and the v4
+  `cloudflare_access_policy` and `cloudflare_access_group`): each condition of `include`,
+  `exclude` and `require` as a principal such as `email:alice@example.com`, `group:<id>`,
+  `email_domain:example.com` or `everyone`, paired with `<decision>:<section>` (for example
+  `allow:include`; a group has no decision and shows `member:include`). Inline `policies` of a v5
+  Access application are not expanded.
 
 `databricks_grants` is authoritative: an "update in place" can silently revoke access from other teams.
 That is why a change that removes principals is `high` and lists the lost principals at the gate.
@@ -117,7 +145,8 @@ An adopter can add rules or tighten existing ones with an extra rules file, usin
   actions: [delete, replace]
 ```
 
-The loader (`load_rules`) applies the packaged file first and then each extra file in order:
+The loader (`load_rules`) applies the packaged files first (`databricks-azure.yaml`, then
+`cloudflare.yaml`) and then each extra file in order:
 
 - A later file may add rules, or replace a rule with the same id **at the same or a higher tier**.
 - **A rule file can only raise a tier.** A rule that lowers an existing one is rejected with
@@ -130,7 +159,8 @@ workflows do not forward it yet, see [known limitations](architecture.md#known-l
 
 ## The Rego pack
 
-The Rego pack answers a different question. It runs `conftest` on the plan JSON **inside the job that
+The Rego packs answer a different question. The policy action runs `conftest` with every pack
+(namespaces `ayasee.databricks` and `ayasee.cloudflare`) on the plan JSON **inside the job that
 made the plan**, so the JSON never leaves the job, and a `deny` fails the job.
 
 | Where | Stage in the data file | Effect |
@@ -142,8 +172,11 @@ made the plan**, so the JSON never leaves the job, and a `deny` fails the job.
 Six rules, `SG-DBX-001` to `SG-DBX-006`, cover the Unity Catalog and job-permission gaps that
 Trivy and Checkov leave: `ALL_PRIVILEGES` to `account users`, non-isolated catalogs, public workspace
 network access, `skip_validation`, metastore destruction and job permissions without a manager. Some
-are `deny` in prod and `warn` elsewhere. Messages name the resource address only. The workflows pass no flags, so `allow-metastore-destroy` cannot be set from them. Rule details, the
-data file and how to run it locally are in [the policy pack reference](../reference/policy-pack.md).
+are `deny` in prod and `warn` elsewhere. Messages name the resource address only. The workflows pass no flags, so `allow-metastore-destroy` cannot be set from them.
+Five Cloudflare rules, `SG-CF-001` to `SG-CF-005`, deny a proxied record switched to DNS-only in
+prod and warn about removed Access applications and firewall rules, new tunnel ingress and MX or
+apex changes. Rule details, the data file and how to run the packs locally are in
+[the policy pack reference](../reference/policy-pack.md).
 
 Trivy and Checkov remain in place for azurerm resources and workflow files. They have two Databricks
 checks between them, both on `azurerm_databricks_workspace`, and none for the `databricks` provider.

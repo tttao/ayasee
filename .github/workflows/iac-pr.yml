@@ -34,6 +34,25 @@ on:
         type: string
         required: false
         default: 3.4.3
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
 
 permissions: {}
 
@@ -179,11 +198,6 @@ jobs:
       group: ayasee-${{ github.repository }}-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      DATABRICKS_AUTH_TYPE: github-oidc-azure
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -202,6 +216,17 @@ jobs:
             while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
             exit 1
           fi
+      - name: Label deviations from the compliant defaults
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # identity: secrets (D7) and solo_mode (D2) are opt-ins that weaken a default; say so
+          labels="$(ayasee config labels --path "$CONFIG_PATH")"
+          [ -n "$labels" ] || exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$labels"
       - id: changed
         name: Find the changed dev units
         env:
@@ -211,9 +236,14 @@ jobs:
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
           units_root="$(jq -r '.units_root' "$RUNNER_TEMP/ayasee-config.json")"
-          units="$(ayasee changed-units --base "$BASE_SHA" --head "$HEAD_SHA" --units-root "$units_root" --env dev)"
+          # the first configured stage (dev by default) is the one a pull request plans
+          stage="$(jq -er '.stages[0]' "$RUNNER_TEMP/ayasee-config.json")"
+          identity="$(jq -er '.identity' "$RUNNER_TEMP/ayasee-config.json")"
+          units="$(ayasee changed-units --base "$BASE_SHA" --head "$HEAD_SHA" --units-root "$units_root" --env "$stage")"
           {
             echo "units-root=$units_root"
+            echo "stage=$stage"
+            echo "identity=$identity"
             echo "engine=$(jq -r '.engine' "$RUNNER_TEMP/ayasee-config.json")"
             if [ -z "$units" ]; then
               echo "any=false"
@@ -224,7 +254,7 @@ jobs:
             fi
           } >>"$GITHUB_OUTPUT"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
-        if: ${{ steps.changed.outputs.any == 'true' }}
+        if: ${{ steps.changed.outputs.any == 'true' && steps.changed.outputs.identity == 'oidc' }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -232,8 +262,18 @@ jobs:
       - id: plan
         if: ${{ steps.changed.outputs.any == 'true' }}
         uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.changed.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+          ARM_USE_OIDC: ${{ steps.changed.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.changed.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.changed.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.changed.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.changed.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
         with:
-          env: dev
+          env: ${{ steps.changed.outputs.stage }}
           units-root: ${{ steps.changed.outputs.units-root }}
           engine: ${{ steps.changed.outputs.engine }}
           only-units: ${{ steps.changed.outputs.only-units }}
@@ -245,7 +285,7 @@ jobs:
         uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
-          stage: dev
+          stage: ${{ steps.changed.outputs.stage }}
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: body
         name: Write the comment body

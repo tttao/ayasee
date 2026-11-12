@@ -73,6 +73,14 @@ identity with a federated credential for `environment:<name>`. `ARM_USE_OIDC=tru
 `DATABRICKS_AUTH_TYPE=github-oidc-azure` replace keys. The only optional secrets are a Teams webhook and
 a fine-grained `ledger-token` for a `git-branch://` ledger, and they are declared explicitly, never
 inherited.
+`identity: secrets` in `.ayasee.yaml` is the documented exception, for providers that cannot federate
+with GitHub OIDC: the workflows skip `azure/login` and pass the provider tokens `CLOUDFLARE_API_TOKEN`,
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the plan and apply steps only. They must be
+environment secrets, one set per environment, never repository or organisation secrets. Every
+configuration load prints a `DEVIATION:` line and each run shows it as a warning and in its summary,
+in the same way `solo_mode` is labelled. Stored tokens are long-lived, and the `dev-plan` ones are
+reachable by same-repository pull-request code: keep them read-only. See
+[identity: secrets](docs/concepts/staged-run.md#identity-secrets).
 
 **Prod needs a human who is not the author (D2).**
 - The `prod` environment has required reviewers, `prevent_self_review = true` and admins cannot bypass.

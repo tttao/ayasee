@@ -10,14 +10,15 @@ inputs:
     default: stages
   encrypt:
     description: >-
-      Encrypt plan files (OpenTofu aes_gcm, enforced). With true, key-vault-key-id is required.
-      false is allowed only with binding-mode replan, or same-job for dev and uat. With false and
+      Encrypt plan files (OpenTofu aes_gcm, enforced). With true, key-vault-key-id (azure_vault)
+      or AYASEE_PLAN_PASSPHRASE (pbkdf2) is required.
+      false is allowed only with binding-mode replan, or same-job for a pre-prod stage. With false and
       a mode other than same-job the plan files are deleted after planning and no plan-dir is output.
     required: false
     default: "true"
   binding-mode:
     description: >-
-      How the later apply binds to this plan - same-job (dev and uat only), breakglass (prod only,
+      How the later apply binds to this plan - same-job (pre-prod stages only, never prod), breakglass (prod only,
       needs breakglass-incident; plan and apply in one job), encrypted_plan (needs encrypt=true),
       replan, or drift (only with drift true).
     required: false
@@ -30,6 +31,13 @@ inputs:
     description: Azure Key Vault key URL (https://<vault>.vault.azure.net/keys/<name>) that protects the plan encryption key.
     required: false
     default: ""
+  key-provider:
+    description: >-
+      Plan-encryption key provider (plan_encryption.key_provider) - azure_vault (key-vault-key-id)
+      or pbkdf2 (passphrase in the AYASEE_PLAN_PASSPHRASE environment variable, from an
+      environment secret). Only used with encrypt true.
+    required: false
+    default: azure_vault
   engine:
     description: Engine, opentofu or terraform.
     required: false
@@ -97,6 +105,7 @@ runs:
         SG_UNITS_ROOT: ${{ inputs.units-root }}
         SG_ENCRYPT: ${{ inputs.encrypt }}
         SG_KEY_VAULT_KEY_ID: ${{ inputs.key-vault-key-id }}
+        SG_KEY_PROVIDER: ${{ inputs.key-provider }}
         SG_BINDING_MODE: ${{ inputs.binding-mode }}
         SG_BREAKGLASS_INCIDENT: ${{ inputs.breakglass-incident }}
         SG_ENGINE: ${{ inputs.engine }}

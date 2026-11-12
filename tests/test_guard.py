@@ -327,3 +327,34 @@ def test_list_issues_page_cap():
 def test_list_issues_exactly_cap_pages_ok():
     respx.get(f"{BASE}/repos/o/n/issues").mock(side_effect=_chain(MAX_PAGES, False))
     assert len(GitHub(BASE, "t").list_issues("o/n", ["x"])) == 1
+
+
+# ---- two-stage layout [<pre-prod>, prod] (issue #1) ----
+
+TWO = ["staging", "prod"]
+
+
+def test_two_stages_pre_prod_needs_no_predecessor(store):
+    issues = Issues(open_envs=TWO)
+    assert check(REPO, "staging", A, TWO, store, issues) == GuardResult(True, ())
+    assert issues.calls == []
+
+
+def test_two_stages_prod_chains_from_the_stage_before_prod(store):
+    assert check(REPO, "prod", A, TWO, store, Issues()).reasons == ("predecessor_missing",)
+    _put(store, "staging", B)
+    assert check(REPO, "prod", A, TWO, store, Issues()).reasons == ("superseded",)
+    _put(store, "staging", A, converged=False, n=2)
+    assert check(REPO, "prod", A, TWO, store, Issues()).reasons == ("predecessor_not_converged",)
+    _put(store, "staging", A, n=3)
+    assert check(REPO, "prod", A, TWO, store, Issues()) == GuardResult(True, ())
+
+
+def test_two_stages_stop_the_line_covers_pre_prod_and_prod(store):
+    _put(store, "staging", A)
+    issues = Issues(open_envs={"staging"})
+    assert check(REPO, "prod", A, TWO, store, issues).reasons == ("stop_the_line",)
+    assert issues.calls[0] == (REPO, "staging")
+    prod_only = Issues(open_envs={"prod"})
+    assert check(REPO, "prod", A, TWO, store, prod_only).reasons == ("stop_the_line",)
+    assert [env for _, env in prod_only.calls] == ["staging", "prod"]

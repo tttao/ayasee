@@ -60,6 +60,32 @@ on:
       ledger-token:
         description: Optional fine-grained token (contents write on the repository) for a git-branch:// ledger store.
         required: false
+      AYASEE_PLAN_PASSPHRASE:
+        description: >-
+          Only for plan_encryption.key_provider pbkdf2. Pass it by name
+          (AYASEE_PLAN_PASSPHRASE set to secrets.AYASEE_PLAN_PASSPHRASE) and create it as an
+          environment secret of prod-plan, prod and prod-breakglass only, never at repository or
+          organisation level: the environment secret takes precedence in those jobs. Only the
+          prod plan and apply steps receive it.
+        required: false
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          prod-breakglass, never at repository or organisation level;
+          only the plan and apply steps receive it.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          prod-breakglass, never at repository or organisation level;
+          only the plan and apply steps receive it.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          prod-breakglass, never at repository or organisation level;
+          only the plan and apply steps receive it.
+        required: false
       extra-env-secret:
         description: >-
           Optional secret exported as AYASEE_EXTRA_SECRET to the plan and apply steps only (so
@@ -151,11 +177,6 @@ jobs:
       group: ayasee-${{ github.repository }}-prod
       cancel-in-progress: false
     env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      DATABRICKS_AUTH_TYPE: github-oidc-azure
       AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -198,6 +219,17 @@ jobs:
             while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
             exit 1
           fi
+      - name: Label deviations from the compliant defaults
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # identity: secrets (D7) and solo_mode (D2) are opt-ins that weaken a default; say so
+          labels="$(ayasee config labels --path "$CONFIG_PATH")"
+          [ -n "$labels" ] || exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$labels"
       - id: cfg
         name: Read the configuration
         env:
@@ -208,8 +240,11 @@ jobs:
           {
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
+            echo "identity=$(jq -r '.identity' "$cfg")"
+            echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
           } >>"$GITHUB_OUTPUT"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ steps.cfg.outputs.identity == 'oidc' }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -277,10 +312,21 @@ jobs:
           breakglass-incident: ${{ needs.validate.outputs.incident }}
           lock-timeout: 10m
           expect-sha: "true" # fail unless the checkout really is the sha to deploy
+          key-provider: ${{ steps.cfg.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           SG_SHA: ${{ needs.validate.outputs.sha }}
+          # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+          ARM_USE_OIDC: ${{ steps.cfg.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
@@ -290,7 +336,16 @@ jobs:
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           SG_SHA: ${{ needs.validate.outputs.sha }} # the sha that was checked out, not the dispatching ref's
+          ARM_USE_OIDC: ${{ steps.cfg.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
         with:
           env: prod
           units-root: ${{ steps.cfg.outputs.units-root }}
@@ -299,6 +354,7 @@ jobs:
           breakglass-incident: ${{ needs.validate.outputs.incident }}
           lock-timeout: 10m
           encrypt: "true"
+          key-provider: ${{ steps.cfg.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
       - id: units
         name: Locate the units record

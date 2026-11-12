@@ -100,11 +100,11 @@ def test_uses_breakglass_environment(wf):
 
 
 def test_prod_vars_come_from_the_breakglass_environment(wf):
-    env = wf["jobs"][JOB]["env"]
     for var in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
         assert f"vars.{var}" in TEXT
-    assert env["ARM_CLIENT_ID"] == "${{ vars.AZURE_CLIENT_ID }}"
     plan = _steps(wf, JOB)[_idx(wf, _ayasee("plan"))]
+    oidc = "steps.cfg.outputs.identity == 'oidc'"
+    assert plan["env"]["ARM_CLIENT_ID"] == f"${{{{ {oidc} && vars.AZURE_CLIENT_ID || '' }}}}"
     assert plan["with"]["key-vault-key-id"] == "${{ vars.AYASEE_KEY_VAULT_KEY_ID }}"
 
 
@@ -354,3 +354,14 @@ def test_refuses_unsupported_settings_before_login(wf):
 def test_breakglass_has_no_main_tip_check(wf):
     """R70 excludes break-glass: it deploys an explicit, older-or-equal sha on main."""
     assert "main-tip" not in PATH.read_text()
+
+
+def test_breakglass_key_provider_and_passphrase_reach_plan_and_apply_only(wf):
+    steps = _steps(wf, JOB)
+    with_pass = [s for s in steps if "AYASEE_PLAN_PASSPHRASE" in str(s)]
+    assert [s.get("id") for s in with_pass] == ["plan", "apply"]
+    for step in with_pass:
+        assert step["env"]["AYASEE_PLAN_PASSPHRASE"] == "${{ secrets.AYASEE_PLAN_PASSPHRASE }}"
+        assert step["with"]["key-provider"] == "${{ steps.cfg.outputs.key-provider }}"
+    assert "AYASEE_PLAN_PASSPHRASE" not in str(wf["jobs"][JOB].get("env", {}))
+    assert "'.plan_encryption.key_provider'" in TEXT

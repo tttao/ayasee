@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Install conftest (SHA-256 verified) and run the Databricks Rego pack over <plan-json>/*.json
-# with a data file naming the stage. The pack lives in this repo (policy/databricks).
+# Install conftest (SHA-256 verified) and run the Rego packs over <plan-json>/*.json with a data
+# file naming the stage. The packs live in this repo: policy/databricks (namespace
+# ayasee.databricks) and policy/cloudflare (ayasee.cloudflare). Every pack runs on every plan; a
+# pack only looks at its own resource types.
 # Env: SG_TOOL_MIRROR (optional) SG_PLAN_JSON SG_STAGE SG_CONFTEST_VERSION SG_CONFTEST_SHA256 (RUNNER_TEMP)
 set -euo pipefail
 
@@ -31,5 +33,6 @@ shopt -s nullglob
 files=("$dir"/*.json)
 [ "${#files[@]}" -gt 0 ] || sg_die "no plan JSON files in $dir"
 
-"$tmp/conftest" test --no-color --policy "$here/../../policy/databricks" \
-  --namespace ayasee.databricks --data "$tmp/data.json" "${files[@]}"
+"$tmp/conftest" test --no-color --policy "$here/../../policy" \
+  --namespace ayasee.databricks --namespace ayasee.cloudflare \
+  --data "$tmp/data.json" "${files[@]}"

@@ -33,6 +33,8 @@ class Rule:
     actions: frozenset[Action]
     attr_true: tuple[str, ...] = ()
     attr_changed: tuple[str, ...] = ()  # match only if before[attr] != after[attr]
+    # match only if before[attr] or after[attr] is one of the listed strings
+    attr_in: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,7 @@ class RiskItem:
     principal_delta: PrincipalDelta | None
 
 
-_ALLOWED_KEYS = {"id", "tier", "types", "actions", "attr_true", "attr_changed"}
+_ALLOWED_KEYS = {"id", "tier", "types", "actions", "attr_true", "attr_changed", "attr_in"}
 _ANY_ACTIONS = frozenset(Action) - {Action.NOOP, Action.READ}
 
 
@@ -64,6 +66,28 @@ def _str_list(raw: dict, key: str, path: Path, required: bool = False) -> tuple[
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise RuleError(f"{path}: rule {raw.get('id')!r}: {key!r} must be a list of strings")
     return tuple(value)
+
+
+def _attr_in(raw: dict, path: Path) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    value = raw.get("attr_in")
+    if value is None:
+        return ()
+    if not isinstance(value, dict) or not value:
+        raise RuleError(f"{path}: rule {raw.get('id')!r}: 'attr_in' must be a non-empty mapping")
+    out = []
+    for attr, allowed in value.items():
+        if (
+            not isinstance(attr, str)
+            or not isinstance(allowed, list)
+            or not allowed
+            or not all(isinstance(v, str) for v in allowed)
+        ):
+            raise RuleError(
+                f"{path}: rule {raw.get('id')!r}: 'attr_in' maps an attribute to a non-empty "
+                "list of strings"
+            )
+        out.append((attr, tuple(allowed)))
+    return tuple(out)
 
 
 def _parse_rule(raw: Any, path: Path) -> Rule:
@@ -98,6 +122,7 @@ def _parse_rule(raw: Any, path: Path) -> Rule:
         actions=frozenset(actions),
         attr_true=_str_list(raw, "attr_true", path),
         attr_changed=_str_list(raw, "attr_changed", path),
+        attr_in=_attr_in(raw, path),
     )
 
 
@@ -133,6 +158,11 @@ def _matches(rule: Rule, rc: ResourceChange) -> bool:
     source = after if rc.after is not None else before
     if any(source.get(attr) is not True for attr in rule.attr_true):
         return False
+    if any(
+        before.get(attr) not in allowed and after.get(attr) not in allowed
+        for attr, allowed in rule.attr_in
+    ):
+        return False
     return all(before.get(attr) != after.get(attr) for attr in rule.attr_changed)
 
 
@@ -161,12 +191,22 @@ def classify(unit: str, changes: list[ResourceChange], rules: list[Rule]) -> lis
 
 # --- principal deltas -------------------------------------------------------------------
 
+# Cloudflare Access policies and groups: who is included, excluded or required (issue #1).
+# cloudflare_access_* are the provider v4 names, cloudflare_zero_trust_access_* the v5 ones.
+_ACCESS_TYPES = {
+    "cloudflare_zero_trust_access_policy",
+    "cloudflare_access_policy",
+    "cloudflare_zero_trust_access_group",
+    "cloudflare_access_group",
+}
+_ACCESS_SECTIONS = ("include", "exclude", "require")
+
 _PRINCIPAL_TYPES = {
     "databricks_grants",
     "databricks_grant",
     "databricks_permissions",
     "azurerm_role_assignment",
-}
+} | _ACCESS_TYPES
 
 
 def _flagged(marker: Any) -> bool:
@@ -180,8 +220,46 @@ def _flagged(marker: Any) -> bool:
     return False
 
 
+def _condition(kind: str, value: Any) -> list[str]:
+    """Principal names of one Access rule condition, such as ``email:a@example.com``.
+
+    v5 conditions are objects (``{email = {email = "..."}}``, ``{everyone = {}}``), v4 ones are
+    lists or booleans (``email = ["..."]``, ``everyone = true``). Empty and false conditions
+    name nobody.
+    """
+    if value is None or value is False or value == [] or value == "":
+        return []
+    if value is True:
+        return [kind]
+    if isinstance(value, str):
+        return [f"{kind}:{value}"]
+    if isinstance(value, list):
+        return [p for item in value for p in _condition(kind, item)]
+    if isinstance(value, dict):
+        parts = sorted(
+            str(v) for v in value.values() if isinstance(v, str | int) and not isinstance(v, bool)
+        )
+        return [f"{kind}:{'/'.join(parts)}" if parts else kind]
+    return [f"{kind}:?"]
+
+
+def _access_entries(values: dict) -> list[tuple[str, str]]:
+    """(principal, "<decision>:<section>") pairs of an Access policy or group."""
+    decision = values.get("decision") or "member"
+    out = []
+    for section in _ACCESS_SECTIONS:
+        for rule in values.get(section) or []:
+            if not isinstance(rule, dict):
+                continue
+            for kind, value in sorted(rule.items()):
+                out += [(who, f"{decision}:{section}") for who in _condition(kind, value)]
+    return out
+
+
 def _entries(rc: ResourceChange, values: dict) -> list[tuple[str, str]]:
     """(principal, privilege/level/role) pairs for one side of the change."""
+    if rc.type in _ACCESS_TYPES:
+        return _access_entries(values)
     if rc.type == "databricks_grants":
         return [
             (g["principal"], p)
@@ -205,6 +283,7 @@ _BLOCK_KEYS = {
     "databricks_grant": ("principal", "privileges"),
     "databricks_permissions": ("access_control",),
     "azurerm_role_assignment": ("principal_id", "role_definition_name", "role_definition_id"),
+    **{t: (*_ACCESS_SECTIONS, "decision") for t in _ACCESS_TYPES},
 }
 
 

@@ -9,6 +9,35 @@ released version into the GitHub release notes.
 
 ### Added
 
+- `iac-staged` runs a configurable stage list (issue #1): `[<first>, <pre-prod>, prod]` or
+  `[<pre-prod>, prod]`, with any pre-prod names. The `dev` and `uat` jobs are the two pre-prod
+  slots and take their environment, concurrency group, units directory and ledger record from the
+  configured names; with two stages the `dev` slot is skipped and the guard of `prod-plan` chains
+  from the stage just before prod. `ayasee config staged` validates the layout and `start-stage`.
+  `iac-pr` plans the first configured stage. Not yet run on GitHub with a two-stage list.
+- `identity: oidc | secrets` in `.ayasee.yaml` (default `oidc`). With `secrets`, the stage jobs of
+  every reusable workflow skip `azure/login` and leave the `ARM_*` variables and
+  `DATABRICKS_AUTH_TYPE` empty; every load prints a `DEVIATION:` line (D7).
+- `plan_encryption.key_provider: azure_vault | pbkdf2` (default `azure_vault`, unchanged). `pbkdf2`
+  encrypts the prod plan with a passphrase from the `AYASEE_PLAN_PASSPHRASE` environment secret,
+  passed only to the prod plan and apply steps (and those of break-glass); a missing, short or
+  ambiguous key source fails closed. The manifest and stale-plan checks are unchanged. The plan and
+  apply actions take a `key-provider` input.
+- `identity: secrets` passes the provider tokens `CLOUDFLARE_API_TOKEN`, `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` (optional `workflow_call` secrets, meant as environment secrets) to the
+  plan and apply steps only, and empty strings with `identity: oidc`. `ayasee config labels` prints
+  the `NON-COMPLIANT` and `DEVIATION` lines; the first job of every reusable workflow turns them
+  into warnings and run-summary lines. The cockpit does not show the label yet.
+- A second risk-rule and policy pack, for Cloudflare edge, DNS and Zero Trust Access:
+  `rules/cloudflare.yaml` (Access, tunnel ingress, WAF and firewall, proxied, MX and apex DNS
+  records; provider v5 and v4 type names) and `policy/cloudflare/` (`SG-CF-001` to `SG-CF-005`,
+  with OPA tests). The change set shows principals gained and lost for Access policies and groups.
+  Risk rules take a new optional condition, `attr_in`. Both packs always load; the policy action
+  runs conftest with both namespaces. Not yet checked against a real Cloudflare plan.
+- A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
+  stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
+  remains the ledger that needs no cloud.
+
 - A documentation site on GitHub Pages, <https://tttao.github.io/ayasee/>: the `docs` workflow
   assembles the repository's Markdown with `scripts/build-docs-site.py` and builds it with mkdocs
   in strict mode. The landing page and theme are in `website/`.
@@ -19,6 +48,11 @@ released version into the GitHub release notes.
   that the docs and the code cite.
 
 ### Changed
+
+- `iac-staged`'s `start-stage` input defaults to empty (the first configured stage) instead of
+  `dev`; `dev`, `uat` and `prod-plan` keep working with the default stages.
+- `binding-mode: same-job` is allowed for any pre-prod stage, not only `dev` and `uat`; it is still
+  refused for `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` and `drift-*`.
 
 - The licence is settled: Apache-2.0, stated in
   [`docs/governance/PROVENANCE.md`](docs/governance/PROVENANCE.md). `scripts/check-provenance.sh`,

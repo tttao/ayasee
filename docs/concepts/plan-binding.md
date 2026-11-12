@@ -23,11 +23,10 @@ at rest. OpenTofu can do that natively.
 `prod-plan` and `prod` run in binding mode `encrypted_plan`:
 
 1. **Plan.** `prod-plan` plans each unit in dependency order with `-out`. OpenTofu's `plan {}`
-   encryption block encrypts every plan file: key provider `azure_vault` (the Key Vault key in
-   `AYASEE_KEY_VAULT_KEY_ID`), method `aes_gcm`, `enforced = true`
-   (`actions/plan/encryption.tofu.tmpl`). The key URL must be `https://<vault>.vault.azure.net/keys/<name>`
-   without a key version, so key rotation does not break a pending approval. Managed HSM keys are
-   not supported yet.
+   encryption block encrypts every plan file with method `aes_gcm` and `enforced = true`. The key
+   comes from the key provider set in `plan_encryption.key_provider` (see
+   [key providers](#key-providers)): by default `azure_vault`, the Key Vault key in
+   `AYASEE_KEY_VAULT_KEY_ID` (`actions/plan/encryption.tofu.tmpl`).
 2. **Scan inside the job.** The Rego pack and Trivy read the plan JSON in this job. The JSON never
    leaves it.
 3. **Manifest.** `ayasee binding make` writes `manifest.json` (schema `ayasee.manifest/v1`):
@@ -104,6 +103,32 @@ CLI and is tested there. `iac-staged` does not select it yet: its `prod-plan` an
 sets `engine: terraform` therefore fails at `prod-plan` when called through `iac-staged` today.
 A subset check (re-plan and compare only the actions) is not implemented.
 
+## Key providers
+
+`plan_encryption.key_provider` in `.ayasee.yaml` picks where the plan key comes from. The
+encryption method, the manifest and the stale-plan checks are the same for every provider: only
+the key source changes. `sg_setup_encryption` in `actions/lib/ayasee-lib.sh` builds the
+`TF_ENCRYPTION` block and fails closed on a missing, malformed or ambiguous key source.
+
+| Provider | Key source | Who can decrypt |
+|---|---|---|
+| `azure_vault` (default) | The Key Vault key in the `AYASEE_KEY_VAULT_KEY_ID` variable, `https://<vault>.vault.azure.net/keys/<name>` without a key version (so rotation does not break a pending approval). Managed HSM keys are not supported yet. | The identities with `unwrapKey` on that key: `prod-plan`, `prod`, `prod-breakglass` |
+| `pbkdf2` | The passphrase in the `AYASEE_PLAN_PASSPHRASE` secret, at least 32 characters of `[A-Za-z0-9+/=_.-]` (for example `openssl rand -base64 48`), turned into the key by OpenTofu's `pbkdf2` provider. | The environments that hold the secret. Create it as an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. |
+
+With `pbkdf2`, the reusable workflows pass `AYASEE_PLAN_PASSPHRASE` to the plan step of `prod-plan`,
+the apply step of `prod` and the plan and apply steps of `iac-breakglass`, and to no other step.
+The caller passes it by name (`AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}`);
+according to GitHub's documentation each job then receives the value of the environment secret of
+its own environment, which takes precedence over a repository secret of the same name (not yet
+verified by a run). A repository or organisation secret of that name would reach every job that is
+passed it, so do not create one; the workflows cannot detect it. The passphrase is a stored secret,
+unlike the Key Vault key, which no job ever holds: anyone who can read it can decrypt an uploaded
+plan artifact during its 7 days.
+
+Any second key source is refused as ambiguous: a key URL with `pbkdf2`, a passphrase with
+`azure_vault`, or the test-only `AYASEE_TEST_PASSPHRASE` next to either. `openbao`, `aws_kms` and
+`gcp_kms` (which OpenTofu supports) are not wired yet; the configuration refuses them.
+
 ## What each mode allows (R29)
 
 `sg_check_mode` in `actions/lib/ayasee-lib.sh` is the one place that allows or refuses a
@@ -111,7 +136,7 @@ combination.
 
 | Mode | Environments | Encryption | What it does | Verification before apply |
 |---|---|---|---|---|
-| `same-job` | `dev`, `uat` only | off (the plan never leaves the job) | Plans every unit as a preview, then applies unit by unit: plan again, apply, converge-check | None, the plan was made in this job |
+| `same-job` | pre-prod stages only (never `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`) | off (the plan never leaves the job) | Plans every unit as a preview, then applies unit by unit: plan again, apply, converge-check | None, the plan was made in this job |
 | `encrypted_plan` | any, used for `prod` | required (`encrypt=true`, OpenTofu) | `prod-plan` plans and encrypts; `prod` applies the approved files | Manifest: SHA, engine, units, plan hash, lock hash |
 | `replan` | any, secondary profile | may be off; plan files are deleted after the manifest | `prod` re-plans, compares, applies the fresh plan | `(address, actions)` plus values hash per unit |
 | `breakglass` | `prod` only, and only with a valid incident reference (`ABC-123` or `INC123`) | on in `iac-breakglass` | Plan, policy pack, apply in one job, like `same-job` | The plan checked by the policy pack must equal the plan applied (R53, below) |
@@ -120,8 +145,8 @@ combination.
 Other rules that follow from R29:
 
 - `encrypted_plan` without encryption is refused. `encrypt=false` is only allowed with `replan`, or
-  with `same-job` in `dev` and `uat`.
-- `same-job` outside `dev` and `uat` is refused. `breakglass` outside `prod` is refused.
+  with `same-job` in a pre-prod stage.
+- `same-job` in `prod` or a fixed-role environment is refused. `breakglass` outside `prod` is refused.
 - `engine: terraform` cannot encrypt, so it needs `encrypt=false`, and therefore `replan`.
 - `replan` deletes plaintext plan files and never exposes the plan directory.
 - Engine output goes to `$RUNNER_TEMP/ayasee/<env>/logs` and never to the job log.
@@ -130,8 +155,8 @@ Other rules that follow from R29:
 - `only-units` limits a run to named units. The apply action allows it with `same-job` only, and
   the plan action refuses it with `breakglass`: break-glass always plans and applies the whole prod
   tree (R71).
-- The test-only variable `AYASEE_TEST_PASSPHRASE` (a PBKDF2 passphrase) replaces Key Vault in
-  tests. Setting it together with a key URL is an error.
+- The test-only variable `AYASEE_TEST_PASSPHRASE` (a PBKDF2 passphrase) replaces the key provider
+  in tests. Setting it together with a key URL or `AYASEE_PLAN_PASSPHRASE` is an error.
 
 ## The cascade rule (R52, R53)
 

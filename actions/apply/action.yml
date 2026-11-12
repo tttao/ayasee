@@ -10,7 +10,7 @@ inputs:
     default: stages
   binding-mode:
     description: >-
-      same-job (dev and uat only; plan and apply in one job, no verification), breakglass (prod only,
+      same-job (pre-prod stages only, never prod; plan and apply in one job, no verification), breakglass (prod only,
       needs breakglass-incident; plan and apply in one job, no verification), encrypted_plan (verify the approved
       encrypted plans against the manifest, then apply them) or replan (re-plan, compare with the
       manifest, then apply the fresh plans).
@@ -39,6 +39,13 @@ inputs:
     description: Azure Key Vault key URL; the same value as given to the plan action.
     required: false
     default: ""
+  key-provider:
+    description: >-
+      Plan-encryption key provider (plan_encryption.key_provider) - azure_vault (key-vault-key-id)
+      or pbkdf2 (passphrase in the AYASEE_PLAN_PASSPHRASE environment variable, from an
+      environment secret). Only used with encrypt true.
+    required: false
+    default: azure_vault
   engine:
     description: Engine, opentofu or terraform.
     required: false
@@ -66,6 +73,7 @@ runs:
         SG_MANIFEST_PATH: ${{ inputs.manifest-path }}
         SG_ENCRYPT: ${{ inputs.encrypt }}
         SG_KEY_VAULT_KEY_ID: ${{ inputs.key-vault-key-id }}
+        SG_KEY_PROVIDER: ${{ inputs.key-provider }}
         SG_ENGINE: ${{ inputs.engine }}
         SG_LOCK_TIMEOUT: ${{ inputs.lock-timeout }}
       run: "$GITHUB_ACTION_PATH/apply.sh"

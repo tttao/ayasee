@@ -1,0 +1,94 @@
+# ayasee risk rules for Cloudflare: edge, DNS and Zero Trust Access (issue #1).
+#
+# Same schema as databricks-azure.yaml, loaded after it. `attr_in` maps an attribute to a list of
+# strings and matches when the attribute's value in `before` or in `after` is one of them.
+# Both the provider v5 type names (cloudflare_zero_trust_*, cloudflare_dns_record) and the v4 ones
+# (cloudflare_access_*, cloudflare_tunnel_*, cloudflare_record) are listed. Rule ids start with
+# `cf-`. The Rego pack in policy/cloudflare/ blocks the worst of these changes in prod.
+
+# Removing an Access application removes the login in front of its origin.
+- id: cf-access-destroy
+  tier: critical
+  types:
+    - cloudflare_zero_trust_access_application
+    - cloudflare_access_application
+  actions: [delete, replace, forget]
+
+# Who can reach what: the change set shows the principals gained and lost for policies and groups.
+- id: cf-access
+  tier: high
+  types:
+    - cloudflare_zero_trust_access_application
+    - cloudflare_zero_trust_access_policy
+    - cloudflare_zero_trust_access_group
+    - cloudflare_zero_trust_access_identity_provider
+    - cloudflare_zero_trust_access_service_token
+    - cloudflare_access_application
+    - cloudflare_access_policy
+    - cloudflare_access_group
+    - cloudflare_access_identity_provider
+    - cloudflare_access_service_token
+  actions: [any]
+
+# A tunnel ingress or route can publish a new origin or port.
+- id: cf-tunnel-ingress
+  tier: high
+  types:
+    - cloudflare_zero_trust_tunnel_cloudflared_config
+    - cloudflare_zero_trust_tunnel_cloudflared_route
+    - cloudflare_tunnel_config
+    - cloudflare_tunnel_route
+  actions: [any]
+
+# Removing a WAF, firewall or rate-limiting rule opens the edge.
+- id: cf-firewall-destroy
+  tier: critical
+  types:
+    - cloudflare_ruleset
+    - cloudflare_firewall_rule
+    - cloudflare_filter
+    - cloudflare_access_rule
+    - cloudflare_rate_limit
+    - cloudflare_waf_rule
+    - cloudflare_waf_group
+    - cloudflare_waf_package
+    - cloudflare_waf_override
+  actions: [delete, replace, forget]
+
+- id: cf-firewall
+  tier: high
+  types:
+    - cloudflare_ruleset
+    - cloudflare_firewall_rule
+    - cloudflare_filter
+    - cloudflare_access_rule
+    - cloudflare_rate_limit
+    - cloudflare_waf_rule
+    - cloudflare_waf_group
+    - cloudflare_waf_package
+    - cloudflare_waf_override
+  actions: [any]
+
+# A proxied record switched to DNS-only publishes the origin address (and switching it on changes
+# what the edge protects).
+- id: cf-dns-proxied
+  tier: high
+  types: [cloudflare_dns_record, cloudflare_record]
+  actions: [any]
+  attr_changed: [proxied]
+
+# Mail routing.
+- id: cf-dns-mx
+  tier: high
+  types: [cloudflare_dns_record, cloudflare_record]
+  actions: [any]
+  attr_in:
+    type: [MX]
+
+# The zone apex, written "@". A record whose name is the full zone name is not recognised.
+- id: cf-dns-apex
+  tier: high
+  types: [cloudflare_dns_record, cloudflare_record]
+  actions: [any]
+  attr_in:
+    name: ["@"]
