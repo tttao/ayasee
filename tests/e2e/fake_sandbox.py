@@ -14,6 +14,8 @@ from typing import Any
 
 from e2e.sandbox import PullRequest, SandboxTimeout, WebhookEvent
 
+from ayasee.config import NON_COMPLIANT
+from ayasee.github import GitHubError
 from ayasee.labels import APPLY_FAILED_LABEL, DRIFT_LABEL, POST_APPROVAL_LABEL, STOP_LABEL
 from ayasee.ledger import UnitResult, record_from_run
 
@@ -31,6 +33,7 @@ def card(title: str, sha: str, env: str = "prod", *texts: str) -> WebhookEvent:
 
 class FakeSandbox:
     repo = "o/ayasee-sandbox"
+    login = "pusher"
 
     def __init__(self, faults: set[str] | None = None) -> None:
         self.faults = faults or set()
@@ -46,7 +49,8 @@ class FakeSandbox:
         self.plan_serial: dict[int, int] = {}
         self.state_marker = "applied"
         self.baseline_marker = "applied"
-        self.files = {GENERATION: "g0\n", TAG: "t0\n"}
+        self.files = {GENERATION: "g0\n", TAG: "t0\n", ".ayasee.yaml": "stages: [dev, uat, prod]\n"}
+        self.approved_by_self: set[int] = set()
 
     # ---- helpers -----------------------------------------------------------------------
 
@@ -56,12 +60,18 @@ class FakeSandbox:
     def _new_sha(self) -> str:
         return f"{next(self._sha):040x}"
 
-    def _record(self, env, sha, status="applied", incident=None, converged=True, units=None):
+    def read_file(self, path, ref="main"):
+        return self.files.get(path)
+
+    def _record(
+        self, env, sha, status="applied", incident=None, converged=True, units=None, approver=None
+    ):
         if env == "prod" and status == "applied" and "no_ledger_prod" in self.faults:
             return
         if env == "dev" and "no_ledger_dev" in self.faults:
             return
-        approver = "approver" if env == "prod" and "no_approver" not in self.faults else None
+        if approver is None:
+            approver = "approver" if env == "prod" and "no_approver" not in self.faults else None
         self.ledgers[env] = record_from_run(
             repo=self.repo,
             env=env,
@@ -150,9 +160,19 @@ class FakeSandbox:
                 self._empty(sha)
         elif "e2e-marker.txt" in files:
             self._change(sha)
+            self._label(sha)
         else:
             self._empty(sha)
         return sha
+
+    def _label(self, sha: str) -> None:
+        """config labels: the resolve job prints NON-COMPLIANT for solo_mode (D2)."""
+        if (
+            "solo_mode: true" in self.files.get(".ayasee.yaml", "")
+            and "no_solo_label" not in self.faults
+        ):
+            run = [r for r in self.workflow_runs if r["head_sha"] == sha][-1]
+            run["log"]["resolve"] = f"::warning::{NON_COMPLIANT}"
 
     def _dev_apply_fail(self, sha: str) -> None:
         later = "uat_runs" in self.faults
@@ -296,10 +316,15 @@ class FakeSandbox:
     def job_log(self, run_id, name):
         return self.runs_by_id[run_id]["log"].get(name, "")
 
-    def review(self, run_id, env, approve) -> None:
+    def review(self, run_id, env, approve, *, as_self=False) -> None:
         run = self.runs_by_id[run_id]
         if env not in run["pending"]:
             raise AssertionError(f"run {run_id} is not waiting for {env}")
+        if as_self:
+            if "self_approval_refused" in self.faults:  # prevent_self_review left on
+                raise GitHubError(422, "you cannot approve your own deployment")
+            if "approver_not_self" not in self.faults:
+                self.approved_by_self.add(run_id)
         run["pending"].discard(env)
         run["status"] = "completed"
         sha = run["head_sha"]
@@ -344,7 +369,9 @@ class FakeSandbox:
         else:
             run["jobs"]["prod"], run["conclusion"] = "success", "success"
             run["log"]["prod"] = "ayasee: base apply: ok\nayasee: grants apply: ok"
-            self._record("prod", sha)
+            self._record(
+                "prod", sha, approver=self.login if run_id in self.approved_by_self else None
+            )
 
     def _release_queue(self) -> None:
         if self._prod_busy():

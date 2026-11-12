@@ -86,6 +86,7 @@ workflow after editing a state file on `ayasee-state`.
 | `stale_plan` | state changes between prod-plan and approval: the engine refuses the saved plan, the first unit's apply fails, nothing is applied and a `prod_failed` card is posted |
 | `cascade` | R52: base and grants (which reads base's outputs) change in one merge; dev and uat converge, prod-plan refuses with `cascading change`, and a second commit restores the files |
 | `empty_prod` | a change with nothing for prod skips the gate and still moves the prod ledger SHA |
+| `solo` | with `solo_mode: true` the run is labelled NON-COMPLIANT, the maintainer who pushed approves prod and a break-glass themselves, the ledger names them as approver and the post-approval issue opens. Needs `prevent_self_review` off on `prod` and `prod-breakglass` (an ephemeral sandbox made without `--prevent-self-review`, or `solo_mode = true` in the module) |
 | `breakglass` | a valid break-glass applies prod, opens a post-approval issue and records the incident in the ledger, with every prod unit in the record (no unit scope, R71) |
 
 Scenarios run one after another and clean up after themselves (they close the issues they cause and

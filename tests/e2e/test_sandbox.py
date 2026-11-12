@@ -434,3 +434,30 @@ def test_job_log_drops_the_authorization_header_on_the_cross_origin_redirect(sb)
     assert "superseded" in sb.job_log(9, "prod")
     assert first.calls[0].request.headers["authorization"] == "Bearer maint"
     assert "authorization" not in second.calls[0].request.headers
+
+
+@respx.mock
+def test_review_as_self_uses_the_pushing_identity(sb):
+    """Solo mode (#1): the maintainer who pushed approves their own gate."""
+    respx.get(f"{API}/actions/runs/9/pending_deployments").mock(
+        return_value=httpx.Response(200, json=[{"environment": {"id": 12, "name": "prod"}}])
+    )
+    post = respx.post(f"{API}/actions/runs/9/pending_deployments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    sb.review(9, "prod", approve=True, as_self=True)
+    (call,) = post.calls
+    assert call.request.headers["authorization"] == "Bearer maint"
+
+
+@respx.mock
+def test_login_is_read_once_and_read_file_uses_main(sb):
+    user = respx.get(f"{BASE}/user").mock(return_value=httpx.Response(200, json={"login": "me"}))
+    assert sb.login == "me" and sb.login == "me"
+    assert user.call_count == 1
+    content = base64.b64encode(b"stages: [dev, uat, prod]\n").decode()
+    route = respx.get(f"{API}/contents/.ayasee.yaml", params={"ref": "main"}).mock(
+        return_value=httpx.Response(200, json={"encoding": "base64", "content": content})
+    )
+    assert sb.read_file(".ayasee.yaml") == "stages: [dev, uat, prod]\n"
+    assert route.called

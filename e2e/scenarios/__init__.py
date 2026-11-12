@@ -13,4 +13,5 @@ SCENARIOS = [
     "cascade",
     "empty_prod",
     "breakglass",
+    "solo",  # needs prevent_self_review off on prod and prod-breakglass (see solo.py)
 ]

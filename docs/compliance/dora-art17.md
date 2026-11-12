@@ -32,7 +32,19 @@ approval, so it does not satisfy point (1)(b). Every load of the configuration p
 NON-COMPLIANT: solo_mode disables independent approval (DORA RTS 2024/1774 Art. 17(1)(b))
 ```
 
-Do not use it for regulated workloads.
+What it keeps and what it drops, for a single maintainer:
+
+- **Kept:** every prod apply still waits for an approval in the `prod` environment, break-glass
+  still waits in `prod-breakglass` and opens its post-approval issue, plan binding and the risk
+  summary are unchanged, and the ledger records who approved. The approval is deliberate, but it is
+  the author's own.
+- **Dropped:** the second person. The `github-environments` module refuses the same person as
+  prod and break-glass reviewer and sets `prevent_self_review`; its `solo_mode = true` lifts both on
+  `prod`, `prod-breakglass` and `prod-pr-plan` (reviewers stay required, admins still cannot bypass).
+- **Labelled:** the line above appears in the log and summary of every run, and the cockpit tags
+  the repository `solo mode · non-compliant`.
+
+The e2e scenario `solo` checks this path end to end. Do not use it for regulated workloads.
 
 ## Break-glass in practice
 

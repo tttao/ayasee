@@ -21,6 +21,7 @@ FAULTS = {
     "cascade": ["cascade_not_refused"],
     "empty_prod": ["gate_not_skipped", "ledger_not_moved"],
     "breakglass": ["no_post_approval", "no_incident", "breakglass_partial"],
+    "solo": ["no_solo_label", "self_approval_refused", "approver_not_self", "no_post_approval"],
 }
 
 

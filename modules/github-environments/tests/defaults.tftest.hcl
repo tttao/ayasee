@@ -201,3 +201,41 @@ run "prod_pr_plan_accepts_pr_branches_and_needs_prod_reviewers" {
     error_message = "prod-plan stays main-only"
   }
 }
+
+run "solo_mode_allows_one_reviewer_set_and_self_review_on_prod_side_only" {
+  command = plan
+  variables {
+    solo_mode            = true
+    shared_units_pr_plan = true
+    prod_reviewers       = { teams = [], users = [7] }
+    breakglass_reviewers = { teams = [], users = [7] }
+  }
+
+  assert {
+    condition = alltrue([
+      for k in ["prod", "prod-breakglass", "prod-pr-plan"] :
+      github_repository_environment.this[k].prevent_self_review == false
+    ])
+    error_message = "solo_mode lets the one maintainer approve prod, break-glass and prod-pr-plan"
+  }
+  assert {
+    condition = alltrue([
+      for k, e in github_repository_environment.this :
+      e.can_admins_bypass == false
+    ])
+    error_message = "solo_mode never allows admin bypass"
+  }
+  assert {
+    condition     = one(github_repository_environment.this["prod"].reviewers).users == toset([7])
+    error_message = "prod still requires the reviewer"
+  }
+}
+
+run "without_solo_mode_equal_reviewer_sets_still_fail" {
+  command = plan
+  variables {
+    prod_reviewers       = { teams = [], users = [7] }
+    breakglass_reviewers = { teams = [], users = [7] }
+  }
+  expect_failures = [var.breakglass_reviewers]
+}
