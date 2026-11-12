@@ -9,7 +9,8 @@ concept pages. The design decisions are recorded in [decisions.md](decisions.md)
 implementation plan is in [`docs/superpowers/plans/`](../superpowers/plans/).
 
 The repository contains no third-party names, tickets, runner labels, secrets, brand tokens, brand
-assets or data, and no third-party source code is copied into it. Tools such as OpenTofu,
+assets or data. One third-party file is copied into it, unmodified: the Mermaid bundle that the
+documentation site serves (see [Dependencies](#dependencies)). Tools such as OpenTofu,
 Terragrunt, Trivy and Checkov are downloaded at run time under their own licences and are not
 redistributed.
 
@@ -38,3 +39,13 @@ The Python dependencies (`pyproject.toml`, `uv.lock`) and the cockpit site's bui
 (`cockpit-site/package.json`) carry permissive licences (MIT, MIT-0, BSD, Apache-2.0, ISC, PSF, Blue Oak 1.0.0) or
 MPL-2.0. They are installed from their registries, not vendored. The built cockpit site bundles no
 third-party runtime library.
+
+The documentation site serves one vendored file, so that its diagrams render without a CDN (the site
+makes no third-party requests):
+
+| File | Upstream | Version | Licence | SHA-256 |
+|---|---|---|---|---|
+| `website/javascripts/vendor/mermaid-11.17.2.min.js` | npm `mermaid`, `dist/mermaid.min.js` | 11.17.2 | MIT (text in `mermaid-11.17.2.LICENSE.txt` beside it) | `581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8` |
+
+To update it, take `dist/mermaid.min.js` from `npm pack mermaid@<version>`, rename it with the new
+version, change the path in `website/overrides/main.html`, and update this table and `NOTICE`.

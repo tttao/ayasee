@@ -26,12 +26,23 @@ execution plane writes the ledger, issues and workflow runs. The observation pla
 
 ## Execution plane
 
+From pull request to merge:
+
 ```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
 flowchart LR
   pr["Pull request"] --> iacpr["iac-pr<br/>checks, scans,<br/>dev-only read-only plan"]
   iacpr --> comment["Sticky PR comment<br/>and scrubbed SARIF"]
   pr -- "review and merge" --> main["push to main"]
   main --> staged["iac-staged<br/>(one run, pinned to the merge SHA)"]
+```
+
+After the merge: the staged run, the nightly run, break-glass, and the ledger they share:
+
+```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  staged["iac-staged<br/>(one run, pinned to the merge SHA)"]
 
   subgraph run ["iac-staged"]
     direction LR
@@ -125,6 +136,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 ## Observation plane
 
 ```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
 flowchart LR
   subgraph facts ["Facts left by the execution plane"]
     led[("Ledger<br/>github-branch:// per repo")]

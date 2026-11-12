@@ -3,3 +3,13 @@ Copyright 2026 The ayasee Authors
 
 This product is licensed under the Apache License, Version 2.0.
 See the LICENSE file for the full licence text.
+
+This product includes third-party software, redistributed unmodified under its own licence:
+
+  Mermaid 11.17.2 (https://github.com/mermaid-js/mermaid), MIT License,
+  Copyright (c) 2014 - 2022 Knut Sveidqvist.
+  File: website/javascripts/vendor/mermaid-11.17.2.min.js, from the npm package mermaid@11.17.2
+  (dist/mermaid.min.js), SHA-256 581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8.
+  Licence text: website/javascripts/vendor/mermaid-11.17.2.LICENSE.txt. The bundle carries the
+  licence notices of the libraries it includes in its own comments.
+  It is served by the documentation site only, so diagrams render without a CDN.

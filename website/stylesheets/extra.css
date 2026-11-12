@@ -7,11 +7,32 @@
   --md-primary-fg-color--dark: #0c2429;
   --md-primary-bg-color: #f4f1ea;
   --md-primary-bg-color--light: #f4f1eab3;
-  --md-accent-fg-color: #c2571a;
+  /* Lamp Orange. Dark enough for white on it (5.50:1) and for it as text on white and on both
+     hero stops (5.94, 4.87, 4.68:1). */
+  --md-accent-fg-color: #ad4c14;
+  --md-accent-fg-color--transparent: #ad4c141a;
+  --md-accent-bg-color: #ffffff;
   --md-typeset-a-color: #0f6b78;
   --ay-hero-bg: linear-gradient(160deg, #f4f1ea 0%, #e6efe9 100%);
   --ay-hero-border: #12343b1f;
+  --ay-wordmark: #12343b;
   --ay-muted: #4c5b5e;
+  --ay-header-rule: transparent;
+  /* The stage strip on the landing page: teal on cream, ruled, the gate filled. */
+  --ay-route-bg: #f4f1ea;
+  --ay-route-rule: #12343b;
+  --ay-route-name: #12343b;
+  --ay-route-does: #4c5b5e;
+  --ay-route-stop-bg: #ffffff;
+  --ay-route-gate-bg: #12343b;
+  --ay-route-gate-fg: #f4f1ea;
+  /* Diagrams: the palette, not Material's indigo and an orange at rest. */
+  --md-mermaid-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --md-mermaid-node-bg-color: #f4f1ea;
+  --md-mermaid-node-fg-color: #12343b;
+  --md-mermaid-label-fg-color: #12343b;
+  --md-mermaid-label-bg-color: #ffffff;
+  --md-mermaid-edge-color: #4c5b5e;
 }
 
 [data-md-color-scheme="slate"] {
@@ -22,10 +43,27 @@
   --md-primary-bg-color: #f4f1ea;
   --md-primary-bg-color--light: #f4f1eab3;
   --md-accent-fg-color: #f08a4b;
+  --md-accent-fg-color--transparent: #f08a4b1a;
+  /* the label on a hovered button: dark teal on the lamp (6.49:1) */
+  --md-accent-bg-color: #0c2429;
   --md-typeset-a-color: #6fc6d1;
   --ay-hero-bg: linear-gradient(160deg, #10282d 0%, #132a24 100%);
   --ay-hero-border: #f4f1ea1f;
+  --ay-wordmark: var(--md-default-fg-color);
   --ay-muted: #a9b8ba;
+  --ay-header-rule: #f4f1ea29;
+  --ay-route-bg: #10282d;
+  --ay-route-rule: #a9b8ba;
+  --ay-route-name: #f4f1ea;
+  --ay-route-does: #a9b8ba;
+  --ay-route-stop-bg: #0c2429;
+  --ay-route-gate-bg: #f4f1ea;
+  --ay-route-gate-fg: #0c2429;
+  --md-mermaid-node-bg-color: #10282d;
+  --md-mermaid-node-fg-color: #6fc6d1;
+  --md-mermaid-label-fg-color: #f4f1ea;
+  --md-mermaid-label-bg-color: var(--md-default-bg-color);
+  --md-mermaid-edge-color: #a9b8ba;
 }
 
 .md-typeset {
@@ -37,13 +75,92 @@
   font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 
-/* Reference tables are wide: let them use the page. */
-.md-typeset table:not([class]) {
-  font-size: 0.72rem;
+/* In the dark scheme the header is darker than the page by a hair: a rule separates them. */
+.md-header,
+.md-tabs {
+  border-bottom: 1px solid var(--ay-header-rule);
 }
 
 .md-grid {
   max-width: 76rem;
+}
+
+/* Page titles in the full text colour, a step above the section headings. */
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}
+
+/* A readable measure for running text. Tables, code, cards, tabs and diagrams keep the full width;
+   text inside them is not a direct child of the article, so it is not capped. */
+.md-content__inner > p,
+.md-content__inner > ul,
+.md-content__inner > ol,
+.md-content__inner > dl,
+.md-content__inner > blockquote {
+  max-width: 60ch;
+}
+
+/* Buttons. In the dark scheme the primary teal is darker than the page, so Material's buttons would
+   vanish: the outline buttons turn cream and the primary one is filled cream. */
+[data-md-color-scheme="slate"] .md-typeset .md-button {
+  color: #f4f1ea;
+  border-color: #f4f1ea;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+  color: #0c2429;
+  background-color: #f4f1ea;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button:focus,
+[data-md-color-scheme="slate"] .md-typeset .md-button:hover {
+  color: var(--md-accent-bg-color);
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+}
+
+/* Tables. Wide ones scroll sideways inside their box; cells stay wide enough to read, and the
+   first column stays in view while the rest scrolls. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+
+.md-typeset table:not([class]) td {
+  min-width: min(9rem, 36vw);
+}
+
+/* Material makes the table itself a scroll container (overflow: auto) inside its scrolling wrapper.
+   A sticky cell sticks to its nearest scroll container, so the table must not be one: the wrapper
+   does the scrolling. */
+.md-typeset .md-typeset__table > table:not([class]) {
+  max-width: none;
+  overflow: visible;
+}
+
+.md-typeset table:not([class]) th:first-child,
+.md-typeset table:not([class]) td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: min(8rem, 30vw);
+  background-color: var(--md-default-bg-color);
+  border-right: 0.05rem solid var(--md-typeset-table-color);
+}
+
+.md-typeset table:not([class]) tbody tr:hover > td:first-child {
+  background-image: linear-gradient(var(--md-typeset-table-color--light), var(--md-typeset-table-color--light));
+}
+
+.md-typeset .md-typeset__scrollwrap:focus-visible,
+.md-typeset .mermaid:focus-visible {
+  outline: 0.1rem solid var(--md-accent-fg-color);
+  outline-offset: 0.1rem;
+}
+
+/* Diagrams keep their natural size and scroll sideways rather than shrink. */
+.md-typeset .mermaid {
+  overflow-x: auto;
 }
 
 /* Landing page */
@@ -60,7 +177,7 @@
   font-size: 2.6rem;
   font-weight: 700;
   letter-spacing: -0.03em;
-  color: var(--md-default-fg-color);
+  color: var(--ay-wordmark);
 }
 
 .md-typeset .ay-hero h1 .headerlink {
@@ -76,17 +193,58 @@
 }
 
 .md-typeset .ay-hero > p {
-  max-width: 46rem;
+  max-width: 64ch;
 }
 
 .md-typeset .ay-hero .md-button {
   margin: 0.3rem 0.4rem 0.3rem 0;
 }
 
-.md-typeset .ay-status {
+/* The most important caveat on the page: body size, muted, never fine print. */
+.md-typeset .ay-hero > .ay-status {
   margin: 1.1rem 0 0;
-  font-size: 0.72rem;
   color: var(--ay-muted);
+}
+
+/* On a wide screen the actions and the status sit in a column of their own, beside the text. */
+@media screen and (min-width: 60em) {
+  .ay-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 36rem) minmax(14rem, 18rem);
+    justify-content: space-between;
+    column-gap: 3rem;
+    align-items: start;
+  }
+
+  .ay-hero > * {
+    grid-column: 1;
+  }
+
+  .md-typeset .ay-hero > .ay-actions,
+  .md-typeset .ay-hero > .ay-status {
+    grid-column: 2;
+    margin: 0;
+  }
+
+  .md-typeset .ay-hero > .ay-actions {
+    grid-row: 1 / span 2;
+    align-self: end;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .md-typeset .ay-hero > .ay-actions .md-button {
+    margin: 0;
+    text-align: center;
+  }
+
+  .md-typeset .ay-hero > .ay-status {
+    grid-row: 3;
+    align-self: end;
+    padding-top: 1rem;
+    border-top: 1px solid var(--ay-hero-border);
+  }
 }
 
 .md-typeset .ay-name {
@@ -99,11 +257,176 @@
   border-radius: 0.5rem;
 }
 
-.md-typeset .mermaid {
-  overflow-x: auto;
+/* The landing page's table spans the grid, edge to edge with the cards. */
+.md-typeset .ay-wide .md-typeset__scrollwrap {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.md-typeset .ay-wide .md-typeset__table {
+  display: block;
+  padding: 0;
+}
+
+.md-typeset .ay-wide table:not([class]) {
+  display: table;
+  width: 100%;
+}
+
+/* The stage strip: one run per merge, left to right, with the ledger and cockpit underneath. */
+.md-typeset .ay-route {
+  display: block;
+  width: auto;
+  max-width: none;
+  margin: 1.2rem 0 1.4rem;
+  padding: 1.2rem 1.2rem 1rem;
+  border: 1px solid var(--ay-hero-border);
+  border-radius: 0.6rem;
+  background-color: var(--ay-route-bg);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.md-typeset .ay-route ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* (beats Material's [dir=ltr] .md-typeset ol li indent) */
+.md-typeset .ay-route li.ay-stop {
+  margin: 0;
+}
+
+.md-typeset .ay-route ol.ay-route__line {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.md-typeset .ay-stop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--ay-route-rule);
+  border-radius: 0.2rem;
+  background-color: var(--ay-route-stop-bg);
+}
+
+/* the track between two stops, ending in a small arrowhead */
+.md-typeset .ay-route__line > .ay-stop + .ay-stop::before {
+  position: absolute;
+  top: 1.1rem;
+  left: calc(-0.9rem - 1px);
+  width: 0.9rem;
+  border-top: 1px solid var(--ay-route-rule);
+  content: "";
+}
+
+.md-typeset .ay-route__line > .ay-stop + .ay-stop::after {
+  position: absolute;
+  top: calc(1.1rem - 0.25rem + 0.5px);
+  left: calc(-0.3rem - 1px);
+  border-top: 0.25rem solid transparent;
+  border-bottom: 0.25rem solid transparent;
+  border-left: 0.3rem solid var(--ay-route-rule);
+  content: "";
+}
+
+.md-typeset .ay-stop__name {
+  color: var(--ay-route-name);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.md-typeset .ay-stop__does {
+  color: var(--ay-route-does);
+}
+
+.md-typeset .ay-stop--gate {
+  border-color: var(--ay-route-gate-bg);
+  background-color: var(--ay-route-gate-bg);
+}
+
+.md-typeset .ay-stop--gate .ay-stop__name,
+.md-typeset .ay-stop--gate .ay-stop__does {
+  color: var(--ay-route-gate-fg);
+}
+
+.md-typeset .ay-route__observe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  max-width: none;
+  margin: 1rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--ay-hero-border);
+  color: var(--ay-route-does);
+  font-size: inherit;
+  font-style: normal;
+}
+
+.md-typeset .ay-route ol.ay-route__line--observe {
+  display: grid;
+  flex: 1 1 24rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 30rem;
+}
+
+.md-typeset .ay-stop--record {
+  border-style: dashed;
+}
+
+@media screen and (max-width: 59.9375em) {
+  .md-typeset .ay-route ol.ay-route__line,
+  .md-typeset .ay-route ol.ay-route__line--observe {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.7rem;
+    max-width: none;
+  }
+
+  .md-typeset .ay-stop {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.6rem;
+  }
+
+  .md-typeset .ay-stop__name {
+    min-width: 5.5rem;
+  }
+
+  /* the track runs down the left edge */
+  .md-typeset .ay-route__line > .ay-stop + .ay-stop::before {
+    top: calc(-0.7rem - 1px);
+    left: 1.2rem;
+    width: 0;
+    height: 0.7rem;
+    border-top: 0;
+    border-left: 1px solid var(--ay-route-rule);
+  }
+
+  .md-typeset .ay-route__line > .ay-stop + .ay-stop::after {
+    top: calc(-0.3rem - 1px);
+    left: calc(1.2rem - 0.25rem + 0.5px);
+    border-top: 0.3rem solid var(--ay-route-rule);
+    border-right: 0.25rem solid transparent;
+    border-bottom: 0;
+    border-left: 0.25rem solid transparent;
+  }
 }
 
 @media screen and (max-width: 44.9375em) {
+  /* Material bleeds the tab labels to the screen edge with max-width: 100vw, which counts a
+     classic scrollbar and overflows the page by its width. Bleed to the content box instead. */
+  .md-content__inner > .tabbed-set .tabbed-labels {
+    max-width: calc(100% + 1.6rem);
+  }
+
   .ay-hero {
     padding: 1.4rem 1rem 1.1rem;
   }
@@ -114,6 +437,10 @@
 
   .md-typeset .ay-tagline {
     font-size: 1rem;
+  }
+
+  .md-typeset .ay-route {
+    padding: 1rem 0.8rem 0.8rem;
   }
 }
 

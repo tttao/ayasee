@@ -1,0 +1,14 @@
+{#-
+  The repository link in the header and the navigation drawer, without data-md-component="source":
+  that attribute makes Material fetch the star and fork counts and the latest release from
+  api.github.com on every page. The site makes no third-party requests (GHES, air-gapped Pages).
+-#}
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source">
+  <div class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </div>
+  <div class="md-source__repository">
+    {{ config.repo_name }}
+  </div>
+</a>

@@ -34,21 +34,23 @@ exception, and this page does not claim more than the sources support.
 
 ## Matrix
 
-| Tool | Runs where | Licence / cost | Ordered multi-env promotion | Plan binding | Risk gate | Drift | Estate dashboard | Fit vs "Actions-only" |
+On a narrow screen the table scrolls sideways; the tool name stays in view.
+
+| Tool | Fit vs "Actions-only" | Runs where | Licence / cost | Ordered multi-env promotion | Plan binding | Risk gate | Drift | Estate dashboard |
 |---|---|---|---|---|---|---|---|---|
-| **ayasee** (this project) | Your Actions only | Apache-2.0 | Yes, one run per merge | Encrypted saved plan plus manifest (OpenTofu); replan fallback not wired into the workflow yet | Named risk tiers with principal deltas, plus a Databricks Rego pack | Nightly at the live SHA, one issue per environment | Static, read-only snapshot (Pages, issue or summary) | Yes |
-| **tfaction** | Actions only | MIT, 406 stars | No (changed directories) | Saved plan artifact | conftest | Issues, one per directory | No | Yes |
-| **dflook actions** | Actions only | No LICENSE file detected | No | Re-plan must equal the PR plan | No | `*-check` actions | No | Yes |
-| **Atmos Native CI / Atmos Pro** | Your Actions plus a SaaS app | Apache-2.0 CLI; Pro hosted | Dependency-ordered dispatch (Pro) | Stored plan plus semantic compare | OPA | Pro (scheduled) | Pro (hosted) | Partly |
-| **Gruntwork Pipelines** | Your Actions | Commercial subscription | Patcher promotion of updates | Not documented | No | Scheduled, opens a PR | No | Yes, but paid |
-| **ALZ accelerator** | Actions only | MIT | Single environment per pipeline | Artifact within the run | No | No | No | Yes (template) |
-| **Terramate** | CLI in CI plus Cloud | MPL-2.0 CLI; Cloud proprietary | Ordering, no promotion | Not documented | Cloud policies | Needs Cloud | Cloud (paid tiers) | Partly |
-| **Digger / OpenTaco** | CI plus an orchestrator backend | MIT (plus an `ee` directory, terms unknown) | No | Plan persistence | OPA | Yes | Cloud UI | No (backend) |
-| **Terrateam / Stategraph** | Your runners plus a server | MPL-2.0; OSS capped at 3 active users | No | Apply invalidates plans | Cost threshold, OPA | Scheduled | Console | No (server) |
-| **Atlantis** | Self-hosted server | Apache-2.0 | No | Plan hash | Custom | Alpha API | Locks and logs only | No |
-| **Spacelift / HCP Terraform / env0 / Scalr** | SaaS (or self-hosted) | Proprietary | Stack dependencies / Stacks / Workflows | Same-run plan | OPA / Sentinel | Paid or metered | Yes | No |
-| **Kargo** | Kubernetes | Apache-2.0 core; Terraform steps commercial | Yes (freight and stages) | `tf-apply` of a saved plan | No | No | Promotion UI | No |
-| **Burrito / tofu-controller** | Kubernetes | Apache-2.0 | No | Not applicable | No | Periodic plan | Burrito layer UI | No |
+| **ayasee** (this project) | Yes | Your Actions only | Apache-2.0 | Yes, one run per merge | Encrypted saved plan plus manifest (OpenTofu); replan fallback not wired into the workflow yet | Named risk tiers with principal deltas, plus a Databricks Rego pack | Nightly at the live SHA, one issue per environment | Static, read-only snapshot (Pages, issue or summary) |
+| **tfaction** | Yes | Actions only | MIT, 406 stars | No (changed directories) | Saved plan artifact | conftest | Issues, one per directory | No |
+| **dflook actions** | Yes | Actions only | No LICENSE file detected | No | Re-plan must equal the PR plan | No | `*-check` actions | No |
+| **Atmos Native CI / Atmos Pro** | Partly | Your Actions plus a SaaS app | Apache-2.0 CLI; Pro hosted | Dependency-ordered dispatch (Pro) | Stored plan plus semantic compare | OPA | Pro (scheduled) | Pro (hosted) |
+| **Gruntwork Pipelines** | Yes, but paid | Your Actions | Commercial subscription | Patcher promotion of updates | Not documented | No | Scheduled, opens a PR | No |
+| **ALZ accelerator** | Yes (template) | Actions only | MIT | Single environment per pipeline | Artifact within the run | No | No | No |
+| **Terramate** | Partly | CLI in CI plus Cloud | MPL-2.0 CLI; Cloud proprietary | Ordering, no promotion | Not documented | Cloud policies | Needs Cloud | Cloud (paid tiers) |
+| **Digger / OpenTaco** | No (backend) | CI plus an orchestrator backend | MIT (plus an `ee` directory, terms unknown) | No | Plan persistence | OPA | Yes | Cloud UI |
+| **Terrateam / Stategraph** | No (server) | Your runners plus a server | MPL-2.0; OSS capped at 3 active users | No | Apply invalidates plans | Cost threshold, OPA | Scheduled | Console |
+| **Atlantis** | No | Self-hosted server | Apache-2.0 | No | Plan hash | Custom | Alpha API | Locks and logs only |
+| **Spacelift / HCP Terraform / env0 / Scalr** | No | SaaS (or self-hosted) | Proprietary | Stack dependencies / Stacks / Workflows | Same-run plan | OPA / Sentinel | Paid or metered | Yes |
+| **Kargo** | No | Kubernetes | Apache-2.0 core; Terraform steps commercial | Yes (freight and stages) | `tf-apply` of a saved plan | No | No | Promotion UI |
+| **Burrito / tofu-controller** | No | Kubernetes | Apache-2.0 | No | Not applicable | No | Periodic plan | Burrito layer UI |
 
 The ayasee row describes the code in this repository, not a published release. Where a competitor
 cell says "not documented", the vendor's public documentation did not say, which is not the same as

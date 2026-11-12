@@ -16,6 +16,9 @@ strict: true
 
 theme:
   name: material
+  # partials/source.html: the repository link without the api.github.com fetch;
+  # main.html: the vendored Mermaid, on pages with a diagram only
+  custom_dir: overrides
   font: false
   icon:
     logo: material/boom-gate-up
@@ -48,6 +51,12 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/tables.js
+
+extra:
+  generator: false
 
 plugins:
   - search
@@ -99,9 +108,9 @@ nav:
           - Ownership contract: examples/databricks-azure/OWNERSHIP.md
       - Migrate from environment branches: docs/guides/migrate-from-env-branches.md
       - Onboard a brownfield estate: docs/guides/onboard-brownfield.md
-      - Comparison with other tools: docs/comparison.md
   - Concepts:
       - Architecture: docs/concepts/architecture.md
+      - Comparison with other tools: docs/comparison.md
       - The staged run: docs/concepts/staged-run.md
       - Plan binding: docs/concepts/plan-binding.md
       - Pull-request checks: docs/concepts/pr-checks.md
