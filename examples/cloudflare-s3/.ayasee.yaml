@@ -1,0 +1,28 @@
+# ayasee configuration of the Cloudflare and S3 reference repository: one host runs a test and a
+# prod stack behind one Cloudflare Tunnel, state in an S3-compatible bucket, no cloud identity.
+# Reference: docs/reference/ayasee-yaml.md in the ayasee repository.
+stages: [test, prod]
+engine: opentofu
+units_root: stages
+
+# Cloudflare and most S3-compatible stores cannot federate with GitHub OIDC: provider tokens are
+# environment secrets, one set per environment. Every run and the cockpit show this as a
+# DEVIATION (D7); see the README for the token scopes.
+identity: secrets
+
+# The approved prod plan is encrypted with a passphrase held by prod-plan, prod and
+# prod-breakglass only (environment secret AYASEE_PLAN_PASSPHRASE).
+plan_encryption:
+  key_provider: pbkdf2
+
+# The tunnel ingress and the Access application exist once and serve both stages: they live under
+# stages/prod only, are applied behind the prod gate and are planned read-only in pull requests.
+shared_units: [tunnel, access]
+
+# No ledger.url here: the git-branch:// URL holds the runner's checkout path, so it is set as the
+# AYASEE_LEDGER_URL variable of each environment (README, step 4).
+gate: always
+allow_cascade: false
+
+notify:
+  teams: true

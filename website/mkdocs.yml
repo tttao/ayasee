@@ -106,6 +106,7 @@ nav:
       - Reference example (Databricks on Azure):
           - examples/databricks-azure/README.md
           - Ownership contract: examples/databricks-azure/OWNERSHIP.md
+      - Reference example (Cloudflare and S3): examples/cloudflare-s3/README.md
       - Migrate from environment branches: docs/guides/migrate-from-env-branches.md
       - Onboard a brownfield estate: docs/guides/onboard-brownfield.md
   - Concepts:

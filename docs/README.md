@@ -14,7 +14,7 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
 |---|---|
 | Understand the design in ten minutes | [Architecture](concepts/architecture.md) |
 | Get from zero to a first green run | [Quickstart](guides/quickstart.md) |
-| See a complete adopter repository | [Databricks on Azure example](../examples/databricks-azure/README.md) |
+| See a complete adopter repository | [Databricks on Azure example](../examples/databricks-azure/README.md), or without Azure, the [Cloudflare and S3 example](../examples/cloudflare-s3/README.md) |
 | Decide whether to use ayasee at all | [Comparison](comparison.md) |
 
 ## Concepts
@@ -61,6 +61,7 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
 | Page | Content |
 |---|---|
 | [Databricks on Azure example](../examples/databricks-azure/README.md) | A working layout: three units across three stages, bootstrap root, callers |
+| [Cloudflare and S3 example](../examples/cloudflare-s3/README.md) | Two stages, `identity: secrets`, `pbkdf2` plan key, S3 state, `git-branch://` ledger, a tunnel and an Access app shared by both stages |
 | [Ownership contract](../examples/databricks-azure/OWNERSHIP.md) | What Terraform owns and what Declarative Automation Bundles own |
 | [End-to-end scenarios](../e2e/README.md) | The sandbox scenarios (implemented, not yet run against a real sandbox) |
 

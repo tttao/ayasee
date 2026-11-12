@@ -14,6 +14,16 @@ released version into the GitHub release notes.
   optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,
   `{kind: deviation, setting: identity}`). The site shows a tag under the repository name, the
   Markdown view a "Labels" list. `ayasee.config.label_keys` and `parse_config_text` back it.
+- A second reference repository, `examples/cloudflare-s3/` (#1): stages `[test, prod]`,
+  `identity: secrets`, the `pbkdf2` plan key, an S3-compatible backend, a `git-branch://` ledger
+  set per environment, and the tunnel ingress and Access application as `shared_units`. Its README
+  gives the token scopes per environment and the worked no-cloud ledger setup.
+
+### Fixed
+
+- The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that
+  store is read-only. It now describes the `git-branch://` store, `AYASEE_LEDGER_URL` and
+  `ledger-token`.
 
 ## [0.1.0] - unreleased
 

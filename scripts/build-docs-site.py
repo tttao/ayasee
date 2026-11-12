@@ -29,6 +29,7 @@ PAGES = (
     "CHANGELOG.md",
     "modules/*/README.md",
     "examples/databricks-azure/*.md",
+    "examples/cloudflare-s3/*.md",
     "e2e/README.md",
     "e2e/ghes/README.md",
 )
