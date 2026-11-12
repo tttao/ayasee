@@ -6,9 +6,12 @@ plan values, never finding details. A repo whose data cannot be fetched is still
 Degraded per environment instead: HTTP 403 on pending deployments gives ``gate.waiting``
 null; 404/422 on compare gives ``pending_commits`` null.
 
-Repos file: a YAML list of ``{repo, ledger, stages?, workflows?}``. ``workflows`` (default
-``[".github/workflows/main.yml"]``, the caller of iac-staged) lists the workflow files whose
-waiting runs count as gates.
+Repos file: a YAML list of ``{repo, ledger, stages?, workflows?, config?}``. ``workflows``
+(default ``[".github/workflows/main.yml"]``, the caller of iac-staged) lists the workflow files
+whose waiting runs count as gates. ``config`` (default ``.ayasee.yaml``) is the repository's ayasee
+configuration, read at the ``main`` SHA for its ``labels``: the opt-ins that weaken a compliant
+default (``solo_mode``, ``identity: secrets``). A missing file means the defaults (no labels); an
+unreadable or invalid one leaves ``labels`` out (unknown).
 
 Rate limit: per repo and run about 6 + 7 x envs requests (main, waiting runs, code scanning
 x2, plus per env: ledger current.json + history listing + newest history entry, compare, drift
@@ -34,7 +37,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from ayasee import cli
+from ayasee import cli, config
 from ayasee.cockpit.render_md import add_subcommands
 from ayasee.drift import DRIFT_BULLET_PREFIX
 from ayasee.github import GitHub, GitHubError
@@ -44,6 +47,7 @@ from ayasee.ledger import LedgerError, LedgerRecord, LedgerStore, open_store
 SCHEMA = "ayasee.snapshot/v1"
 DEFAULT_STAGES = ["dev", "uat", "prod"]
 DEFAULT_WORKFLOWS = [".github/workflows/main.yml"]
+DEFAULT_CONFIG = ".ayasee.yaml"
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -57,6 +61,7 @@ class RepoEntry:
     ledger: str
     stages: list[str] = field(default_factory=lambda: list(DEFAULT_STAGES))
     workflows: list[str] = field(default_factory=lambda: list(DEFAULT_WORKFLOWS))
+    config: str = DEFAULT_CONFIG
 
 
 def load_repos(path: Path) -> list[RepoEntry]:
@@ -71,7 +76,9 @@ def load_repos(path: Path) -> list[RepoEntry]:
         where = f"repos[{i}]"
         if not isinstance(item, dict):
             raise ReposFileError(f"{where}: expected a mapping")
-        unknown = sorted(str(k) for k in item if k not in {"repo", "ledger", "stages", "workflows"})
+        unknown = sorted(
+            str(k) for k in item if k not in {"repo", "ledger", "stages", "workflows", "config"}
+        )
         if unknown:
             raise ReposFileError(f"{where}: unknown key(s): {', '.join(unknown)}")
         repo, ledger = item.get("repo"), item.get("ledger")
@@ -94,7 +101,10 @@ def load_repos(path: Path) -> list[RepoEntry]:
             or not all(isinstance(w, str) and w for w in workflows)
         ):
             raise ReposFileError(f"{where}.workflows: expected workflow file paths")
-        out.append(RepoEntry(repo, ledger, list(stages), list(workflows)))
+        cfg = item.get("config", DEFAULT_CONFIG)
+        if not isinstance(cfg, str) or not cfg or cfg.startswith("/") or ".." in cfg.split("/"):
+            raise ReposFileError(f"{where}.config: expected a repository-relative file path")
+        out.append(RepoEntry(repo, ledger, list(stages), list(workflows), cfg))
     if len({e.repo for e in out}) != len(out):
         raise ReposFileError("repos file: duplicate repo")
     return out
@@ -165,6 +175,22 @@ def _drift(gh: GitHub, repo: str, env: str) -> dict[str, Any]:
     }
 
 
+def _labels(gh: GitHub, entry: RepoEntry, main: str | None) -> list[dict[str, str]] | None:
+    """The repository's opt-ins that weaken a compliant default; None when unknown."""
+    if main is None:
+        return None
+    try:
+        text = gh.get_file(entry.repo, entry.config, main)
+    except GitHubError:
+        return None  # no contents permission, or not a file: unknown, not a repo error
+    if text is None:
+        return []  # no configuration file: the compliant defaults
+    try:
+        return config.label_keys(config.parse_config_text(text))
+    except config.ConfigError:
+        return None
+
+
 def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str, Any]:
     repo = entry.repo
     main = gh.main_sha(repo)
@@ -205,7 +231,11 @@ def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str,
             "stop_the_line": bool(gh.list_issues(repo, [STOP_LABEL, f"env:{name}"])),
         }
         envs.append(e)
-    return {"repo": repo, "main_sha": main, "findings": findings, "envs": envs}
+    out: dict[str, Any] = {"repo": repo, "main_sha": main, "findings": findings, "envs": envs}
+    labels = _labels(gh, entry, main)
+    if labels is not None:
+        out["labels"] = labels
+    return out
 
 
 def _short(exc: Exception) -> str:

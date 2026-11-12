@@ -7,6 +7,14 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The cockpit shows the opt-ins that weaken a compliant default (#1): the collector reads each
+  repository's `.ayasee.yaml` at `main` (`config` in `repos.yaml`) and the snapshot carries an
+  optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,
+  `{kind: deviation, setting: identity}`). The site shows a tag under the repository name, the
+  Markdown view a "Labels" list. `ayasee.config.label_keys` and `parse_config_text` back it.
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published first as the release candidate `v0.1.0-rc.2` (the run of

@@ -54,6 +54,7 @@ attributes.
 |---|---|---|
 | `repos[].repo`, `main_sha` | Repository and the head of its default branch | GitHub API |
 | `repos[].error` | Present when the repository could not be collected (at most 200 characters); its environments are unknown | Collector |
+| `repos[].labels` | Optional. The opt-ins of the repository's `.ayasee.yaml` at `main` that weaken a compliant default, each `{kind, setting}`: `{non-compliant, solo_mode}` (no independent approval, D2) and `{deviation, identity}` (`identity: secrets`, stored provider tokens instead of OIDC, D7). Empty when none or when the file is missing; absent when unknown (the file cannot be read or is invalid). The site shows each as a tag under the repository name, the Markdown view as a "Labels" list. | Contents API (`config` in `repos.yaml`, default `.ayasee.yaml`) |
 | `repos[].findings` | Open code-scanning alerts of severity critical and high, and a link. Repo level, because scans run on `main` and on pull requests, not per environment (R54). Null when unavailable. | Code-scanning API |
 | `envs[]` | The repository's configured stages, `prod-plan` excluded | `repos.yaml` `stages` (default `dev, uat, prod`) |
 | `live_sha`, `live_at`, `converged` | The ledger's current record | [Ledger](ledger.md) |

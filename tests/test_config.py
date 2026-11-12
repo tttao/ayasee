@@ -432,3 +432,17 @@ def test_check_shared_layout(tmp_path, monkeypatch, capsys):
     assert "tunnel" not in err
     p = write(tmp_path, "")
     assert _cli(monkeypatch, "check-shared", "--path", str(p)) == 0
+
+
+def test_label_keys_and_quiet_parse(capsys):
+    cfg = config.parse_config_text("solo_mode: true\nidentity: secrets\n")
+    assert capsys.readouterr().err == ""  # unlike load_config, nothing is printed
+    assert config.label_keys(cfg) == [
+        {"kind": "non-compliant", "setting": "solo_mode"},
+        {"kind": "deviation", "setting": "identity"},
+    ]
+    assert config.labels(cfg) == [config.NON_COMPLIANT, config.DEVIATION_SECRETS]
+    assert config.parse_config_text("") == Config()
+    for bad in ("bogus: 1", "stages: [unclosed"):
+        with pytest.raises(ConfigError):
+            config.parse_config_text(bad)

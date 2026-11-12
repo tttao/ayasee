@@ -38,6 +38,10 @@ export interface Repo {
     url: NullableString;
   };
   envs: Env[];
+  /**
+   * Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets: deviation). Absent when unknown, empty when none.
+   */
+  labels?: Label[];
 }
 /**
  * This interface was referenced by `AyaseeCockpitSnapshotV1`'s JSON-Schema
@@ -65,4 +69,12 @@ export interface Env {
     last_result: "applied" | "failed" | "no_changes" | "unknown";
     stop_the_line: boolean;
   };
+}
+/**
+ * This interface was referenced by `AyaseeCockpitSnapshotV1`'s JSON-Schema
+ * via the `definition` "label".
+ */
+export interface Label {
+  kind: "non-compliant" | "deviation";
+  setting: string;
 }

@@ -253,18 +253,39 @@ def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
     }
 
 
-def labels(cfg: Config) -> list[str]:
-    """The opt-ins that weaken a compliant default, one line each, for run summaries.
+def label_keys(cfg: Config) -> list[dict[str, str]]:
+    """The opt-ins that weaken a compliant default, as ``{kind, setting}`` (the cockpit's form).
 
-    ``solo_mode`` disables independent approval (D2) and ``identity: secrets`` stores provider
-    tokens instead of using OIDC (D7). The same lines go to stderr on every load.
+    ``solo_mode`` disables independent approval (D2, kind ``non-compliant``) and
+    ``identity: secrets`` stores provider tokens instead of using OIDC (D7, kind ``deviation``).
     """
     out = []
     if cfg.solo_mode:
-        out.append(NON_COMPLIANT)
+        out.append({"kind": "non-compliant", "setting": "solo_mode"})
     if cfg.identity == "secrets":
-        out.append(DEVIATION_SECRETS)
+        out.append({"kind": "deviation", "setting": "identity"})
     return out
+
+
+_LABEL_TEXT = {"solo_mode": NON_COMPLIANT, "identity": DEVIATION_SECRETS}
+
+
+def labels(cfg: Config) -> list[str]:
+    """The same opt-ins as :func:`label_keys`, one line each, for run summaries.
+
+    The same lines go to stderr on every load.
+    """
+    return [_LABEL_TEXT[k["setting"]] for k in label_keys(cfg)]
+
+
+def parse_config_text(text: str) -> Config:
+    """Parse the text of a configuration file without printing anything (the cockpit reads
+    other repositories' files). Raises :class:`ConfigError`."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"cannot parse: {type(exc).__name__}") from exc
+    return _parse({} if raw is None else raw)
 
 
 def _labels(args: argparse.Namespace) -> int:

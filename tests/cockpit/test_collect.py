@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 
@@ -57,10 +58,23 @@ def _compare(base, head, ahead):
     )
 
 
-def _mock_basics(*, scanning=None, waiting=(), issues=None):
-    """Everything but compare. ``issues``: {(label, env): [issue, ...]}."""
+def _mock_basics(*, scanning=None, waiting=(), issues=None, config=None):
+    """Everything but compare. ``issues``: {(label, env): [issue, ...]}. ``config``: the text of
+    .ayasee.yaml at main (None: no such file), or an int HTTP status."""
     respx.get(f"{BASE}/repos/{REPO}/commits/main").mock(
         return_value=httpx.Response(200, json={"sha": MAIN})
+    )
+    if isinstance(config, int):
+        cfg = httpx.Response(config, json={"message": "nope"})
+    elif config is None:
+        cfg = httpx.Response(404, json={"message": "Not Found"})
+    else:
+        cfg = httpx.Response(
+            200,
+            json={"encoding": "base64", "content": base64.b64encode(config.encode()).decode()},
+        )
+    respx.get(f"{BASE}/repos/{REPO}/contents/.ayasee.yaml", params={"ref": MAIN}).mock(
+        return_value=cfg
     )
     respx.get(f"{BASE}/repos/{REPO}/actions/runs").mock(
         return_value=httpx.Response(200, json={"workflow_runs": [r for r, _ in waiting]})
@@ -604,3 +618,49 @@ def test_estate_repositories_refuses_ledgers_the_cockpit_cannot_read(tmp_path, l
     f.write_text(f"- repo: acme/a\n  ledger: {ledger}\n")
     with pytest.raises(ReposFileError, match="github-branch://"):
         estate_repositories(load_repos(f), "acme")
+
+
+@pytest.mark.parametrize(
+    ("config", "want"),
+    [
+        (None, []),  # no configuration file: the compliant defaults
+        ("stages: [dev, uat, prod]\n", []),
+        (
+            "solo_mode: true\nidentity: secrets\n",
+            [
+                {"kind": "non-compliant", "setting": "solo_mode"},
+                {"kind": "deviation", "setting": "identity"},
+            ],
+        ),
+        ("bogus: 1\n", "unknown"),  # invalid: unknown, never a repo error
+        (403, "unknown"),  # no contents permission
+    ],
+)
+@respx.mock
+def test_labels_come_from_the_configuration_at_main(tmp_path, capsys, config, want):
+    _mock_basics(config=config)
+    for base, head in ((DEV, MAIN), (UAT, DEV), (PROD, UAT)):
+        _compare(base, head, 0)
+    url = _ledger(tmp_path, [_rec("dev", DEV), _rec("uat", UAT), _rec("prod", PROD)])
+    snap = collect([_entry(url)], _gh())
+    repo = snap["repos"][0]
+    assert "error" not in repo
+    if want == "unknown":
+        assert "labels" not in repo
+    else:
+        assert repo["labels"] == want
+    jsonschema.validate(snap, SCHEMA)
+    assert "NON-COMPLIANT" not in capsys.readouterr().err  # reading another repo prints nothing
+
+
+def test_load_repos_config_key(tmp_path):
+    f = tmp_path / "repos.yaml"
+    f.write_text(
+        "- {repo: a/b, ledger: 'file:///l', config: cfg/ayasee.yaml}\n- {repo: a/c, ledger: 'file:///l'}\n"
+    )
+    a, c = load_repos(f)
+    assert (a.config, c.config) == ("cfg/ayasee.yaml", ".ayasee.yaml")
+    for bad in ("/abs.yaml", "../x.yaml", "''", "3"):
+        f.write_text(f"- {{repo: a/b, ledger: 'file:///l', config: {bad}}}\n")
+        with pytest.raises(ReposFileError, match="config"):
+            load_repos(f)

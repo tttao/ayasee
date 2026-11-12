@@ -200,4 +200,22 @@ describe("waiting without a since timestamp", () => {
     renderMatrix(s, root, NOW);
     expect(cell("acme/lakehouse", "prod").querySelector(".waiting-since")?.textContent).toBe("at gate");
   });
+
+  it("shows the labels of a repository as text tags under its name", () => {
+    const s = clone();
+    s.repos[0]!.labels = [
+      { kind: "non-compliant", setting: "solo_mode" },
+      { kind: "deviation", setting: "identity" },
+    ];
+    s.repos[1]!.labels = [{ kind: "deviation", setting: "<img src=x onerror=alert(1)>" }];
+    renderMatrix(s, root, NOW);
+    const tags = [...root.querySelectorAll<HTMLElement>(`tr[data-repo="${s.repos[0]!.repo}"] th .repo-label`)];
+    expect(tags.map((t) => t.textContent)).toEqual(["solo mode · non-compliant", "secrets identity · deviation"]);
+    expect(tags[0]!.classList.contains("repo-label--non-compliant")).toBe(true);
+    expect(tags[1]!.title).toContain("D7");
+    // an unknown setting is rendered as text, never as markup
+    expect(root.querySelector("img")).toBeNull();
+    // no labels field (unknown) and an empty list both render nothing
+    expect(root.querySelectorAll(`tr[data-repo="${s.repos[2]!.repo}"] .repo-label`)).toHaveLength(0);
+  });
 });

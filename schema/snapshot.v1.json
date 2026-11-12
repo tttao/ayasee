@@ -32,7 +32,21 @@
             "url": { "$ref": "#/$defs/nullableString" }
           }
         },
-        "envs": { "type": "array", "items": { "$ref": "#/$defs/env" } }
+        "envs": { "type": "array", "items": { "$ref": "#/$defs/env" } },
+        "labels": {
+          "description": "Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets: deviation). Absent when unknown, empty when none.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/label" }
+        }
+      }
+    },
+    "label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "setting"],
+      "properties": {
+        "kind": { "enum": ["non-compliant", "deviation"] },
+        "setting": { "type": "string", "pattern": "^[a-z_]{1,40}$" }
       }
     },
     "env": {

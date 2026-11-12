@@ -16,7 +16,7 @@ Create one GitHub App (organization settings, Developer settings, GitHub Apps). 
 | Metadata | read | repository and branch lookup |
 | Actions | read | runs waiting on a gate |
 | Issues | read | drift and stop-the-line issues |
-| Contents | read | ledger (`github-branch://` stores), compare |
+| Contents | read | ledger (`github-branch://` stores), compare, the repository's `.ayasee.yaml` (labels) |
 | Deployments | read | pending deployments of waiting runs |
 | Code scanning alerts (security events) | read | finding counts |
 | Contents (data repo only) | write | commit `snapshot.json` and `history/` |
@@ -56,7 +56,7 @@ A snapshot is committed only when it changed apart from `generated_at`; an uncha
 
 ### repos.yaml
 
-A YAML list of `{repo, ledger, stages?, workflows?}`.
+A YAML list of `{repo, ledger, stages?, workflows?, config?}`. `config` (default `.ayasee.yaml`) is the repository's ayasee configuration, read at `main` for the cockpit's [labels](../concepts/cockpit.md#the-snapshot-contract-v1).
 
 **`cockpit-collect` reads only `github-branch://` ledgers.** It reads each ledger through the read token (the contents API), and it has no cloud login. A repository whose ayasee ledger is a `git-branch://` store is listed with the matching `github-branch://owner/repo?branch=<branch>` URL. A ledger in Azure Blob storage (`azure-blob://`), or any other store URL, is refused by `ayasee cockpit repos` and the run fails before any token is minted. Keep the ledger of a repository on a branch if it should appear in the cockpit.
 
