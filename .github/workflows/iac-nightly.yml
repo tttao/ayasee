@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -165,7 +165,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -219,7 +219,7 @@ jobs:
           persist-credentials: false
       - id: plan
         if: ${{ steps.failed.outputs.skip == 'false' }}
-        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/plan@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
@@ -253,7 +253,7 @@ jobs:
         run: |
           ayasee drift sync --repo "$REPO" --env "$DRIFT_ENV" --result "$RUNNER_TEMP/drift-result.json" \
             --sha "$SHA" --run-url "$RUN_URL"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         if: ${{ steps.sync.outputs.change == 'opened' }}
         with:
           event: drift_found
@@ -262,7 +262,7 @@ jobs:
           sha: ${{ steps.ledger.outputs.sha }}
           run-url: ${{ env.RUN_URL }}
           teams-webhook: ${{ secrets.teams-webhook }}
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         if: ${{ steps.sync.outputs.change == 'cleared' }}
         with:
           event: drift_cleared
@@ -271,7 +271,7 @@ jobs:
           sha: ${{ steps.ledger.outputs.sha }}
           run-url: ${{ env.RUN_URL }}
           teams-webhook: ${{ secrets.teams-webhook }}
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         if: ${{ failure() }}
         with:
           event: stage_failed
@@ -297,7 +297,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: config
@@ -371,7 +371,7 @@ jobs:
             exit 1
           }
           echo "count=$count" >>"$GITHUB_OUTPUT"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         if: ${{ steps.findings.outputs.count != '0' }}
         with:
           event: new_findings

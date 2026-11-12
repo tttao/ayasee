@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: config
@@ -229,7 +229,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # the diff against the base needs the merge base
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -288,7 +288,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - id: plan
         if: ${{ steps.changed.outputs.any == 'true' }}
-        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/plan@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         env:
           CLOUDFLARE_API_TOKEN: ${{ steps.changed.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
@@ -309,7 +309,7 @@ jobs:
           lock: "false" # a read-only identity cannot write the state lock
       - id: policy
         if: ${{ steps.plan.outcome == 'success' }}
-        uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/policy@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
           stage: ${{ steps.changed.outputs.stage }}
@@ -374,7 +374,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # the diff against the base needs the merge base
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: shared
@@ -423,7 +423,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -441,7 +441,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - id: plan
-        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/plan@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         env:
           CLOUDFLARE_API_TOKEN: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
@@ -463,7 +463,7 @@ jobs:
           lock: "false" # a read-only identity cannot write the state lock
       - id: policy
         if: ${{ steps.plan.outcome == 'success' }}
-        uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/policy@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
           stage: prod
@@ -520,7 +520,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: download
@@ -556,7 +556,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: download

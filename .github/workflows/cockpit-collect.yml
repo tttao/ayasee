@@ -127,11 +127,11 @@ jobs:
       - name: Check out the ayasee source (scripts/)
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          repository: OWNER/ayasee # AYASEE_REPO
-          ref: 0000000000000000000000000000000000000000 # AYASEE_SHA
+          repository: tttao/ayasee # AYASEE_REPO
+          ref: 7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_SHA
           path: ayasee-src
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: repos
@@ -277,7 +277,7 @@ jobs:
           path: cockpit-data
       # builds the site and puts snapshot.json and history/ (with index.json) at the site root,
       # where the page fetches ./snapshot.json and ./history/index.json
-      - uses: OWNER/ayasee/actions/cockpit-site@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/cockpit-site@7643f8a3120a34c557f2de5b1c7fd668556e3794 # AYASEE_REF
         with:
           snapshot: cockpit-data/snapshot.json
           history-dir: cockpit-data/history
