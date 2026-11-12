@@ -16,6 +16,23 @@ export function agoLabel(iso: string | null | undefined, now: Date): string {
   return a === "just now" || a === "unknown" ? a : `${a} ago`;
 }
 
+/** The same age in words for accessible names: "2 hours", "1 day"; "" when unknown. */
+export function ageWords(iso: string | null | undefined, now: Date): string {
+  const a = ageLabel(iso, now);
+  if (a === "unknown") return "";
+  if (a === "just now") return "less than a minute";
+  const n = Number.parseInt(a, 10);
+  const unit = { m: "minute", h: "hour", d: "day" }[a.slice(-1)] ?? "";
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
+/** Exact time for display, always UTC: "2026-11-06 09:00 UTC"; the input unchanged if unparseable. */
+export function utcLabel(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return `${new Date(t).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 export function isStale(iso: string, now: Date): boolean {
   return now.getTime() - Date.parse(iso) > STALE_AFTER_MS;
 }

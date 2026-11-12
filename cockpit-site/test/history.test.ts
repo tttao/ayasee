@@ -64,6 +64,18 @@ describe("promotionLeadTime", () => {
     expect(promotionLeadTime(h, "acme/other")).toBe(3);
   });
 
+  it("measures between the two named environments, in that order", () => {
+    const h = [
+      snap(H(1), [env("sandbox", "s1", H(0)), env("staging", "s1", H(1)), env("live", null, null)]),
+      snap(H(9), [env("sandbox", "s1", H(0)), env("staging", "s1", H(1)), env("live", "s1", H(7))]),
+    ];
+    expect(promotionLeadTimes(h, "acme/a")).toEqual([]); // no env is named dev or prod
+    expect(promotionLeadTimes(h, "acme/a", "sandbox", "live")).toEqual([7]);
+    expect(promotionLeadTime(h, "acme/a", "staging", "live")).toBe(6);
+    expect(promotionLeadTimes(h, "acme/a", "live", "sandbox")).toEqual([]); // wrong direction
+    expect(promotionLeadTimes(h, "acme/a", "live", "live")).toEqual([]);
+  });
+
   it("falls back to generated_at when live_at is missing", () => {
     const h = [snap(H(1), [env("dev", "s1", null)]), snap(H(4), [env("prod", "s1", null)])];
     expect(promotionLeadTime(h, "acme/a")).toBe(3);

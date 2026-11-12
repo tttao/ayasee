@@ -35,13 +35,17 @@ describe("renderMatrix", () => {
     const heads = [...root.querySelectorAll("thead th.env")].map((h) => h.textContent);
     expect(heads).toEqual(["dev", "uat", "prod", "sandbox"]);
     expect(cell("acme/lakehouse", "uat")).toBeNull();
-    expect(root.querySelector('td[data-repo="acme/lakehouse"][data-env="uat"]')?.textContent).toBe("—");
+    const gap = root.querySelector('td[data-repo="acme/lakehouse"][data-env="uat"]')!;
+    expect(gap.querySelector(".none-mark")?.textContent).toBe("—");
+    expect(gap.querySelector(".none-mark")?.getAttribute("aria-hidden")).toBe("true");
+    expect(gap.querySelector(".visually-hidden")?.textContent).toBe("Not configured");
   });
 
-  it("shows a dash for the SHA of an unknown cell and a 7 character SHA otherwise", () => {
+  it("omits the SHA of a cell with nothing live and shows a 7 character SHA otherwise", () => {
     renderMatrix(base, root, NOW);
     const unknown = cell("acme/new-repo", "dev");
-    expect(unknown.querySelector(".sha")?.textContent).toBe("—");
+    expect(unknown.querySelector(".sha")).toBeNull();
+    expect(unknown.getAttribute("aria-label")).toContain("No live SHA");
     expect(unknown.querySelector(".pill")?.textContent).toContain("Unknown");
     expect(cell("acme/lakehouse", "dev").querySelector(".sha")?.textContent).toBe("a1b2c3d");
   });
@@ -60,7 +64,7 @@ describe("renderMatrix", () => {
       const [repo, env] = key.split("|") as [string, string];
       const pill = cell(repo, env).querySelector(".pill")!;
       expect(pill.querySelector(".pill-label")?.textContent).toBe(label);
-      expect(pill.querySelector(".pill-icon")?.textContent?.length).toBeGreaterThan(0);
+      expect(pill.querySelector(`svg.pill-icon--${label.toLowerCase()}`)?.childElementCount).toBeGreaterThan(0);
       expect(pill.querySelector(".pill-icon")?.getAttribute("aria-hidden")).toBe("true");
       expect(pill.className).toContain(`pill--${label.toLowerCase()}`);
     }
@@ -68,11 +72,12 @@ describe("renderMatrix", () => {
 
   it("shows the pending count when > 0 and a waiting-since age when waiting", () => {
     renderMatrix(base, root, NOW);
-    expect(cell("acme/lakehouse", "uat").querySelector(".pending")?.textContent).toBe("3 pending");
+    expect(cell("acme/lakehouse", "uat").querySelector(".pending")?.textContent).toBe("3 commits");
     expect(cell("acme/lakehouse", "dev").querySelector(".pending")).toBeNull();
     const prod = cell("acme/lakehouse", "prod");
-    expect(prod.querySelector(".pending")?.textContent).toBe("2 pending");
-    expect(prod.querySelector(".waiting-since")?.textContent).toBe("waiting 2h");
+    expect(prod.querySelector(".pending")?.textContent).toBe("2 commits");
+    expect(prod.querySelector(".waiting-since")?.textContent).toBe("2h at gate");
+    expect(prod.getAttribute("aria-label")).toContain("2 commits pending. Waiting at a gate for 2 hours.");
     expect(cell("acme/lakehouse", "uat").querySelector(".waiting-since")).toBeNull();
   });
 
@@ -143,6 +148,13 @@ describe("selection and keyboard", () => {
 
   it("arrow keys move focus, skip error rows and clamp at the edges", () => {
     renderMatrix(base, root, NOW);
+    // Triage order: the unreadable repo, then worst status first (held, waiting, unknown).
+    expect([...root.querySelectorAll<HTMLElement>("tbody tr")].map((r) => r.dataset.repo)).toEqual([
+      "acme/broken",
+      "acme/ml-platform",
+      "acme/lakehouse",
+      "acme/new-repo",
+    ]);
     const press = (el: HTMLElement, key: string) =>
       el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
     const a = cell("acme/lakehouse", "dev");
@@ -152,16 +164,18 @@ describe("selection and keyboard", () => {
     expect(cell("acme/lakehouse", "uat").tabIndex).toBe(0);
     expect(a.tabIndex).toBe(-1);
     press(document.activeElement as HTMLElement, "ArrowDown");
-    expect(document.activeElement).toBe(cell("acme/ml-platform", "uat"));
-    press(document.activeElement as HTMLElement, "ArrowDown");
     expect(document.activeElement).toBe(cell("acme/new-repo", "uat"));
-    press(document.activeElement as HTMLElement, "ArrowDown"); // error row has no cells
+    press(document.activeElement as HTMLElement, "ArrowDown"); // last row: clamp
     expect(document.activeElement).toBe(cell("acme/new-repo", "uat"));
-    press(document.activeElement as HTMLElement, "ArrowLeft");
-    expect(document.activeElement).toBe(cell("acme/new-repo", "dev"));
-    press(document.activeElement as HTMLElement, "ArrowLeft");
-    expect(document.activeElement).toBe(cell("acme/new-repo", "dev"));
     press(document.activeElement as HTMLElement, "ArrowUp");
+    expect(document.activeElement).toBe(cell("acme/lakehouse", "uat"));
+    press(document.activeElement as HTMLElement, "ArrowUp");
+    expect(document.activeElement).toBe(cell("acme/ml-platform", "uat"));
+    press(document.activeElement as HTMLElement, "ArrowUp"); // only the error row above: clamp
+    expect(document.activeElement).toBe(cell("acme/ml-platform", "uat"));
+    press(document.activeElement as HTMLElement, "ArrowLeft");
+    expect(document.activeElement).toBe(cell("acme/ml-platform", "dev"));
+    press(document.activeElement as HTMLElement, "ArrowLeft");
     expect(document.activeElement).toBe(cell("acme/ml-platform", "dev"));
     press(document.activeElement as HTMLElement, "End");
     expect(document.activeElement).toBe(cell("acme/ml-platform", "prod"));
@@ -180,10 +194,10 @@ describe("mergeEnvOrder (R59)", () => {
 });
 
 describe("waiting without a since timestamp", () => {
-  it("reads just 'waiting'", () => {
+  it("reads just 'at gate'", () => {
     const s = clone();
     s.repos[0]!.envs[2]!.gate.since = null;
     renderMatrix(s, root, NOW);
-    expect(cell("acme/lakehouse", "prod").querySelector(".waiting-since")?.textContent).toBe("waiting");
+    expect(cell("acme/lakehouse", "prod").querySelector(".waiting-since")?.textContent).toBe("at gate");
   });
 });

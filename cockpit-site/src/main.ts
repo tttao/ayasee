@@ -1,8 +1,10 @@
 import "./styles.css";
-import { mount, renderAge } from "./app.ts";
+import { mount, refresh, tick } from "./app.ts";
 
-void mount(document).then((s) => {
-  if (!s) return;
-  // Keep the relative age honest on a page left open.
-  setInterval(() => renderAge(document, s, new Date()), 60_000);
+const REFRESH_MS = 5 * 60_000;
+
+void mount(document).then(() => {
+  // Keep the relative age honest on a page left open, and pick up new snapshots.
+  setInterval(() => tick(document), 60_000);
+  setInterval(() => void refresh(document), REFRESH_MS);
 });

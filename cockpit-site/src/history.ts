@@ -69,14 +69,18 @@ function firstLive(history: readonly Snapshot[], repo: string, env: string): Map
   return first;
 }
 
-/** Hours from first live in dev to first live in prod, per SHA seen in both (in that order). */
-export function promotionLeadTimes(history: readonly Snapshot[], repo: string): number[] {
-  const dev = firstLive(history, repo, "dev");
-  const prod = firstLive(history, repo, "prod");
+/**
+ * Hours from first live in `from` to first live in `to`, per SHA seen in both (in that order).
+ * The caller names the two environments, normally the first and last configured for the repo.
+ */
+export function promotionLeadTimes(history: readonly Snapshot[], repo: string, from = "dev", to = "prod"): number[] {
+  if (from === to) return [];
+  const start = firstLive(history, repo, from);
+  const end = firstLive(history, repo, to);
   const out: number[] = [];
-  for (const [sha, tProd] of prod) {
-    const tDev = dev.get(sha);
-    if (tDev !== undefined && tProd >= tDev) out.push((tProd - tDev) / 3_600_000);
+  for (const [sha, tEnd] of end) {
+    const tStart = start.get(sha);
+    if (tStart !== undefined && tEnd >= tStart) out.push((tEnd - tStart) / 3_600_000);
   }
   return out;
 }
@@ -88,7 +92,7 @@ export function median(xs: readonly number[]): number | null {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
-/** Median hours from dev to prod for the same SHA across the window, or null when none promoted. */
-export function promotionLeadTime(history: readonly Snapshot[], repo: string): number | null {
-  return median(promotionLeadTimes(history, repo));
+/** Median hours from `from` to `to` for the same SHA across the window, or null when none promoted. */
+export function promotionLeadTime(history: readonly Snapshot[], repo: string, from = "dev", to = "prod"): number | null {
+  return median(promotionLeadTimes(history, repo, from, to));
 }
