@@ -1,0 +1,1 @@
+{"format_version":"1.2","resource_changes":[{"address":"cloudflare_dns_record.www","type":"cloudflare_dns_record","change":{"actions":["update"],"before":{"name":"www","type":"A","proxied":true},"after":{"name":"www","type":"A","proxied":false}}}]}

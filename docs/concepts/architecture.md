@@ -73,13 +73,13 @@ flowchart LR
 | `actions/setup` | Composite action | Installs pinned OpenTofu, Terragrunt, uv and the `ayasee` CLI, verifying SHA-256 checksums. Never uses a dependency cache (R40). It does not install Terraform. |
 | `actions/guard` | Composite action | Fails closed unless the preceding stage has this SHA live and converged, and no stop-the-line issue is open. |
 | `actions/plan`, `actions/apply` | Composite actions | Plan and apply per unit in dependency order. They hold the binding modes, plan encryption, the cascade check and the converge check. Logic is in `actions/plan/plan.sh`, `actions/apply/apply.sh` and `actions/lib/ayasee-lib.sh`. |
-| `actions/policy` | Composite action | Runs the Databricks Rego pack with conftest on the plan JSON, inside the job that made the plan. |
+| `actions/policy` | Composite action | Runs the Rego packs (Databricks, Cloudflare) with conftest on the plan JSON, inside the job that made the plan. |
 | `actions/risk` | Composite action | Runs `ayasee changeset` on a directory of plan JSON files. The plan action calls the same command. |
 | `actions/ledger` | Composite action | Writes the outcome of a stage to the ledger and, from `main`, mirrors it to Deployments. |
 | `actions/notify` | Composite action | Teams Adaptive Cards: counts and links only. A failed post never fails a run. |
 | `ayasee` CLI (`src/ayasee/`) | Python package | `binding`, `cascade`, `changed-units`, `changeset`, `config`, `drift`, `findings`, `guard`, `issue`, `approvals`, `ledger`, `notify`, `pr-comment`, `sarif-scrub` and `cockpit`. Every command fails closed. |
-| `policy/databricks/` | Rego | The policy pack, see [the policy pack](../reference/policy-pack.md). |
-| `rules/databricks-azure.yaml` | YAML | The risk rules, see [the risk gate](risk-gate.md). |
+| `policy/databricks/`, `policy/cloudflare/` | Rego | The policy packs, see [the policy packs](../reference/policy-pack.md). |
+| `rules/databricks-azure.yaml`, `rules/cloudflare.yaml` | YAML | The risk rules, see [the risk gate](risk-gate.md). |
 | `modules/github-environments`, `modules/azure-stage-identity` | OpenTofu modules | The nine environments, their reviewers and branch policies, and one managed identity with a federated credential per environment. |
 
 Workflows reference their own actions by repository path and commit SHA. A release rewrites the

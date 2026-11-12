@@ -1,5 +1,5 @@
 name: ayasee policy
-description: Run the Databricks Rego pack on plan JSON with conftest (checksum-verified install). The plan JSON stays in the job.
+description: Run the Rego packs (Databricks, Cloudflare) on plan JSON with conftest (checksum-verified install). The plan JSON stays in the job.
 inputs:
   plan-json:
     description: Directory of <unit>.json plan files (kept inside the job).

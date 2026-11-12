@@ -28,6 +28,12 @@ released version into the GitHub release notes.
   plan and apply steps only, and empty strings with `identity: oidc`. `ayasee config labels` prints
   the `NON-COMPLIANT` and `DEVIATION` lines; the first job of every reusable workflow turns them
   into warnings and run-summary lines. The cockpit does not show the label yet.
+- A second risk-rule and policy pack, for Cloudflare edge, DNS and Zero Trust Access:
+  `rules/cloudflare.yaml` (Access, tunnel ingress, WAF and firewall, proxied, MX and apex DNS
+  records; provider v5 and v4 type names) and `policy/cloudflare/` (`SG-CF-001` to `SG-CF-005`,
+  with OPA tests). The change set shows principals gained and lost for Access policies and groups.
+  Risk rules take a new optional condition, `attr_in`. Both packs always load; the policy action
+  runs conftest with both namespaces. Not yet checked against a real Cloudflare plan.
 - A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
   stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
   remains the ledger that needs no cloud.

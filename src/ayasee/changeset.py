@@ -144,12 +144,17 @@ def render_summary(cs: dict) -> str:
     return "\n".join(out)
 
 
-def _default_rules() -> Path:
-    packaged = Path(str(resources.files("ayasee").joinpath("rules/databricks-azure.yaml")))
-    if packaged.exists():
-        return packaged
-    # source checkout: the repo-root file is the single source (force-included in the wheel)
-    return Path(__file__).resolve().parents[2] / "rules" / "databricks-azure.yaml"
+# The packaged rule files, loaded in this order before any adopter file (issue #1: a second,
+# provider-agnostic pack next to the Databricks one).
+PACKAGED_RULES = ("databricks-azure.yaml", "cloudflare.yaml")
+
+
+def _default_rules() -> list[Path]:
+    packaged = Path(str(resources.files("ayasee").joinpath("rules")))
+    if not (packaged / PACKAGED_RULES[0]).exists():
+        # source checkout: the repo-root files are the single source (force-included in the wheel)
+        packaged = Path(__file__).resolve().parents[2] / "rules"
+    return [packaged / name for name in PACKAGED_RULES]
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -159,7 +164,7 @@ def _run(args: argparse.Namespace) -> int:
         print(f"ayasee: no <unit>.json plans found in {plan_dir}", file=sys.stderr)
         return 1
     try:
-        rules = load_rules(_default_rules(), *(Path(p) for p in args.rules or []))
+        rules = load_rules(*_default_rules(), *(Path(p) for p in args.rules or []))
         items: list[RiskItem] = []
         outputs: list[tuple[str, OutputChange]] = []
         for plan in plans:
