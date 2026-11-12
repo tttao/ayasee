@@ -2,7 +2,7 @@
 # Plan every unit of an environment in dependency order, bind the plans, set outputs.
 # Env: SG_ENV SG_UNITS_ROOT SG_BINDING_MODE SG_ENCRYPT SG_KEY_VAULT_KEY_ID [SG_ENGINE]
 #      [SG_SHA|GITHUB_SHA] [SG_BREAKGLASS_INCIDENT] [SG_ONLY_UNITS] [SG_LOCK] [SG_DRIFT]
-#      [SG_LOCK_TIMEOUT] [SG_EXPECT_SHA] [SG_ALLOW_CASCADE]
+#      [SG_LOCK_TIMEOUT] [SG_EXPECT_SHA] [SG_ALLOW_CASCADE] [SG_SHARED_UNITS]
 # Writes under $RUNNER_TEMP/ayasee/<env>/: plans/<unit>.tfplan, json/<unit>.json,
 # locks/<unit>.lock.hcl, changeset.json, summary.md (the rendered change set, no values), manifest.json and logs/ (engine output). The workflow decides what
 # leaves the job. With encryption off and a binding-mode other than same-job or breakglass, the plan files are
@@ -110,7 +110,7 @@ ayasee binding make --sha "$sha" --env "$env" \
   --out "$work/manifest.json"
 
 ayasee changeset --plan-json "$work/json" --sha "$sha" --env "$env" \
-  --out "$work/changeset.json" --summary "$work/summary.md"
+  --out "$work/changeset.json" --summary "$work/summary.md" --shared-units "${SG_SHARED_UNITS:-}"
 [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/summary.md" >>"$GITHUB_STEP_SUMMARY"
 if [ "$(jq '.items | length' "$work/changeset.json")" -gt 0 ]; then has=true; else has=false; fi
 

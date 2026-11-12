@@ -164,3 +164,40 @@ run "empty_breakglass_reviewers_fails" {
   }
   expect_failures = [var.breakglass_reviewers]
 }
+
+run "prod_pr_plan_is_opt_in" {
+  command = plan
+
+  assert {
+    condition     = !contains(keys(github_repository_environment.this), "prod-pr-plan")
+    error_message = "prod-pr-plan must not exist unless shared_units_pr_plan is true"
+  }
+}
+
+run "prod_pr_plan_accepts_pr_branches_and_needs_prod_reviewers" {
+  command = plan
+  variables {
+    shared_units_pr_plan = true
+  }
+
+  assert {
+    condition     = length(github_repository_environment.this["prod-pr-plan"].deployment_branch_policy) == 0
+    error_message = "prod-pr-plan must accept pull-request branches"
+  }
+  assert {
+    condition     = !contains(keys(github_repository_environment_deployment_policy.main), "prod-pr-plan")
+    error_message = "prod-pr-plan must have no main policy"
+  }
+  assert {
+    condition     = one(github_repository_environment.this["prod-pr-plan"].reviewers).teams == toset([101])
+    error_message = "prod-pr-plan must carry the prod reviewers"
+  }
+  assert {
+    condition     = github_repository_environment.this["prod-pr-plan"].prevent_self_review == true
+    error_message = "prod-pr-plan must prevent self review"
+  }
+  assert {
+    condition     = github_repository_environment_deployment_policy.main["prod-plan"].branch_pattern == "main"
+    error_message = "prod-plan stays main-only"
+  }
+}

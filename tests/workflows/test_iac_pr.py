@@ -46,10 +46,11 @@ def test_pr_never_runs_apply(wf):
 def test_pr_plan_uses_dev_plan_environment_only(wf):
     assert wf["jobs"]["plan-dev"]["environment"] == "dev-plan"
     assert "environment" not in wf["jobs"]["checks"]
-    envs = [j.get("environment") for j in wf["jobs"].values()]
-    assert envs.count("dev-plan") == 1
-    for env in ("uat", "prod", "prod-plan"):
-        assert f"environment: {env}" not in PATH.read_text()
+    envs = [j.get("environment") for j in wf["jobs"].values() if j.get("environment")]
+    # never an environment that can apply or holds the plan key; prod-pr-plan is the read-only
+    # identity of the shared-units plan (#5)
+    assert sorted(envs) == ["dev-plan", "prod-pr-plan"]
+    assert wf["jobs"]["plan-shared"]["environment"] == "prod-pr-plan"
     plans = [s for s in _steps(wf, "plan-dev") if "/actions/plan@" in _uses(s)]
     assert len(plans) == 1
     with_ = plans[0]["with"]
@@ -61,7 +62,11 @@ def test_pr_plan_uses_dev_plan_environment_only(wf):
     for job in wf["jobs"].values():
         for step in job["steps"]:
             if "upload-artifact" in _uses(step):
-                assert step["with"]["name"] in {"ayasee-pr-comment", "ayasee-sarif"}
+                assert step["with"]["name"] in {
+                    "ayasee-pr-comment",
+                    "ayasee-pr-comment-shared",
+                    "ayasee-sarif",
+                }
                 assert "plan" not in step["with"]["path"].replace("pr-comment", "")
 
 
@@ -87,7 +92,7 @@ def test_no_job_running_pr_code_holds_a_write_scope(wf):
         if "/actions/plan@" in text or "hcl validate" in text:
             runs_pr_code += 1
             assert not set(job["permissions"]) & {"pull-requests", "security-events"}, name
-    assert runs_pr_code == 2  # checks and plan-dev
+    assert runs_pr_code == 3  # checks, plan-dev and plan-shared
 
 
 def test_comment_job_checks_out_only_the_base_commit(wf):
@@ -427,3 +432,55 @@ def test_sarif_paths_are_made_repository_relative(wf):
     for s in scrubs:
         assert s["env"]["IAC_ROOT"] == "${{ steps.config.outputs.iac-root }}"
         assert '--uri-prefix "$IAC_ROOT"' in s["run"]
+
+
+def test_shared_units_are_found_without_an_identity(wf):
+    """#5: the job that decides whether to plan shared units holds no identity or environment, so
+    a PR that touches none of them never waits for the prod-pr-plan approval."""
+    job = wf["jobs"]["shared-changes"]
+    assert job["permissions"] == {"contents": "read"} and "environment" not in job
+    assert FORK_SKIP in job["if"]
+    step = job["steps"][_index(job["steps"], lambda s: s.get("id") == "shared")]
+    assert "--env prod --shared" in step["run"] and "--iac-root" in step["run"]
+    assert not any("azure/login" in _uses(s) or "/actions/plan@" in _uses(s) for s in job["steps"])
+
+
+def test_plan_shared_plans_read_only_against_prod_and_never_applies(wf):
+    job = wf["jobs"]["plan-shared"]
+    assert job["needs"] == "shared-changes"
+    assert job["if"] == "${{ needs.shared-changes.outputs.units != '' }}"
+    assert job["permissions"] == {"contents": "read", "id-token": "write"}
+    steps = job["steps"]
+    supported = _index(steps, lambda s: "config check-supported" in s.get("run", ""))
+    login = _index(steps, lambda s: "azure/login" in _uses(s))
+    plan_i = _index(steps, lambda s: "/actions/plan@" in _uses(s))
+    assert supported < login < plan_i
+    plan = steps[plan_i]["with"]
+    assert plan["env"] == "prod" and plan["binding-mode"] == "replan"
+    assert plan["encrypt"] == "false" and plan["lock"] == "false"
+    assert plan["only-units"] == "${{ needs.shared-changes.outputs.units }}"
+    assert plan["shared-units"] == "${{ needs.shared-changes.outputs.shared-units }}"
+    assert "key-vault-key-id" not in plan
+    pol = steps[_index(steps, lambda s: "/actions/policy@" in _uses(s))]["with"]
+    assert pol["stage"] == "prod"
+
+
+def test_shared_plan_has_its_own_sticky_comment(wf):
+    job = wf["jobs"]["comment-shared"]
+    assert job["needs"] == "plan-shared"
+    assert job["permissions"] == {"contents": "read", "pull-requests": "write"}
+    steps = job["steps"]
+    co = [s for s in steps if "actions/checkout@" in _uses(s)]
+    assert len(co) == 1 and co[0]["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    post = steps[-1]
+    assert "--marker pr-plan-shared" in post["run"]
+    dl = steps[_index(steps, lambda s: "download-artifact" in _uses(s))]
+    assert dl["with"]["name"] == "ayasee-pr-comment-shared"
+    # the dev plan's comment does not wait for the shared plan
+    assert wf["jobs"]["comment"]["needs"] == "plan-dev"
+
+
+def test_checks_refuse_a_shared_unit_outside_prod(wf):
+    steps = _steps(wf, "checks")
+    i = _index(steps, lambda s: "config check-shared" in s.get("run", ""))
+    assert "exit 1" in steps[i]["run"]

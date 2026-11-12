@@ -189,6 +189,35 @@ pull-request code with them (same-repository pull requests only; forks get no se
 `dev-plan` read-only tokens. The prod tokens live only in `prod` and `prod-breakglass`, behind their
 reviewers; `prod-plan` should hold read-only ones.
 
+## Units that serve every stage
+
+Every stage plans and applies the units under `<units_root>/<stage>/`. A unit does not have to exist
+in every stage: a unit present under `prod` only is planned by `prod-plan`, shown in the gate
+summary and applied by `prod` behind the approval, and `dev` and `uat` never see it. The ledger
+records it with the prod run.
+
+Some resources exist once and carry the traffic of every stage: one tunnel whose ingress lists the
+test and the prod hostnames, one access application, one DNS zone. They cannot be split per stage,
+and putting them under the first stage would apply prod traffic changes without approval. Put them
+under `prod` and list them in `shared_units` in `.ayasee.yaml`:
+
+```yaml
+shared_units: [edge__tunnel, edge__access]   # stages/prod/edge/tunnel, stages/prod/edge/access
+```
+
+Then:
+
+- `resolve` and the PR `checks` job run `ayasee config check-shared`: a listed unit missing under
+  `prod`, or also present under another stage, fails the run;
+- the gate summary opens with "Shared by every stage" and marks each of their changes **shared**,
+  and the change set lists them in `shared_units`, because the stage name alone does not tell the
+  reviewer the blast radius;
+- a pull request that changes one of them gets a second plan, against prod and read-only, in the
+  `prod-pr-plan` environment ([PR checks](pr-checks.md#shared-units)).
+
+The trade-off is explicit: a change to a shared unit, even one that only concerns a test hostname,
+reaches production only through the prod gate, and no earlier stage soaks it.
+
 ## The plan artifact
 
 `prod-plan` uploads one artifact, `ayasee-prod-plan`, kept 7 days. It holds only the encrypted

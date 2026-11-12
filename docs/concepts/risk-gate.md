@@ -118,6 +118,10 @@ Real output of `ayasee changeset` on a grants update that removes `SELECT` from 
   - lost: `analysts` SELECT
 ```
 
+When the change set touches a unit listed in `shared_units`, the summary opens with a
+"Shared by every stage" line naming it, and each of its changes ends with **shared**
+([units that serve every stage](staged-run.md#units-that-serve-every-stage)).
+
 The same summary is appended to the job summary of `prod-plan` and appears in the sticky comment on
 the pull request (for the dev plan). The Teams `prod_waiting` card carries the counts
 (critical, high, medium, total) and a link, never addresses or values.

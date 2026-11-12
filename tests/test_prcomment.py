@@ -123,3 +123,41 @@ def test_author_must_match_and_is_configurable(tmp_path, monkeypatch):
     args = ["pr-comment", "--repo", "o/n", "--pr", "7", "--body-file", _body(tmp_path)]
     assert cli.main([*args, "--author", "my-app[bot]"]) == 0
     assert patch.called
+
+
+@respx.mock
+def test_shared_marker_keeps_its_own_comment(tmp_path, monkeypatch):
+    dev = {
+        "id": 1,
+        "body": f"{MARKER}\ndev",
+        "user": {"type": "Bot", "login": "github-actions[bot]"},
+    }
+    respx.get(f"{BASE}/repos/o/n/issues/7/comments").mock(
+        return_value=httpx.Response(200, json=[dev])
+    )
+    post = respx.post(f"{BASE}/repos/o/n/issues/7/comments").mock(
+        return_value=httpx.Response(201, json={"id": 5})
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    args = ["pr-comment", "--repo", "o/n", "--pr", "7", "--body-file", _body(tmp_path, "shared")]
+    assert cli.main([*args, "--marker", "pr-plan-shared"]) == 0
+    body = json.loads(post.calls[0].request.content)["body"]
+    assert body == "<!-- ayasee:pr-plan-shared -->\nshared"  # the dev comment is left alone
+
+
+@respx.mock
+def test_dev_marker_does_not_capture_the_shared_comment(tmp_path, monkeypatch):
+    shared = {
+        "id": 2,
+        "body": "<!-- ayasee:pr-plan-shared -->\nx",
+        "user": {"type": "Bot", "login": "github-actions[bot]"},
+    }
+    respx.get(f"{BASE}/repos/o/n/issues/7/comments").mock(
+        return_value=httpx.Response(200, json=[shared])
+    )
+    post = respx.post(f"{BASE}/repos/o/n/issues/7/comments").mock(
+        return_value=httpx.Response(201, json={"id": 5})
+    )
+    assert _run(tmp_path, monkeypatch) == 0
+    assert post.called

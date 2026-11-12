@@ -32,6 +32,8 @@ KEY_PROVIDERS = ("azure_vault", "pbkdf2")
 STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # Environments with a fixed role that a pre-prod stage of iac-staged must never run in.
 RESERVED_ENVIRONMENTS = frozenset({"prod-plan", "prod-breakglass", "dev-plan"})
+# a unit name as the plan action writes it: the path below <units_root>/<stage>, / written __
+_UNIT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 
 
 class ConfigError(Exception):
@@ -65,6 +67,7 @@ class Config:
     solo_mode: bool = False
     allow_cascade: bool = False
     extra_rules: list[str] = field(default_factory=list)
+    shared_units: list[str] = field(default_factory=list)
     drift_noise: dict[str, list[str]] = field(default_factory=dict)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     identity: str = "oidc"
@@ -163,6 +166,16 @@ def _parse(raw: Any) -> Config:
         cfg.allow_cascade = _bool(top["allow_cascade"], "allow_cascade")
     if "extra_rules" in top:
         cfg.extra_rules = _str_list(top["extra_rules"], "extra_rules")
+    if "shared_units" in top:
+        shared = _str_list(top["shared_units"], "shared_units")
+        if any(not _UNIT_NAME.fullmatch(s) for s in shared):
+            raise ConfigError(
+                "shared_units: each entry is a prod unit name (its path below "
+                "<units_root>/prod, with / written __)"
+            )
+        if len(set(shared)) != len(shared):
+            raise ConfigError("shared_units: names must be unique")
+        cfg.shared_units = shared
     if "drift_noise" in top:
         noise = top["drift_noise"]
         if not isinstance(noise, dict):
@@ -322,6 +335,39 @@ def _check_supported(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def shared_layout_problems(cfg: Config, repo: Path = Path(".")) -> list[str]:
+    """Why ``shared_units`` does not match the tree under ``repo``, one message each.
+
+    A shared unit serves every stage, so it lives under ``<units_root>/prod`` (a directory with a
+    ``terragrunt.hcl``) and under no other stage: a copy in another stage would be a second object.
+    """
+    out = []
+    for name in cfg.shared_units:
+        rel = name.replace("__", "/")
+        prod = repo / cfg.units_root / "prod" / rel
+        if not (prod / "terragrunt.hcl").is_file():
+            out.append(f"shared_units: {name}: no unit at {cfg.units_root}/prod/{rel}")
+        for stage in cfg.stages:
+            if stage != "prod" and (repo / cfg.units_root / stage / rel).exists():
+                out.append(
+                    f"shared_units: {name}: also present in stage {stage} "
+                    f"({cfg.units_root}/{stage}/{rel}); a shared unit exists in prod only"
+                )
+    return out
+
+
+def _check_shared(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_config(Path(args.path))
+    except ConfigError as exc:
+        print(f"ayasee: config error: {exc}", file=sys.stderr)
+        return 1
+    problems = shared_layout_problems(cfg)
+    for msg in problems:
+        print(msg, file=sys.stderr)
+    return 1 if problems else 0
+
+
 def _setup(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="config_command", metavar="<action>", required=True)
     show = sub.add_parser("show", help="print the resolved configuration as JSON")
@@ -346,6 +392,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     )
     lab.add_argument("--path", default=str(DEFAULT_PATH))
     lab.set_defaults(handler=_labels)
+    shared = sub.add_parser(
+        "check-shared",
+        help="exit 1, one line per problem, when shared_units does not match the units on disk",
+    )
+    shared.add_argument("--path", default=str(DEFAULT_PATH))
+    shared.set_defaults(handler=_check_shared)
 
 
 cli.register("config", _setup)

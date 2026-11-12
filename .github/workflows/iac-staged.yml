@@ -91,6 +91,7 @@ jobs:
       pre-prod-stage: ${{ steps.resolve.outputs.pre-prod-stage }}
       identity: ${{ steps.resolve.outputs.identity }}
       key-provider: ${{ steps.resolve.outputs.key-provider }}
+      shared-units: ${{ steps.resolve.outputs.shared-units }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -157,7 +158,13 @@ jobs:
             echo "allow-cascade=$(jq -r '.allow_cascade' "$cfg")"
             echo "identity=$identity"
             echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
+            echo "shared-units=$(jq -r '.shared_units | join(",")' "$cfg")"
           } >>"$GITHUB_OUTPUT"
+          # shared units (#5) live under prod only: a copy in another stage is refused
+          if ! problems="$(ayasee config check-shared --path "$CONFIG_PATH" 2>&1)"; then
+            while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
+            exit 1
+          fi
       - id: features
         name: Detect platform features
         # R66: informational for now; it must never block the staged run (R67 fix).
@@ -503,6 +510,7 @@ jobs:
           key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
           allow-cascade: ${{ needs.resolve.outputs.allow-cascade }} # UNSAFE when true (R52)
+          shared-units: ${{ needs.resolve.outputs.shared-units }} # flagged in the gate summary
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}

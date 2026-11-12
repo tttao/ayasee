@@ -35,6 +35,9 @@ result to small jobs that run no PR code (R39).
 | `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on `iac_root` (the repository by default; SARIF, no cache); Checkov via `uvx checkov@<version>` on `iac_root` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
 | `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs. |
 | `plan-dev` | `contents: read`, `id-token: write` | Environment `dev-plan`. Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default; the environment is `dev-plan` whatever that stage is called), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives the `dev-plan` environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text to artifact `ayasee-pr-comment` (1 day). |
+| `shared-changes` | `contents: read` | Only when `shared_units` is set. No environment, no identity: works out which shared prod units the PR changes (`ayasee changed-units --env prod --shared ...`). |
+| `plan-shared` | `contents: read`, `id-token: write` | Only when `shared-changes` found some. Environment `prod-pr-plan`. Plans those units against prod (`binding-mode: replan`, `encrypt: false`, `lock: false`; never applied, the plan files are deleted), runs the pack (stage `prod`) and keeps the comment text as `ayasee-pr-comment-shared`. See [shared units](#shared-units). |
+| `comment-shared` | `contents: read`, `pull-requests: write` | Like `comment`, for a second sticky comment (`--marker pr-plan-shared`), so the dev plan's comment never waits for the `prod-pr-plan` approval. |
 | `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` and runs `ayasee pr-comment`. Plan-dev refuses settings that are not supported yet before its Azure login. |
 
 ### Which units are planned
@@ -95,6 +98,31 @@ trade-off: PR runs have refs like `refs/pull/<n>/merge`, which branch policies m
 strict policy can block every PR plan. Where it is too awkward, rely on the minimal role and on
 requiring approval for workflows from first-time contributors. No reviewers are required on the
 environment. The workflow reads no uat or prod variable and no secret.
+
+## Shared units
+
+A unit listed in `shared_units` exists under `prod` only and serves every stage
+([the staged run](staged-run.md#units-that-serve-every-stage)), so the dev plan never shows it. To
+let the reviewer see its change before merge, `iac-pr` plans it against prod, read-only:
+
+- `ayasee changed-units --env prod --shared a,b` prints the shared units a PR changes: a change
+  under one of them gives its name; a change inside `iac_root` but outside `units_root` (modules,
+  `root.hcl`), a file under `<units_root>/prod/` that belongs to no unit, the configuration file, or
+  a diff that cannot be computed gives every shared unit; changes to other stages and to the prod
+  units that are not shared give nothing.
+- Only then does `plan-shared` start, in the `prod-pr-plan` environment. Create it with
+  `shared_units_pr_plan = true` in the [`github-environments`](../../modules/github-environments/README.md)
+  module: it accepts PR branches and carries the **prod reviewers**, so a prod reviewer approves
+  each run before the PR's code gets the prod identity. Give it its own identity (federated subject
+  `repo:<owner>/<repo>:environment:prod-pr-plan`) with **read-only** rights on prod and on the prod
+  state, no key access and no ledger access, through the same `AZURE_*` variables.
+- The result goes to its own sticky comment, headed "Shared prod units plan".
+
+Everything said above about `dev-plan` applies here with higher stakes: the PR's code runs with the
+identity and can read prod state, including any secret stored in it (a tunnel's credentials, for
+example). The reviewer approval on `prod-pr-plan` is what stands between an open PR and that read;
+approve only after reading the diff. If that is not acceptable, leave `prod-pr-plan` out: the job
+then waits and the change is seen first at the prod gate.
 
 ## Fork pull requests
 

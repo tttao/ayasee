@@ -12,6 +12,7 @@ ayasee config show [--path FILE]
 ayasee config check-supported [--path FILE]
 ayasee config staged [--path FILE] [--start-stage STAGE]
 ayasee config labels [--path FILE]
+ayasee config check-shared [--path FILE]
 ```
 
 `labels` prints one line per opt-in that weakens a compliant default (`solo_mode`,
@@ -29,6 +30,10 @@ implements yet (R35, R73): `gate: risky`, `engine: terraform`, `terragrunt: fals
 `iac-nightly` and the `iac-breakglass` job run it before any cloud login and fail the run on any
 such setting, so it never silently runs something else.
 
+`check-shared` exits 1 and prints one line per problem when `shared_units` does not match the units
+on disk: a name with no unit under `<units_root>/prod`, or one that also exists under another stage.
+Run it from the repository root.
+
 ## Keys
 
 | Key | Type | Default | Meaning |
@@ -38,6 +43,7 @@ such setting, so it never silently runs something else.
 | `terragrunt` | boolean | `true` | Units are always discovered and driven through Terragrunt. `false` (plain OpenTofu layouts) is **not supported yet**: the workflows refuse it with "terragrunt: not supported yet" (R73). |
 | `iac_root` | string | `.` | Directory, relative to the repository root, that holds the estate: `root.hcl`, the modules and `units_root`. Set it in a monorepo where the IaC sits beside application code (for example `infra/iac`). The PR and nightly format checks, the Terragrunt validation, Trivy and Checkov are scoped to it, and `changed-units` ignores files outside it (except the configuration file), so an application-only pull request plans nothing. Checkov's `github_actions` framework runs only when `iac_root` is `.`. It must be relative and stay inside the repository. See [monorepos](../concepts/pr-checks.md#monorepos). |
 | `units_root` | string | `stages` | Directory that contains the stage units, relative to the repository root (not to `iac_root`). It must be inside `iac_root`: with `iac_root: infra/iac`, write `units_root: infra/iac/stages`. |
+| `shared_units` | list of strings | `[]` | Prod units that exist once and serve every stage (a tunnel ingress, an access application, a DNS zone). Names as the plan action writes them: the path below `<units_root>/prod`, with `/` written `__`. Each must exist under `prod` and under no other stage (`ayasee config check-shared`, run by `iac-pr` and `iac-staged`). They are applied behind the prod gate, flagged as shared in the gate summary and the change set, and planned read-only in pull requests through the `prod-pr-plan` environment. See [units that serve every stage](../concepts/staged-run.md#units-that-serve-every-stage). |
 | `ledger.url` | string or null | `null` | Ledger store URL: `file://`, `git-branch://` or `azure-blob://` ([the ledger](../concepts/ledger.md#stores-and-urls)). The `AYASEE_LEDGER_URL` variable of a GitHub environment takes precedence. |
 | `gate` | `always` or `risky` | `always` | Prod approval gate. `always` requires approval on every prod run (D9). `risky` is accepted by the parser but **not supported**: every reusable workflow rejects it with "gate: risky is not supported yet" (R35). |
 | `solo_mode` | boolean | `false` | Opt-in single-maintainer mode. **NON-COMPLIANT**: it disables independent approval. Every load prints `NON-COMPLIANT: solo_mode disables independent approval (DORA RTS 2024/1774 Art. 17(1)(b))` to stderr (D2), so it appears in the log of every run. The key does not itself change any environment setting; the independent-approval controls are the `prod` environment's reviewers and `prevent_self_review`. |
@@ -72,6 +78,7 @@ plan_encryption:
 allow_cascade: false
 extra_rules:
   - rules/team-rules.yaml
+shared_units: []
 drift_noise:
   databricks_job:
     - email_notifications

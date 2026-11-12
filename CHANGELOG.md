@@ -37,6 +37,14 @@ released version into the GitHub release notes.
 - A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
   stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
   remains the ledger that needs no cloud.
+- `shared_units` in `.ayasee.yaml` for resources that exist once and serve every stage (#5): they
+  live under `<units_root>/prod` only (`ayasee config check-shared`, run by `iac-pr` and
+  `iac-staged`), are flagged as shared in the change set and the gate summary
+  (`ayasee changeset --shared-units`, plan action input `shared-units`), and are planned read-only
+  in pull requests by the new `shared-changes`, `plan-shared` and `comment-shared` jobs of `iac-pr`
+  in the opt-in `prod-pr-plan` environment (`shared_units_pr_plan` in `github-environments`).
+  `ayasee changed-units --shared` and `ayasee pr-comment --marker pr-plan-shared` support them.
+
 - `iac_root` in `.ayasee.yaml` (default `.`) for monorepos where the IaC sits beside application
   code (#4). The `iac-pr` format checks, Trivy and Checkov, and the nightly rescan, are scoped to
   it; `ayasee changed-units --iac-root DIR --config-path FILE` ignores changes outside it, so an

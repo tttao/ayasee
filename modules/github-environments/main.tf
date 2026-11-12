@@ -11,19 +11,26 @@ terraform {
 
 locals {
   # Environments the workflows use, and their reviewers (null = none).
-  # dev-plan is the only one that is not restricted to main (PR plans).
+  # dev-plan and prod-pr-plan are the only ones that are not restricted to main (PR plans).
+  # prod-pr-plan (opt-in) plans the shared prod units of a PR read-only; it carries the prod
+  # reviewers because the PR's code runs with a prod identity.
+  pr_plan = merge(
+    { "dev-plan" = null },
+    var.shared_units_pr_plan ? { "prod-pr-plan" = var.prod_reviewers } : {},
+  )
+
   environments = merge(
     { for s in var.stages : s => null },
     { for s in var.stages : "drift-${s}" => null },
     {
-      "dev-plan"        = null
       "prod-plan"       = null
       "prod"            = var.prod_reviewers
       "prod-breakglass" = var.breakglass_reviewers
     },
+    local.pr_plan,
   )
 
-  main_only = { for k, v in local.environments : k => v if k != "dev-plan" }
+  main_only = { for k, v in local.environments : k => v if !contains(keys(local.pr_plan), k) }
 
   variables = merge([
     for env, vars in var.variables : {
@@ -53,7 +60,7 @@ resource "github_repository_environment" "this" {
   }
 
   dynamic "deployment_branch_policy" {
-    for_each = each.key == "dev-plan" ? [] : [1]
+    for_each = contains(keys(local.pr_plan), each.key) ? [] : [1]
     content {
       protected_branches     = false
       custom_branch_policies = true

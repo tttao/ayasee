@@ -300,3 +300,21 @@ def test_no_op_outputs_are_dropped():
 def test_resource_items_carry_kind_resource():
     cs = build_changeset("s", "prod", [item("a.b", Tier.NONE)])
     assert cs["items"][0]["kind"] == "resource"
+
+
+def test_shared_units_are_listed_and_flagged():
+    items = [item("t.r", Tier.HIGH, unit="tunnel"), item("a.r", Tier.NONE, unit="app")]
+    cs = build_changeset("s", "prod", items, shared_units=["tunnel", "idle"])
+    assert cs["shared_units"] == ["tunnel"]  # only the shared units this change set touches
+    text = render_summary(cs)
+    assert "> **Shared by every stage:** `tunnel`." in text
+    assert "- `tunnel` `t.r` (update) **shared** [r1]" in text
+    assert "- `app` `a.r` (update)\n" in text + "\n"
+    plain = build_changeset("s", "prod", items)
+    assert plain["shared_units"] == [] and "Shared by every stage" not in render_summary(plain)
+
+
+def test_summary_of_an_older_changeset_without_shared_units():
+    cs = build_changeset("s", "prod", [item("a", Tier.NONE)])
+    del cs["shared_units"]
+    assert "Shared" not in render_summary(cs)

@@ -17,12 +17,15 @@ from ayasee import cli
 from ayasee.github import GitHub, GitHubError
 
 MARKER = "<!-- ayasee:pr-plan -->"
+# one sticky comment per kind: the dev plan, and the plan of the shared prod units (#5), which may
+# wait for the prod-pr-plan approval and must not hold back the dev plan's comment
+MARKERS = {"pr-plan": MARKER, "pr-plan-shared": "<!-- ayasee:pr-plan-shared -->"}
 MAX_BODY = 65536  # GitHub's comment size limit
 _CUT = "\n\n_(summary truncated)_\n"
 
 
-def _compose(text: str) -> str:
-    body = f"{MARKER}\n{text}"
+def _compose(text: str, marker: str = MARKER) -> str:
+    body = f"{marker}\n{text}"
     if len(body) > MAX_BODY:
         body = body[: MAX_BODY - len(_CUT)] + _CUT
     return body
@@ -31,13 +34,14 @@ def _compose(text: str) -> str:
 def _run(args: argparse.Namespace) -> int:
     gh: GitHub | None = None
     try:
-        body = _compose(Path(args.body_file).read_text())
+        marker = MARKERS[args.marker]
+        body = _compose(Path(args.body_file).read_text(), marker)
         gh = GitHub.from_env()
         existing = next(
             (
                 c
                 for c in gh.list_issue_comments(args.repo, args.pr)
-                if MARKER in str(c.get("body", ""))
+                if str(c.get("body", "")).startswith(marker + "\n")
                 and (c.get("user") or {}).get("type") == "Bot"
                 and (c.get("user") or {}).get("login") == args.author
                 and isinstance(c.get("id"), int)
@@ -63,6 +67,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", required=True, help="owner/name")
     parser.add_argument("--pr", required=True, type=int)
     parser.add_argument("--body-file", required=True)
+    parser.add_argument(
+        "--marker",
+        choices=sorted(MARKERS),
+        default="pr-plan",
+        help="which sticky comment to create or update (default: %(default)s)",
+    )
     parser.add_argument(
         "--author",
         default="github-actions[bot]",
