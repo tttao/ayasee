@@ -120,53 +120,59 @@ jobs:
           if-no-files-found: error
 
   pin:
+    # The release commit is pushed by the maintainer (scripts/pin-release.sh), never by this job: a
+    # GitHub Actions token cannot push a change to .github/workflows/, and a stored token that could
+    # would be a standing secret. This job makes the same commit locally and, for a tag, refuses
+    # unless the pushed release/<tag> has the tagged commit as parent and the same tree.
     name: pin release branch
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
       source-sha: ${{ steps.pin.outputs.source-sha }}
-      release-sha: ${{ steps.pin.outputs.release-sha }}
+      release-sha: ${{ steps.verify.outputs.release-sha || steps.pin.outputs.release-sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Rewrite the own-action references on release/<tag>
+      - name: Make the release commit locally
         id: pin
         env:
           TAG: ${{ needs.build.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          src="$(git rev-parse HEAD)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "release/$TAG"
-          files="$(grep -lE '#[ ]AYASEE_(REF|REPO|SHA)' .github/workflows/*.yml)"
-          for f in $files; do
-            scripts/set-ayasee-ref.sh "$REPO" "$src" "$f"
-          done
-          # shellcheck disable=SC2086  # $files is a newline-free list of workflow paths
-          if grep -nE 'OWNER/ayasee|0{40} # AYASEE_(REF|SHA)' $files; then
-            echo "::error::a AYASEE_REF placeholder is left behind"
-            exit 1
-          fi
-          git commit -a -m "chore: pin ayasee actions to $src for $TAG"
-          {
-            echo "source-sha=$src"
-            echo "release-sha=$(git rev-parse HEAD)"
-          } >>"$GITHUB_OUTPUT"
-      - name: Push release/<tag>
+          scripts/pin-release.sh "$REPO" "$TAG" >>"$GITHUB_OUTPUT"
+      - name: Verify the pushed release/<tag>
+        id: verify
         if: ${{ github.ref_type == 'tag' && (github.event_name == 'push' || inputs.dry-run == false) }}
         env:
           TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_SHA: ${{ steps.pin.outputs.source-sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c core.hooksPath=/dev/null -c "http.extraheader=AUTHORIZATION: basic $auth" push origin "release/$TAG"
+          git -c core.hooksPath=/dev/null -c "http.extraheader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags origin "+refs/heads/release/$TAG:refs/remotes/origin/release/$TAG" || {
+            echo "::error::release/$TAG is not on the remote; push it with scripts/pin-release.sh before the tag (docs/guides/releasing.md)"
+            exit 1
+          }
+          pushed="$(git rev-parse "refs/remotes/origin/release/$TAG")"
+          [ "$(git rev-parse "$pushed^")" = "$SOURCE_SHA" ] || {
+            echo "::error::release/$TAG is not one commit on top of the tagged commit $SOURCE_SHA"
+            exit 1
+          }
+          [ "$(git rev-parse "$pushed^{tree}")" = "$(git rev-parse "HEAD^{tree}")" ] || {
+            echo "::error::release/$TAG differs from what scripts/pin-release.sh makes for $SOURCE_SHA"
+            git diff --stat HEAD "$pushed"
+            exit 1
+          }
+          echo "release-sha=$pushed" >>"$GITHUB_OUTPUT"
 
   attest:
     name: attest
