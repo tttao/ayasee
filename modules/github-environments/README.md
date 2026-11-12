@@ -10,10 +10,14 @@ Provider: `integrations/github`.
 | `prod-plan` | `main` only | none |
 | `drift-<stage>` per stage | `main` only | none |
 | `prod-breakglass` | `main` only | `breakglass_reviewers` |
+| `prod-pr-plan` (only with `shared_units_pr_plan = true`) | all | `prod_reviewers` |
 
 Every environment sets `prevent_self_review = true` and `can_admins_bypass = false` (D2).
 `prod_reviewers` and `breakglass_reviewers` must be non-empty, and the break-glass set must differ
 from the prod set.
+
+`shared_units_pr_plan` (default `false`) adds `prod-pr-plan`, where `iac-pr` plans the shared prod
+units of a pull request read-only ([shared units](../../docs/concepts/pr-checks.md#shared-units)).
 
 ```hcl
 module "environments" {

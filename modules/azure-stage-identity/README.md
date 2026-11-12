@@ -43,6 +43,7 @@ They depend on your estate, so assign them yourself with `principal_id`. Minimum
 | `prod-plan` | Reader on prod; Storage Blob Data Contributor on the prod state container (state read and the lock lease); `wrapKey` **and** `unwrapKey` on the Key Vault key (`AYASEE_KEY_VAULT_KEY_ID`): it encrypts its plan and then runs `tofu show -json` on that encrypted plan, which decrypts it; write on the prod ledger record (the `prod-in-sync` job, R31). Cannot apply |
 | `prod` | Apply rights on prod; Storage Blob Data Contributor on the prod state container; `unwrapKey` on the same key; read and write on the ledger |
 | `prod-breakglass` | Its own identity, never the `prod` one: prod apply rights; Storage Blob Data Contributor on the prod state container; `wrapKey` and `unwrapKey` on the key (it plans and applies in one job); read and write on the ledger |
+| `prod-pr-plan` (only with `shared_units`) | Reader on the shared prod resources; Storage Blob Data Reader on the prod state container (PR plans run with `-lock=false`). No apply rights, no key access, no ledger access. It runs pull-request code: see [shared units](../../docs/concepts/pr-checks.md#shared-units) |
 | `drift-<env>` | Reader; Storage Blob Data Contributor on that env's state container (needed for the state lease); read on the ledger. No apply rights |
 
 Test: `tofu init -backend=false && tofu test`.

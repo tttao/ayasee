@@ -14,6 +14,14 @@ CASES = {
     "iac-pr.yml": ("steps.changed.outputs.identity", "step"),
     "iac-breakglass.yml": ("steps.cfg.outputs.identity", "step"),
 }
+# jobs whose identity expression differs from the workflow's (job -> expression)
+JOB_IDENT = {
+    "iac-pr.yml": {"plan-shared": "needs.shared-changes.outputs.identity"},
+}
+
+
+def _ident(name, job_name):
+    return JOB_IDENT.get(name, {}).get(job_name, CASES[name][0])
 
 
 def _wf(name):
@@ -22,9 +30,9 @@ def _wf(name):
 
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_every_azure_login_is_conditional_on_the_oidc_identity(name):
-    ident, _ = CASES[name]
     logins = 0
-    for job in _wf(name)["jobs"].values():
+    for job_name, job in _wf(name)["jobs"].items():
+        ident = _ident(name, job_name)
         for step in job.get("steps", []):
             if "azure/login" in step.get("uses", ""):
                 logins += 1
@@ -34,9 +42,10 @@ def test_every_azure_login_is_conditional_on_the_oidc_identity(name):
 
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_arm_variables_are_set_only_for_the_oidc_identity(name):
-    ident, where = CASES[name]
+    _, where = CASES[name]
     seen = 0
-    for job in _wf(name)["jobs"].values():
+    for job_name, job in _wf(name)["jobs"].items():
+        ident = _ident(name, job_name)
         scopes = [job.get("env") or {}] + [s.get("env") or {} for s in job.get("steps", [])]
         for env in scopes:
             for key, value in env.items():
@@ -84,6 +93,7 @@ def test_provider_tokens_reach_only_plan_and_apply_steps_for_the_secrets_identit
                 continue
             assert re.search(r"/actions/(plan|apply)@", step.get("uses", "")), (name, step)
             assert has == list(TOKENS)
+            ident = _ident(name, job_name)
             for token in TOKENS:
                 expected = f"${{{{ {ident} == 'secrets' && secrets.{token} || '' }}}}"
                 assert env[token] == expected, (name, token)

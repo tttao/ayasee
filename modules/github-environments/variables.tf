@@ -53,3 +53,9 @@ variable "variables" {
   type        = map(map(string))
   default     = {}
 }
+
+variable "shared_units_pr_plan" {
+  description = "Create prod-pr-plan: the environment of the iac-pr job that plans shared prod units (shared_units in .ayasee.yaml) read-only. It accepts pull-request branches and carries prod_reviewers, so a prod reviewer approves before PR code runs with the read-only prod identity."
+  type        = bool
+  default     = false
+}

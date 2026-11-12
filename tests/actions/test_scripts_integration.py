@@ -822,3 +822,16 @@ def test_pbkdf2_refusals(sandbox, extra, message):
     assert proc.returncode != 0
     assert message in proc.stderr
     assert PLAN_PASSPHRASE not in proc.stdout + proc.stderr
+
+
+def test_shared_units_reach_the_changeset_and_summary(fresh):
+    """#5: the plan action flags units that serve every stage (input shared-units)."""
+    root, env = fresh()
+    env = {**env, "SG_ENCRYPT": "false", "SG_BINDING_MODE": "replan"}
+    proc, out = _run(Path("plan/plan.sh"), env, SG_ONLY_UNITS="app", SG_SHARED_UNITS="app,other")
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    _no_leak(proc)
+    work = _work(env)
+    assert json.loads((work / "changeset.json").read_text())["shared_units"] == ["app"]
+    summary = (work / "summary.md").read_text()
+    assert "**Shared by every stage:** `app`" in summary and "**shared**" in summary

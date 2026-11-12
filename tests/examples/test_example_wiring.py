@@ -202,7 +202,11 @@ def test_bootstrap_creates_every_environment_the_workflows_use():
     created = (
         set(stages) | {f"drift-{s}" for s in stages} | {"dev-plan", "prod-plan", "prod-breakglass"}
     )
-    assert _called_environments() == created
+    # prod-pr-plan (#5) is opt-in: the module creates it only with shared_units_pr_plan, which an
+    # example without shared_units does not need
+    cfg = load_config(EX / ".ayasee.yaml")
+    assert not cfg.shared_units and "shared_units_pr_plan" not in text
+    assert _called_environments() - {"prod-pr-plan"} == created
     # identities: one per environment, listed in the bootstrap locals
     assert 'concat(\n    ["dev-plan"],\n    local.stages,' in text
     assert '["prod-plan", "prod-breakglass"]' in text

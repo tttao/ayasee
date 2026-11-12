@@ -51,10 +51,13 @@ def build_changeset(
     env: str,
     items: list[RiskItem],
     outputs: list[tuple[str, OutputChange]] | None = None,
+    shared_units: list[str] | None = None,
 ) -> dict:
     """Build the allow-listed change set; items with only no-op/read actions are dropped.
 
     ``outputs`` are ``(unit, output change)`` pairs; their non-idle ones become ``output`` items.
+    ``shared_units`` (units that serve every stage) are listed when the change set touches them,
+    because the stage name alone does not tell a reviewer the blast radius.
     """
     real = [i for i in items if set(i.actions) - _IDLE]
     real.sort(key=lambda i: (-int(i.tier), i.unit, i.address))
@@ -88,12 +91,14 @@ def build_changeset(
         for unit, oc in sorted(outputs or [], key=lambda p: (p[0], p[1].name))
         if set(oc.actions) - _IDLE
     ]
+    shared = set(shared_units or [])
     return {
         "schema": SCHEMA,
         "sha": sha,
         "env": env,
         "counts": counts,
         "risk": {_tier_name(t): sum(1 for i in real if i.tier is t) for t in _RISK_TIERS},
+        "shared_units": sorted({r["unit"] for r in rows} & shared),
         "items": rows,
     }
 
@@ -105,8 +110,10 @@ def _md(value: object) -> str:
     return text.replace("`", "'").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _line(item: dict) -> str:
+def _line(item: dict, shared: frozenset[str] = frozenset()) -> str:
     text = f"- `{_md(item['unit'])}` `{_md(item['address'])}` ({', '.join(item['actions'])})"
+    if item["unit"] in shared:
+        text += " **shared**"
     if item["rules"]:
         text += f" [{', '.join(item['rules'])}]"
     principals = item["principals"]
@@ -120,23 +127,31 @@ def _line(item: dict) -> str:
 def render_summary(cs: dict) -> str:
     risk = cs["risk"]
     items = cs["items"]
+    shared = frozenset(cs.get("shared_units") or [])
     out = [
         f"### Prod gate: {risk['critical']} critical · {risk['high']} high · "
         f"{risk['medium']} medium · {len(items)} changes",
         "",
     ]
+    if shared:
+        names = ", ".join(f"`{_md(u)}`" for u in sorted(shared))
+        out += [
+            f"> **Shared by every stage:** {names}. These units exist once and carry the traffic "
+            "of every stage, so a change to them reaches all stages, not only prod.",
+            "",
+        ]
     for tier in _RISK_TIERS:
         name = _tier_name(tier)
         group = [i for i in items if i["tier"] == name]
         if group:
-            out += [f"#### {name.capitalize()}", "", *map(_line, group), ""]
+            out += [f"#### {name.capitalize()}", "", *(_line(i, shared) for i in group), ""]
     rest = [i for i in items if i["tier"] == "none"]
     if rest:
         out += [
             "<details>",
             f"<summary>{len(rest)} other changes</summary>",
             "",
-            *map(_line, rest),
+            *(_line(i, shared) for i in rest),
             "",
             "</details>",
             "",
@@ -170,7 +185,8 @@ def _run(args: argparse.Namespace) -> int:
         for plan in plans:
             items += classify(plan.stem, load_plan(plan), rules)
             outputs += [(plan.stem, oc) for oc in load_output_changes(plan)]
-        cs = build_changeset(args.sha, args.env, items, outputs)
+        shared = [u for u in (args.shared_units or "").split(",") if u]
+        cs = build_changeset(args.sha, args.env, items, outputs, shared)
         Path(args.out).write_text(json.dumps(cs, indent=2) + "\n")
         if args.summary:
             with open(args.summary, "a") as fh:
@@ -188,6 +204,11 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--summary", help="file to append the Markdown summary to")
     parser.add_argument("--rules", action="append", help="extra rules file (repeatable)")
+    parser.add_argument(
+        "--shared-units",
+        default="",
+        help="comma list of units that serve every stage (shared_units); flagged in the summary",
+    )
     parser.set_defaults(handler=_run)
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from ayasee import cli
-from ayasee.changed import ALL, changed_units, classify
+from ayasee.changed import ALL, changed_units, classify, classify_shared
 
 
 def _is_unit(root: Path):
@@ -214,3 +214,60 @@ def test_cli_accepts_iac_root_and_config_path(tmp_path, monkeypatch, capsys):
     base, head = _commit(git, tmp_path, {"app.py": "c", "infra/iac/stages/dev/app/x.tf": "x"})
     assert cli.main(["changed-units", "--base", base, "--head", head, *common]) == 0
     assert capsys.readouterr().out == "app\n"
+
+
+def _shared_tree(tmp_path):
+    for rel in ("s/prod/tunnel", "s/prod/edge/access", "s/prod/app", "s/dev/app"):
+        (tmp_path / rel).mkdir(parents=True)
+        (tmp_path / rel / "terragrunt.hcl").write_text("")
+    return _is_unit(tmp_path)
+
+
+def test_classify_shared_picks_only_the_shared_prod_units(tmp_path):
+    isu = _shared_tree(tmp_path)
+    shared = ["tunnel", "edge__access"]
+
+    def cls(files, **kw):
+        return classify_shared(files, "s", shared, isu, **kw)
+
+    assert cls(["s/prod/tunnel/main.tf"]) == ["tunnel"]
+    assert cls(["s/prod/edge/access/x/y.tf", "s/prod/tunnel/a.tf"]) == ["edge__access", "tunnel"]
+    # other stages and the prod units that are not shared are planned elsewhere
+    assert cls(["s/dev/app/main.tf", "s/prod/app/main.tf", "README.md"]) == []
+    # anything that may change what a shared unit plans gives every shared unit
+    assert cls(["modules/m/main.tf"]) is ALL
+    assert cls(["root.hcl"]) is ALL
+    assert cls(["s/prod/common.hcl"]) is ALL
+    assert cls([".ayasee.yaml"]) is ALL
+    # in a monorepo, application code is not IaC
+    assert cls(["server/a.py"], iac_root="s") == []
+    assert classify_shared(["x.tf"], "s", [], isu) == []
+
+
+def test_cli_shared_prints_the_changed_shared_units(tmp_path, monkeypatch, capsys):
+    repo, git = _repo(tmp_path)
+    for rel in ("stages/prod/tunnel", "stages/prod/app"):
+        (repo / rel).mkdir(parents=True)
+        (repo / rel / "terragrunt.hcl").write_text("")
+    git("add", "-A")
+    git("commit", "-qm", "prod")
+    monkeypatch.chdir(repo)
+    common = ["--units-root", "stages", "--env", "prod", "--shared", "tunnel"]
+
+    def run(base, head, *extra):
+        assert cli.main(["changed-units", "--base", base, "--head", head, *common, *extra]) == 0
+        return capsys.readouterr().out
+
+    assert run(*_commit(git, repo, {"stages/prod/tunnel/main.tf": "t"})) == "tunnel\n"
+    assert run(*_commit(git, repo, {"stages/dev/app/main.tf": "d"})) == "\n"
+    # ALL is spelled out as the shared list
+    assert run(*_commit(git, repo, {"modules/m.tf": "m"})) == "tunnel\n"
+    head = git("rev-parse", "HEAD")
+    assert run("f" * 40, head) == "tunnel\n"  # an uncomputable diff fails safe
+
+
+def test_cli_shared_needs_prod(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    args = ["changed-units", "--base", "a" * 40, "--head", "b" * 40, "--units-root", "stages"]
+    assert cli.main([*args, "--env", "dev", "--shared", "t"]) == 1
+    assert "--env prod" in capsys.readouterr().err

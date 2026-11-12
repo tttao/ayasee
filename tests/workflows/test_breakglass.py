@@ -365,3 +365,12 @@ def test_breakglass_key_provider_and_passphrase_reach_plan_and_apply_only(wf):
         assert step["with"]["key-provider"] == "${{ steps.cfg.outputs.key-provider }}"
     assert "AYASEE_PLAN_PASSPHRASE" not in str(wf["jobs"][JOB].get("env", {}))
     assert "'.plan_encryption.key_provider'" in TEXT
+
+
+def test_breakglass_plan_flags_shared_units():
+    wf = yaml.safe_load((WORKFLOWS / "iac-breakglass.yml").read_text())
+    steps = [s for job in wf["jobs"].values() for s in job["steps"]]
+    cfg = next(s for s in steps if s.get("id") == "cfg")
+    assert ".shared_units" in cfg["run"]
+    plan = next(s for s in steps if "/actions/plan@" in s.get("uses", ""))
+    assert plan["with"]["shared-units"] == "${{ steps.cfg.outputs.shared-units }}"

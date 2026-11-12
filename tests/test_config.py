@@ -392,3 +392,43 @@ def test_cli_labels_invalid_config_exit_1(tmp_path, monkeypatch, capsys):
 def test_invalid_iac_root_rejected(tmp_path, text):
     with pytest.raises(ConfigError):
         load_config(write(tmp_path, text + "\n"))
+
+
+def test_shared_units(tmp_path):
+    assert Config().shared_units == []
+    cfg = load_config(write(tmp_path, "shared_units: [edge__tunnel, access]\n"))
+    assert cfg.shared_units == ["edge__tunnel", "access"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "shared_units: tunnel",
+        "shared_units: [tunnel, tunnel]",
+        "shared_units: ['']",
+        "shared_units: [edge/tunnel]",
+        "shared_units: ['../x']",
+        "shared_units: ['..']",
+        "shared_units: [1]",
+    ],
+)
+def test_invalid_shared_units_rejected(tmp_path, text):
+    with pytest.raises(ConfigError):
+        load_config(write(tmp_path, text + "\n"))
+
+
+def test_check_shared_layout(tmp_path, monkeypatch, capsys):
+    for rel in ("stages/prod/tunnel", "stages/prod/edge/access", "stages/dev/edge/access"):
+        (tmp_path / rel).mkdir(parents=True)
+        (tmp_path / rel / "terragrunt.hcl").write_text("")
+    monkeypatch.chdir(tmp_path)
+    p = write(tmp_path, "shared_units: [tunnel]\n")
+    assert _cli(monkeypatch, "check-shared", "--path", str(p)) == 0
+    p = write(tmp_path, "shared_units: [tunnel, edge__access, missing]\n")
+    assert _cli(monkeypatch, "check-shared", "--path", str(p)) == 1
+    err = capsys.readouterr().err
+    assert "edge__access: also present in stage dev" in err
+    assert "missing: no unit at stages/prod/missing" in err
+    assert "tunnel" not in err
+    p = write(tmp_path, "")
+    assert _cli(monkeypatch, "check-shared", "--path", str(p)) == 0

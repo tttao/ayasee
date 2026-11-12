@@ -622,3 +622,20 @@ def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
     assert seen == [("prod-plan", "plan"), ("prod", "apply")]
     secret = wf[True]["workflow_call"]["secrets"]["AYASEE_PLAN_PASSPHRASE"]
     assert secret["required"] is False and "environment secret" in secret["description"]
+
+
+def test_prod_plan_flags_shared_units_and_resolve_checks_their_layout():
+    wf = yaml.safe_load((WORKFLOWS / "iac-staged.yml").read_text())
+    resolve = wf["jobs"]["resolve"]
+    assert "shared-units" in resolve["outputs"]
+    run = next(s for s in resolve["steps"] if s.get("id") == "resolve")["run"]
+    assert ".shared_units" in run and "ayasee config check-shared" in run
+    plans = [
+        s
+        for job in wf["jobs"].values()
+        for s in job["steps"]
+        if "/actions/plan@" in s.get("uses", "") and s["with"]["env"] == "prod"
+    ]
+    assert plans and all(
+        p["with"]["shared-units"] == "${{ needs.resolve.outputs.shared-units }}" for p in plans
+    )
