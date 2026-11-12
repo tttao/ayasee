@@ -1,3 +1,3 @@
 """ayasee: staged, gated IaC promotion on GitHub Actions."""
 
-__version__ = "0.0.0"
+__version__ = "0.1.0-rc.1"

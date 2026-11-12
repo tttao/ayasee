@@ -21,8 +21,8 @@ your own Actions, with OIDC identities and no stored cloud secrets.
 [Compare with other tools](docs/comparison.md){ .md-button }
 { .ay-actions }
 
-<p class="ay-status"><strong>Status: pre-alpha.</strong> Implemented and tested, no published
-release yet. Read the <a href="docs/concepts/architecture/#known-limitations">known limitations</a>
+<p class="ay-status"><strong>Status: pre-alpha.</strong> Implemented and tested; first release
+candidate <code>v0.1.0-rc.1</code>. Read the <a href="docs/concepts/architecture/#known-limitations">known limitations</a>
 before you adopt it.</p>
 
 </div>
