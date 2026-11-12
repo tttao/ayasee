@@ -169,10 +169,8 @@ def load_config(path: Path = DEFAULT_PATH) -> Config:
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise ConfigError(f"{path}: cannot read: {type(exc).__name__}") from exc
     cfg = _parse({} if raw is None else raw)
-    if cfg.solo_mode:
-        print(NON_COMPLIANT, file=sys.stderr)
-    if cfg.identity == "secrets":
-        print(DEVIATION_SECRETS, file=sys.stderr)
+    for line in labels(cfg):
+        print(line, file=sys.stderr)
     return cfg
 
 
@@ -214,6 +212,31 @@ def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
         "pre-prod-stage": preprod,
         "order": ",".join(stages),
     }
+
+
+def labels(cfg: Config) -> list[str]:
+    """The opt-ins that weaken a compliant default, one line each, for run summaries.
+
+    ``solo_mode`` disables independent approval (D2) and ``identity: secrets`` stores provider
+    tokens instead of using OIDC (D7). The same lines go to stderr on every load.
+    """
+    out = []
+    if cfg.solo_mode:
+        out.append(NON_COMPLIANT)
+    if cfg.identity == "secrets":
+        out.append(DEVIATION_SECRETS)
+    return out
+
+
+def _labels(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_config(Path(args.path))
+    except ConfigError as exc:
+        print(f"ayasee: config error: {exc}", file=sys.stderr)
+        return 1
+    for line in labels(cfg):
+        print(line)
+    return 0
 
 
 def _staged(args: argparse.Namespace) -> int:
@@ -291,6 +314,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     staged.add_argument("--path", default=str(DEFAULT_PATH))
     staged.add_argument("--start-stage", default="", help="empty, a pre-prod stage or prod-plan")
     staged.set_defaults(handler=_staged)
+    lab = sub.add_parser(
+        "labels",
+        help="print one line per opt-in that weakens a compliant default (solo_mode, identity)",
+    )
+    lab.add_argument("--path", default=str(DEFAULT_PATH))
+    lab.set_defaults(handler=_labels)
 
 
 cli.register("config", _setup)

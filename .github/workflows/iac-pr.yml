@@ -34,6 +34,25 @@ on:
         type: string
         required: false
         default: 3.4.3
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: >-
+          identity: secrets only. Pass it by name and create it as an environment secret of
+          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
+          or organisation level; only the plan step receives it.
+        required: false
 
 permissions: {}
 
@@ -197,6 +216,17 @@ jobs:
             while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
             exit 1
           fi
+      - name: Label deviations from the compliant defaults
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # identity: secrets (D7) and solo_mode (D2) are opt-ins that weaken a default; say so
+          labels="$(ayasee config labels --path "$CONFIG_PATH")"
+          [ -n "$labels" ] || exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$labels"
       - id: changed
         name: Find the changed dev units
         env:
@@ -233,6 +263,9 @@ jobs:
         if: ${{ steps.changed.outputs.any == 'true' }}
         uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.changed.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
           # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
           ARM_USE_OIDC: ${{ steps.changed.outputs.identity == 'oidc' && 'true' || '' }}
           ARM_CLIENT_ID: ${{ steps.changed.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}

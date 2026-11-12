@@ -320,3 +320,34 @@ def test_cli_show_has_the_key_provider(tmp_path, monkeypatch, capsys):
     assert _cli(monkeypatch, "show", "--path", str(p)) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["plan_encryption"] == {"key_provider": "pbkdf2"}
+
+
+# ---- labels: the deviations a run summary shows (issue #1) ------------------------------
+
+
+def test_labels_are_empty_for_the_defaults():
+    assert config.labels(Config()) == []
+
+
+def test_labels_name_each_deviation():
+    cfg = Config(solo_mode=True, identity="secrets")
+    assert config.labels(cfg) == [config.NON_COMPLIANT, config.DEVIATION_SECRETS]
+    assert config.labels(Config(identity="secrets")) == [config.DEVIATION_SECRETS]
+
+
+def test_cli_labels_prints_one_line_each_on_stdout(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: secrets\nsolo_mode: true\n")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        config.NON_COMPLIANT,
+        config.DEVIATION_SECRETS,
+    ]
+    p = write(tmp_path, "")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_labels_invalid_config_exit_1(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "identity: maybe\n")
+    assert _cli(monkeypatch, "labels", "--path", str(p)) == 1
+    assert "config error" in capsys.readouterr().err

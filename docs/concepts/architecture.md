@@ -217,7 +217,9 @@ flowchart LR
   OpenTofu, and the setup action installs only OpenTofu. See [plan binding](plan-binding.md#the-replan-fallback).
 - **Azure first.** The default, and the only profile designed end to end, is Entra identities,
   Azure Key Vault plan encryption and the `azure-blob://` ledger store. A provider-neutral profile
-  exists but has not run on GitHub: `identity: secrets` skips the Azure login,
+  exists but has not run on GitHub: `identity: secrets` skips the Azure login and passes
+  provider tokens from environment secrets (labelled as a deviation in the run summary, not yet in
+  the cockpit),
   `plan_encryption.key_provider: pbkdf2` encrypts the prod plan with a passphrase held as an
   environment secret, the quickstart has a [reference S3 `root.hcl`](../guides/quickstart.md#without-azure),
   and `github-branch://` is the ledger store that needs no cloud. There is no `s3://` ledger store,

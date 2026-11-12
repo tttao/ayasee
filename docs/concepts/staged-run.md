@@ -154,6 +154,41 @@ when `ledger-token` is set, only the guard and ledger steps receive it, as step-
 (`GIT_CONFIG_*` with an inline credential helper that reads the token from an environment
 variable; no file, no global git configuration).
 
+## identity: secrets
+
+Some providers (Cloudflare, most VPS hosts, many S3-compatible stores) cannot federate with GitHub
+OIDC. `identity: secrets` in `.ayasee.yaml` is the opt-in for them, and a documented deviation from
+the "no stored cloud secrets" default (D7):
+
+- No `azure/login`; `ARM_*` and `DATABRICKS_AUTH_TYPE` are empty.
+- The plan and apply steps, and no other step, receive three provider tokens as environment
+  variables: `CLOUDFLARE_API_TOKEN`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (the last two
+  for an S3-compatible state backend). They are declared, optional, under `on.workflow_call.secrets`
+  of every reusable workflow; with `identity: oidc` the steps get empty strings instead.
+- Create them as **environment secrets**, one set per environment (`dev`, `uat`, `prod-plan`,
+  `prod`, `prod-breakglass`, `dev-plan`, `drift-<stage>`), each token scoped to what that
+  environment may do, and never at repository or organisation level. The caller passes them by
+  name, never with `secrets: inherit`:
+
+  ```yaml
+      secrets:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  ```
+
+  GitHub's documentation says a job that runs in an environment receives that environment's secret
+  when the caller passes a secret of the same name; this has not been verified by a run yet.
+- The first job of each reusable workflow runs `ayasee config labels` and turns
+  `DEVIATION: identity: secrets ...` (and `NON-COMPLIANT: solo_mode ...`) into a warning and a line
+  of the run summary. The cockpit does not show the label yet.
+
+What it costs: a stored token does not expire after the job like an OIDC token, so a leaked token
+stays usable until it is rotated. The `dev-plan` tokens are the most exposed, because `iac-pr` plans
+pull-request code with them (same-repository pull requests only; forks get no secrets): give
+`dev-plan` read-only tokens. The prod tokens live only in `prod` and `prod-breakglass`, behind their
+reviewers; `prod-plan` should hold read-only ones.
+
 ## The plan artifact
 
 `prod-plan` uploads one artifact, `ayasee-prod-plan`, kept 7 days. It holds only the encrypted

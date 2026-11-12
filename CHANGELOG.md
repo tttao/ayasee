@@ -23,6 +23,11 @@ released version into the GitHub release notes.
   passed only to the prod plan and apply steps (and those of break-glass); a missing, short or
   ambiguous key source fails closed. The manifest and stale-plan checks are unchanged. The plan and
   apply actions take a `key-provider` input.
+- `identity: secrets` passes the provider tokens `CLOUDFLARE_API_TOKEN`, `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` (optional `workflow_call` secrets, meant as environment secrets) to the
+  plan and apply steps only, and empty strings with `identity: oidc`. `ayasee config labels` prints
+  the `NON-COMPLIANT` and `DEVIATION` lines; the first job of every reusable workflow turns them
+  into warnings and run-summary lines. The cockpit does not show the label yet.
 - A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
   stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
   remains the ledger that needs no cloud.

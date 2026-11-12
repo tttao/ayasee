@@ -307,7 +307,10 @@ def test_no_expression_in_run_blocks(wf):
 
 
 def test_workflow_call_only_and_no_secrets_needed(wf):
-    assert "secrets" not in wf[True]["workflow_call"]
+    # only the optional provider tokens of identity: secrets (issue #1)
+    secrets = wf[True]["workflow_call"]["secrets"]
+    assert set(secrets) == {"CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+    assert all(v["required"] is False for v in secrets.values())
     assert "inherit" not in PATH.read_text()
 
 
