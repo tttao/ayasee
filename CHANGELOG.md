@@ -37,6 +37,10 @@ released version into the GitHub release notes.
 - A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
   stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
   remains the ledger that needs no cloud.
+- Distribution (#3): the public repository `tttao/ayasee` is the supported source; the quickstart
+  pins a published release SHA, shows a pinned local CLI install (`uvx --from git+...@<release SHA>`
+  or the attested wheel), and the releasing guide documents mirrors for GHES and air-gapped estates.
+
 - `shared_units` in `.ayasee.yaml` for resources that exist once and serve every stage (#5): they
   live under `<units_root>/prod` only (`ayasee config check-shared`, run by `iac-pr` and
   `iac-staged`), are flagged as shared in the change set and the gate summary

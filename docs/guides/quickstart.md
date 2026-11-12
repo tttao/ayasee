@@ -62,8 +62,25 @@ Search for the placeholders and replace them: `OWNER`, the all-zero subscription
 The callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
 cannot reference its own actions by a relative path from another repository, so the workflow files hold
 a placeholder that a release rewrites (see
-[where the actions come from](../concepts/staged-run.md#where-the-actions-come-from)). There is no
-published ayasee release yet, so make one from your copy of the ayasee repository:
+[where the actions come from](../concepts/staged-run.md#where-the-actions-come-from)).
+
+ayasee is distributed from the public repository <https://github.com/tttao/ayasee>. Take the
+**release SHA** from the notes of the [release](https://github.com/tttao/ayasee/releases) you want
+(the head of its `release/<tag>` branch, not the tag) and pin it in your callers:
+
+```bash
+sed -i -E 's#OWNER/ayasee#tttao/ayasee#; s#@0{40} \# replace with an ayasee release SHA#@<release SHA> \# ayasee vX.Y.Z#' \
+  .github/workflows/*.yml
+```
+
+Any repository, in any account or organization, can call the reusable workflows and actions of a
+public repository. If your runners cannot reach github.com (GitHub Enterprise Server, air-gapped),
+use a [mirror](releasing.md#mirrors-for-ghes-and-air-gapped-estates) and replace `tttao/ayasee` with
+the mirror's `owner/name`.
+
+### Your own release (forks and development)
+
+To run code that is not released, make a release commit from your copy of the ayasee repository:
 
 ```bash
 # in your ayasee checkout, on a clean commit that holds the code you want to release
@@ -78,14 +95,27 @@ The script refuses unless `actions/`, `policy/`, `src/`, `pyproject.toml` and `u
 at `$src` and `HEAD`, so the pinned actions are exactly the released code. Callers pin that release
 commit by full SHA, never by branch or tag. Do the same for `iac-pr.yml`, `iac-nightly.yml`,
 `iac-breakglass.yml` and, if you use the cockpit, `cockpit-collect.yml`, by passing the file as the
-last argument. Then, in your adopter repository:
-
-```bash
-sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with an ayasee release SHA#@<40-hex SHA> \# ayasee vX.Y.Z#' \
-  .github/workflows/*.yml
-```
+last argument. Then use the `sed` above with `my-org/ayasee` and that SHA.
 
 Callers never use `secrets: inherit`.
+
+### The CLI on your machine
+
+The workflows install the CLI from the pinned checkout; you never install it for CI. To run the same
+version locally (`ayasee config show`, `config check-supported`, `changeset`, `changed-units`), pin
+it to the same release:
+
+```bash
+# from the repository, at the release SHA your callers pin
+uvx --from "git+https://github.com/tttao/ayasee@<release SHA>" ayasee config show
+
+# or the wheel attached to the release, after verifying its provenance
+gh release download vX.Y.Z --repo tttao/ayasee --pattern '*.whl' --dir dist
+gh attestation verify dist/ayasee-X.Y.Z-py3-none-any.whl --repo tttao/ayasee
+uvx --from dist/ayasee-X.Y.Z-py3-none-any.whl ayasee config show
+```
+
+Once the release is on PyPI, `uvx ayasee@X.Y.Z config show` works too.
 
 ## 3. Bootstrap the environments and identities
 
