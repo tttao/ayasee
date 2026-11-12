@@ -285,3 +285,38 @@ def test_cli_staged_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, cap
     assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 1
     cap = capsys.readouterr()
     assert cap.out == "" and "two or three stages" in cap.err
+
+
+# ---- plan_encryption.key_provider (issue #1) --------------------------------------------
+
+
+def test_key_provider_defaults_to_azure_vault():
+    assert Config().plan_encryption.key_provider == "azure_vault"
+
+
+@pytest.mark.parametrize("provider", ["azure_vault", "pbkdf2"])
+def test_key_provider_accepts_the_wired_providers(tmp_path, provider):
+    cfg = load_config(write(tmp_path, f"plan_encryption:\n  key_provider: {provider}\n"))
+    assert cfg.plan_encryption.key_provider == provider
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "plan_encryption: pbkdf2",
+        "plan_encryption: {key_provider: openbao}",
+        "plan_encryption: {key_provider: aws_kms}",
+        "plan_encryption: {key_provider: 3}",
+        "plan_encryption: {passphrase: x}",
+    ],
+)
+def test_key_provider_rejects_anything_else(tmp_path, text):
+    with pytest.raises(ConfigError, match="plan_encryption"):
+        load_config(write(tmp_path, text + "\n"))
+
+
+def test_cli_show_has_the_key_provider(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "plan_encryption: {key_provider: pbkdf2}\n")
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["plan_encryption"] == {"key_provider": "pbkdf2"}

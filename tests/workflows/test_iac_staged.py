@@ -77,7 +77,12 @@ def test_concurrency_groups(wf):
 def test_no_secrets_inherit(wf):
     assert "inherit" not in PATH.read_text()
     secrets = wf[True]["workflow_call"]["secrets"]
-    assert set(secrets) == {"teams-webhook", "ledger-token", "extra-env-secret"}
+    assert set(secrets) == {
+        "teams-webhook",
+        "ledger-token",
+        "extra-env-secret",
+        "AYASEE_PLAN_PASSPHRASE",
+    }
     assert all(v["required"] is False for v in secrets.values())
 
 
@@ -584,3 +589,33 @@ def test_resolve_step_refuses_an_unsupported_layout(wf, tmp_path, text, start):
     assert proc.returncode == 1
     assert proc.stdout.startswith("::error::ayasee: config error:")
     assert out == {}
+
+
+# ---- issue #1: plan_encryption.key_provider ----
+
+
+def test_key_provider_reaches_the_prod_plan_and_apply_only(wf):
+    assert wf["jobs"]["resolve"]["outputs"]["key-provider"] == (
+        "${{ steps.resolve.outputs.key-provider }}"
+    )
+    run = next(s for s in _steps(wf, "resolve") if s.get("id") == "resolve")["run"]
+    assert "'.plan_encryption.key_provider'" in run
+    for job, kind in (("prod-plan", "plan"), ("prod", "apply")):
+        step = next(s for s in _steps(wf, job) if f"/actions/{kind}@" in s.get("uses", ""))
+        assert step["with"]["key-provider"] == "${{ needs.resolve.outputs.key-provider }}"
+        assert step["with"]["encrypt"] == "true"
+
+
+def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
+    seen = []
+    for name, job in wf["jobs"].items():
+        assert "AYASEE_PLAN_PASSPHRASE" not in str(job.get("env", {})), name
+        for step in job["steps"]:
+            if "AYASEE_PLAN_PASSPHRASE" in str(step):
+                assert step["env"]["AYASEE_PLAN_PASSPHRASE"] == (
+                    "${{ secrets.AYASEE_PLAN_PASSPHRASE }}"
+                )
+                seen.append((name, step["uses"].split("/actions/")[1].split("@")[0]))
+    assert seen == [("prod-plan", "plan"), ("prod", "apply")]
+    secret = wf[True]["workflow_call"]["secrets"]["AYASEE_PLAN_PASSPHRASE"]
+    assert secret["required"] is False and "environment secret" in secret["description"]

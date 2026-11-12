@@ -135,7 +135,7 @@ credential for `environment:<name>`:
 |---|---|
 | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | `azure/login` (OIDC), and `ARM_CLIENT_ID`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID` for the provider |
 | `AYASEE_LEDGER_URL` | Ledger store URL. Falls back to `ledger.url` in `.ayasee.yaml`; the run fails if neither is set. |
-| `AYASEE_KEY_VAULT_KEY_ID` | Azure Key Vault key URL (`https://<vault>.vault.azure.net/keys/<name>`, no key version) protecting plan encryption. Set the same key on `prod-plan`, `prod` and `prod-breakglass`. `prod-plan` needs `wrapKey` and `unwrapKey` (it encrypts its plan, then decrypts it for `tofu show -json`), `prod` needs `unwrapKey`, `prod-breakglass` both. Full table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-assignments-not-created-here). |
+| `AYASEE_KEY_VAULT_KEY_ID` | `plan_encryption.key_provider: azure_vault` (the default) only. Azure Key Vault key URL (`https://<vault>.vault.azure.net/keys/<name>`, no key version) protecting plan encryption. Set the same key on `prod-plan`, `prod` and `prod-breakglass`. `prod-plan` needs `wrapKey` and `unwrapKey` (it encrypts its plan, then decrypts it for `tofu show -json`), `prod` needs `unwrapKey`, `prod-breakglass` both. Full table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-assignments-not-created-here). |
 
 The `prod-plan` identity reads and plans prod; it must not be able to apply. It is also granted
 write on the prod ledger record, because `prod-in-sync` records an unchanged prod from that
@@ -147,7 +147,9 @@ With `identity: oidc` the workflow runs `azure/login` and sets `ARM_USE_OIDC=tru
 that cannot federate with GitHub OIDC (see [the reference](../reference/ayasee-yaml.md#keys)). Two optional
 secrets are declared explicitly under `on.workflow_call.secrets`, never inherited: `teams-webhook`
 (without it, notifications are skipped) and `ledger-token`, a fine-grained token with contents
-write on the repository, needed only for a `git-branch://` ledger store. Jobs keep `contents: read`;
+write on the repository, needed only for a `git-branch://` ledger store. A third,
+`AYASEE_PLAN_PASSPHRASE`, is only for `plan_encryption.key_provider: pbkdf2` and must be an
+environment secret of `prod-plan` and `prod` (see [key providers](plan-binding.md#key-providers)). Jobs keep `contents: read`;
 when `ledger-token` is set, only the guard and ledger steps receive it, as step-level environment
 (`GIT_CONFIG_*` with an inline credential helper that reads the token from an environment
 variable; no file, no global git configuration).

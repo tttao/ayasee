@@ -215,9 +215,13 @@ flowchart LR
 - **Plain Terraform is not wired into `iac-staged`.** The replan fallback (D1(b)) exists in the
   actions and the CLI, but `iac-staged` always runs prod in `encrypted_plan` mode, which needs
   OpenTofu, and the setup action installs only OpenTofu. See [plan binding](plan-binding.md#the-replan-fallback).
-- **Azure first.** The wired pieces are Entra identities, Azure Key Vault plan encryption and the
-  `azure-blob://` ledger store. A `git-branch://` ledger works without Azure, and `identity: secrets`
-  skips the Azure login, but plan encryption has no other key provider yet.
+- **Azure first.** The default, and the only profile designed end to end, is Entra identities,
+  Azure Key Vault plan encryption and the `azure-blob://` ledger store. A provider-neutral profile
+  exists but has not run on GitHub: `identity: secrets` skips the Azure login,
+  `plan_encryption.key_provider: pbkdf2` encrypts the prod plan with a passphrase held as an
+  environment secret, the quickstart has a [reference S3 `root.hcl`](../guides/quickstart.md#without-azure),
+  and `github-branch://` is the ledger store that needs no cloud. There is no `s3://` ledger store,
+  and the `openbao`, `aws_kms` and `gcp_kms` key providers are not wired.
 - **Two or three stages only.** `iac-staged` runs `[<pre-prod>, prod]` or
   `[<first>, <pre-prod>, prod]`; longer lists are refused in `resolve`. No two-stage run has been
   executed on GitHub yet.

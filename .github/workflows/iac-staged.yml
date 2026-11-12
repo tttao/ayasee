@@ -35,6 +35,14 @@ on:
       ledger-token:
         description: Optional fine-grained token (contents write on the repository) for a git-branch:// ledger store.
         required: false
+      AYASEE_PLAN_PASSPHRASE:
+        description: >-
+          Only for plan_encryption.key_provider pbkdf2. Pass it by name
+          (AYASEE_PLAN_PASSPHRASE set to secrets.AYASEE_PLAN_PASSPHRASE) and create it as an
+          environment secret of prod-plan, prod and prod-breakglass only, never at repository or
+          organisation level: the environment secret takes precedence in those jobs. Only the
+          prod plan and apply steps receive it.
+        required: false
       extra-env-secret:
         description: >-
           Optional secret exported as AYASEE_EXTRA_SECRET to the plan and apply steps only (so
@@ -64,6 +72,7 @@ jobs:
       first-stage: ${{ steps.resolve.outputs.first-stage }}
       pre-prod-stage: ${{ steps.resolve.outputs.pre-prod-stage }}
       identity: ${{ steps.resolve.outputs.identity }}
+      key-provider: ${{ steps.resolve.outputs.key-provider }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -118,6 +127,7 @@ jobs:
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "allow-cascade=$(jq -r '.allow_cascade' "$cfg")"
             echo "identity=$identity"
+            echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
           } >>"$GITHUB_OUTPUT"
       - id: features
         name: Detect platform features
@@ -439,12 +449,14 @@ jobs:
         uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
           engine: ${{ needs.resolve.outputs.engine }}
           encrypt: "true"
           binding-mode: encrypted_plan
+          key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
           allow-cascade: ${{ needs.resolve.outputs.allow-cascade }} # UNSAFE when true (R52)
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
@@ -586,6 +598,7 @@ jobs:
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -594,6 +607,7 @@ jobs:
           plan-artifact: ${{ runner.temp }}/ayasee-prod-plan
           manifest-path: ${{ runner.temp }}/ayasee-prod-plan/manifest.json
           encrypt: "true"
+          key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
       - id: units
         name: Locate the units record

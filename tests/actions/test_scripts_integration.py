@@ -746,3 +746,79 @@ def test_output_only_change_reports_has_changes_for_prod(fresh):
     ]
     for f in (work / "changeset.json", work / "summary.md"):
         assert MARKER not in f.read_bytes(), f.name
+
+
+# ---- plan_encryption.key_provider: pbkdf2 (issue #1) ----
+
+PLAN_PASSPHRASE = "pbkdf2+base64/passphrase=ayasee-0123456789"
+
+
+def _pbkdf2_env(env, passphrase=PLAN_PASSPHRASE):
+    clean = {k: v for k, v in env.items() if k != "AYASEE_TEST_PASSPHRASE"}
+    return {**clean, "SG_KEY_PROVIDER": "pbkdf2", "AYASEE_PLAN_PASSPHRASE": passphrase}
+
+
+def test_pbkdf2_plan_is_encrypted_bound_and_applied(fresh):
+    root, env = fresh()
+    env = _pbkdf2_env(env)
+    proc, out = _run(Path("plan/plan.sh"), env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    _no_leak(proc)
+    assert PLAN_PASSPHRASE not in proc.stdout + proc.stderr
+    work = _work(env)
+    for plan in (work / "plans").iterdir():
+        assert MARKER not in plan.read_bytes()
+    bare = {k: v for k, v in env.items() if k != "TF_ENCRYPTION"}
+    shown = subprocess.run(
+        ["tofu", "show", str(work / "plans" / "base.tfplan")],
+        env=bare,
+        capture_output=True,
+        text=True,
+        cwd=env["RUNNER_TEMP"],
+    )
+    assert shown.returncode != 0
+    apply_args = {
+        "SG_BINDING_MODE": "encrypted_plan",
+        "SG_PLAN_ARTIFACT": str(work),
+        "SG_MANIFEST_PATH": str(work / "manifest.json"),
+    }
+    # another passphrase cannot decrypt the approved plan: nothing is applied
+    wrong = _pbkdf2_env(env, "another+passphrase/that=is-long-enough-000")
+    proc, _ = _run(Path("apply/apply.sh"), wrong, **apply_args)
+    assert proc.returncode != 0
+    assert _states(root) == []
+    proc, _ = _run(Path("apply/apply.sh"), env, **apply_args)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    _no_leak(proc)
+    units = json.loads((work / "units.json").read_text())
+    assert units == {
+        "base": {"status": "applied", "converged": True},
+        "app": {"status": "applied", "converged": True},
+    }
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"AYASEE_PLAN_PASSPHRASE": ""}, "pbkdf2 needs AYASEE_PLAN_PASSPHRASE"),
+        ({"AYASEE_PLAN_PASSPHRASE": "short-passphrase"}, "at least 32 chars"),
+        ({"AYASEE_PLAN_PASSPHRASE": 'x" } evil { "' + "y" * 32}, "at least 32 chars"),
+        ({"AYASEE_PLAN_PASSPHRASE": "${var.x}" + "y" * 32}, "at least 32 chars"),
+        (
+            {"SG_KEY_VAULT_KEY_ID": "https://v.vault.azure.net/keys/k"},
+            "pbkdf2 with key-vault-key-id set is ambiguous",
+        ),
+        ({"SG_KEY_PROVIDER": "aws_kms"}, "key-provider must be azure_vault or pbkdf2"),
+        (
+            {"SG_KEY_PROVIDER": "azure_vault"},
+            "AYASEE_PLAN_PASSPHRASE is set but key-provider is azure_vault",
+        ),
+        ({"AYASEE_TEST_PASSPHRASE": PASSPHRASE}, "use exactly one"),
+    ],
+)
+def test_pbkdf2_refusals(sandbox, extra, message):
+    _, env = sandbox
+    proc, _ = _run(Path("plan/plan.sh"), {**_pbkdf2_env(env), **extra})
+    assert proc.returncode != 0
+    assert message in proc.stderr
+    assert PLAN_PASSPHRASE not in proc.stdout + proc.stderr

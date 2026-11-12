@@ -18,6 +18,14 @@ released version into the GitHub release notes.
 - `identity: oidc | secrets` in `.ayasee.yaml` (default `oidc`). With `secrets`, the stage jobs of
   every reusable workflow skip `azure/login` and leave the `ARM_*` variables and
   `DATABRICKS_AUTH_TYPE` empty; every load prints a `DEVIATION:` line (D7).
+- `plan_encryption.key_provider: azure_vault | pbkdf2` (default `azure_vault`, unchanged). `pbkdf2`
+  encrypts the prod plan with a passphrase from the `AYASEE_PLAN_PASSPHRASE` environment secret,
+  passed only to the prod plan and apply steps (and those of break-glass); a missing, short or
+  ambiguous key source fails closed. The manifest and stale-plan checks are unchanged. The plan and
+  apply actions take a `key-provider` input.
+- A reference `root.hcl` for an S3-compatible state backend (`use_lockfile` locking, one bucket per
+  stage) in the quickstart's "Without Azure" section. No `s3://` ledger store: `github-branch://`
+  remains the ledger that needs no cloud.
 
 - A documentation site on GitHub Pages, <https://tttao.github.io/ayasee/>: the `docs` workflow
   assembles the repository's Markdown with `scripts/build-docs-site.py` and builds it with mkdocs

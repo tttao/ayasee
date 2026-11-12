@@ -39,6 +39,7 @@ such setting, so it never silently runs something else.
 | `extra_rules` | list of strings | `[]` | Extra risk-rule files, merged after the packaged rules; a file can only raise a tier (see [the risk gate](../concepts/risk-gate.md#rule-files)). Works with `ayasee changeset --rules` and the `rules` input of the `risk` action. A non-empty list is **not supported by the workflows yet**: they refuse it with "extra_rules: not supported yet" rather than ignore it (R73). |
 | `drift_noise` | map of string to list of strings | `{}` | Resource type to attribute paths ignored when judging drift. Read by `iac-nightly` at the live SHA ([drift](../concepts/drift.md#what-counts-as-drift)). |
 | `identity` | `oidc` or `secrets` | `oidc` | How stage jobs reach the cloud (D7). `oidc` is the Entra OIDC profile: `azure/login` and the `ARM_*` variables, one managed identity per environment, no stored cloud secret. `secrets` skips `azure/login` and leaves `ARM_*` and `DATABRICKS_AUTH_TYPE` empty, for providers that cannot federate with GitHub OIDC. **DEVIATION**: every load prints `DEVIATION: identity: secrets stores provider API tokens as GitHub environment secrets instead of OIDC federation (D7)` to stderr. |
+| `plan_encryption.key_provider` | `azure_vault` or `pbkdf2` | `azure_vault` | Where the prod plan encryption key comes from (D1). `azure_vault` is the Key Vault key in the `AYASEE_KEY_VAULT_KEY_ID` variable. `pbkdf2` derives it from the `AYASEE_PLAN_PASSPHRASE` secret, which must be an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. The manifest and the stale-plan checks do not change. `openbao`, `aws_kms` and `gcp_kms` are refused (not wired yet). See [key providers](../concepts/plan-binding.md#key-providers). |
 | `notify.teams` | boolean | `true` | A Teams card is sent whenever the `teams-webhook` secret is set, and skipped otherwise. `false` is **not supported yet** (the workflows refuse it with "notify.teams: not supported yet", R73): to turn Teams off, leave the secret unset. |
 
 ### Derived value
@@ -59,6 +60,8 @@ ledger:
 gate: always
 solo_mode: false
 identity: oidc
+plan_encryption:
+  key_provider: azure_vault
 allow_cascade: false
 extra_rules:
   - rules/team-rules.yaml

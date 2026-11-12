@@ -25,6 +25,8 @@ DEVIATION_SECRETS = (
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")
 IDENTITIES = ("oidc", "secrets")
+# Wired plan-encryption key providers (D1); openbao, aws_kms and gcp_kms are not yet.
+KEY_PROVIDERS = ("azure_vault", "pbkdf2")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
 STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # Environments with a fixed role that a pre-prod stage of iac-staged must never run in.
@@ -46,6 +48,11 @@ class NotifyConfig:
 
 
 @dataclass
+class PlanEncryptionConfig:
+    key_provider: str = "azure_vault"
+
+
+@dataclass
 class Config:
     stages: list[str] = field(default_factory=lambda: ["dev", "uat", "prod"])
     engine: str = "opentofu"
@@ -59,6 +66,7 @@ class Config:
     drift_noise: dict[str, list[str]] = field(default_factory=dict)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     identity: str = "oidc"
+    plan_encryption: PlanEncryptionConfig = field(default_factory=PlanEncryptionConfig)
 
     @property
     def binding_mode(self) -> str:
@@ -142,6 +150,12 @@ def _parse(raw: Any) -> Config:
             cfg.notify.teams = _bool(section["teams"], "notify.teams")
     if "identity" in top:
         cfg.identity = _literal(top["identity"], "identity", IDENTITIES)
+    if "plan_encryption" in top:
+        section = _mapping(top["plan_encryption"], "plan_encryption", {"key_provider"})
+        if "key_provider" in section:
+            cfg.plan_encryption.key_provider = _literal(
+                section["key_provider"], "plan_encryption.key_provider", KEY_PROVIDERS
+            )
     return cfg
 
 

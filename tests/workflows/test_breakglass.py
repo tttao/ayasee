@@ -354,3 +354,14 @@ def test_refuses_unsupported_settings_before_login(wf):
 def test_breakglass_has_no_main_tip_check(wf):
     """R70 excludes break-glass: it deploys an explicit, older-or-equal sha on main."""
     assert "main-tip" not in PATH.read_text()
+
+
+def test_breakglass_key_provider_and_passphrase_reach_plan_and_apply_only(wf):
+    steps = _steps(wf, JOB)
+    with_pass = [s for s in steps if "AYASEE_PLAN_PASSPHRASE" in str(s)]
+    assert [s.get("id") for s in with_pass] == ["plan", "apply"]
+    for step in with_pass:
+        assert step["env"]["AYASEE_PLAN_PASSPHRASE"] == "${{ secrets.AYASEE_PLAN_PASSPHRASE }}"
+        assert step["with"]["key-provider"] == "${{ steps.cfg.outputs.key-provider }}"
+    assert "AYASEE_PLAN_PASSPHRASE" not in str(wf["jobs"][JOB].get("env", {}))
+    assert "'.plan_encryption.key_provider'" in TEXT
