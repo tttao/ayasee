@@ -126,6 +126,30 @@ The own-action references inside that commit already point at the source SHA. Th
 placeholder SHA in an adopter's callers. The `setup` action installs the CLI from the pinned
 ayasee checkout; PyPI is for people who want the CLI on their own machine.
 
+## Distribution
+
+The supported distribution is the public repository `tttao/ayasee`: adopters in any account or
+organization call its reusable workflows and actions at a release SHA. GitHub shares workflows and
+actions of a private repository only with repositories of the same owner (or, for an
+organization, within it), so the repository stays public.
+
+### Mirrors for GHES and air-gapped estates
+
+An estate whose runners cannot reach github.com keeps a mirror and pins the mirror's own SHAs:
+
+1. Mirror the release branch and the tag without rewriting history:
+   `git clone --bare https://github.com/tttao/ayasee && git -C ayasee.git push --mirror https://<host>/<org>/ayasee`,
+   or push only `release/<tag>`, `main` and the tag.
+2. Verify the mirror: `git -C <mirror clone> rev-parse release/<tag>` must equal the release SHA in
+   the release notes, and `git -C <mirror clone> rev-parse <tag>^{commit}` the source SHA. Git
+   object IDs are content hashes, so equal SHAs mean equal code.
+3. The release commit pins the actions as `tttao/ayasee/actions/<x>@<source SHA>`. On the mirror,
+   rewrite that owner on top of the release branch, once per reusable workflow:
+   `for f in .github/workflows/{iac-staged,iac-pr,iac-nightly,iac-breakglass,cockpit-collect}.yml; do scripts/set-ayasee-ref.sh <org>/ayasee <source SHA> "$f"; done`,
+   then commit and pin that commit. The script refuses unless the code is identical to the source
+   SHA.
+4. Follow ayasee releases on your own cadence; each update repeats steps 1 to 3.
+
 ## If something fails
 
 - **Provenance gate fails**: the confirmation is incomplete. Nothing was built.
