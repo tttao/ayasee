@@ -37,6 +37,12 @@ committed as unit inputs. Everything uses placeholders: `OWNER`, the all-zero ID
 
 ## Adoption steps
 
+`ayasee init --profile cloudflare-s3` writes the configuration, the callers, `root.hcl` and the
+bootstrap root of this example into your repository, with your stages and `iac_root`, pinned to one
+release (step 5 is then done); it writes no unit. See
+[start from the example](../../docs/guides/quickstart.md#1-start-from-the-example). The steps below
+apply either way.
+
 ### 1. Bootstrap the environments
 
 ```bash

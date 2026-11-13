@@ -111,18 +111,14 @@ def test_callers_pass_the_provider_tokens_by_name_and_only_declared_secrets():
 
 def test_bootstrap_creates_the_environments_and_the_ledger_variable():
     text = (EX / "bootstrap" / "main.tf").read_text()
-    assert 'stages               = ["test", "prod"]' in text
+    assert 'stages     = ["test", "prod"]' in text
+    assert "stages               = local.stages" in text
     assert "shared_units_pr_plan = true" in text
     assert "git-branch://${local.workspace}?branch=ayasee-ledger&remote=origin" in text
-    envs = re.search(r"ledger_envs = \[(.*?)\]", text).group(1)
-    assert {e.strip().strip('"') for e in envs.split(",")} == {
-        "test",
-        "prod-plan",
-        "prod",
-        "prod-breakglass",
-        "drift-test",
-        "drift-prod",
-    }
+    assert (
+        'ledger_envs = concat(local.stages, ["prod-plan", "prod-breakglass"], '
+        '[for s in local.stages : "drift-${s}"])'
+    ) in text
     assert "azure" not in text.lower()
 
 
