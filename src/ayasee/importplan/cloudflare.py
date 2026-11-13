@@ -2,14 +2,14 @@
 
 Read-only: the client below has no method other than GET. The token is read from
 ``CLOUDFLARE_API_TOKEN``, the variable the provider reads, and is never part of a message; the
-read permissions of a plan token are enough (Zone DNS Read, Cloudflare Tunnel Read, Access: Apps
-and Policies Read). ``CLOUDFLARE_API_BASE_URL`` overrides the API URL (https only).
+read permissions of a plan token are enough (Zone DNS Read, which also reads the zone's name;
+Cloudflare Tunnel Read; Access: Apps and Policies Read). ``CLOUDFLARE_API_BASE_URL`` overrides the API URL (https only).
 
 What identifies a live object, and the import ID written for it (formats of provider v5):
 
 | Resource | Matched on | Import ID |
 |---|---|---|
-| ``cloudflare_dns_record`` | zone, exact name (FQDN, case-insensitive) and type | ``<zone_id>/<record_id>`` |
+| ``cloudflare_dns_record`` | zone, exact name (FQDN in the zone, case-insensitive), type, and content unless CNAME | ``<zone_id>/<record_id>`` |
 | ``cloudflare_zero_trust_tunnel_cloudflared_config`` | account and tunnel (one config per tunnel) | ``<account_id>/<tunnel_id>`` |
 | ``cloudflare_zero_trust_access_application`` | account, domain (case-insensitive) and type | ``accounts/<account_id>/<app_id>`` |
 | ``cloudflare_zero_trust_access_policy`` | account and exact name (reusable policies) | ``<account_id>/<policy_id>`` |
@@ -35,6 +35,7 @@ class Cloudflare:
     def __init__(self, base_url: str, token: str, *, timeout: float = 30.0) -> None:
         if urlparse(base_url).scheme != "https":
             raise ImportPlanError("CLOUDFLARE_API_BASE_URL must be https")
+        self._zones: dict[str, str] = {}
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -75,6 +76,8 @@ class Cloudflare:
         return result
 
     def get_all(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Every page of a list endpoint. A truncated list could turn an ambiguity into a
+        single wrong match, so anything short of a provably complete list is an error."""
         items: list[dict[str, Any]] = []
         for page in range(1, MAX_PAGES + 1):
             body = self._get(path, {**(params or {}), "page": page, "per_page": PER_PAGE})
@@ -84,9 +87,25 @@ class Cloudflare:
             items.extend(result)
             info = body.get("result_info")
             total = info.get("total_pages") if isinstance(info, dict) else None
-            if not isinstance(total, int) or page >= total or not result:
+            if not isinstance(total, int) or isinstance(total, bool):
+                # No page count: complete only if the first page is not full.
+                if page == 1 and len(result) < PER_PAGE:
+                    return items
+                raise ImportPlanError("cloudflare: list response has no page count")
+            if page >= total:
                 return items
+            if not result:
+                raise ImportPlanError("cloudflare: empty page before the last one")
         raise ImportPlanError(f"cloudflare: more than {MAX_PAGES} pages of results")
+
+    def zone_name(self, zone_id: str) -> str:
+        """The zone's apex name (``GET /zones/{id}``), read once per zone."""
+        if zone_id not in self._zones:
+            name = self.get_one(f"/zones/{zone_id}").get("name")
+            if not isinstance(name, str) or not name:
+                raise ImportPlanError("cloudflare: the zone has no name")
+            self._zones[zone_id] = name
+        return self._zones[zone_id]
 
     def find(self, planned: Planned) -> list[str]:
         return _FINDERS[planned.type](self, planned)
@@ -112,18 +131,31 @@ def _host(value: str) -> str:
 
 
 def _dns_record(cf: Cloudflare, p: Planned) -> list[str]:
+    """A CNAME is the only record at its name, so name and type identify it. Every other type
+    can hold several records at one name (TXT, A, MX...): the planned content must equal the live
+    content too, or an unrelated record would be adopted and overwritten by the next apply."""
     name = p.known_str("name")
     rtype = p.known_str("type")
-    if name == "@" or "." not in name:
+    host = _host(name)
+    if "." not in host:  # "@" or a relative name: no request needed to refuse it
         raise Unmatchable("name is not a fully qualified hostname; write this block by hand")
     zone = _ident(p, "zone_id")
-    listed = cf.get_all(f"/zones/{zone}/dns_records", {"type": rtype, "name.exact": name})
+    zone_name = _host(cf.zone_name(zone))
+    if not (host == zone_name or host.endswith("." + zone_name)):
+        raise Unmatchable("name is not a fully qualified hostname of the zone; write by hand")
+    params = {"type": rtype, "name.exact": name}
+    content = None
+    if rtype != "CNAME":
+        content = p.known_str("content")
+        params["content.exact"] = content
+    listed = cf.get_all(f"/zones/{zone}/dns_records", params)
     hits = [
         r
         for r in listed
         if isinstance(r.get("name"), str)
-        and _host(r["name"]) == _host(name)
+        and _host(r["name"]) == host
         and r.get("type") == rtype
+        and (content is None or r.get("content") == content)
     ]
     return [f"{zone}/{i}" for i in _ids(hits)]
 

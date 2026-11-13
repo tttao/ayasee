@@ -20,7 +20,8 @@ ACCOUNT = "22222222222222222222222222222222"
 TUNNEL = "33333333-3333-3333-3333-333333333333"
 TOKEN = "ayasee-fixture-secret-marker"
 
-DNS = f"{API}/zones/{ZONE}/dns_records"
+ZONE_URL = f"{API}/zones/{ZONE}"
+DNS = f"{ZONE_URL}/dns_records"
 TUNNEL_CFG = f"{API}/accounts/{ACCOUNT}/cfd_tunnel/{TUNNEL}/configurations"
 APPS = f"{API}/accounts/{ACCOUNT}/access/apps"
 POLICIES = f"{API}/accounts/{ACCOUNT}/access/policies"
@@ -67,6 +68,7 @@ def _dns_side_effect(request):
 
 
 def _mock_estate(*, apps=None, policies=None, dns=_dns_side_effect):
+    respx.get(ZONE_URL).mock(return_value=_ok({"id": ZONE, "name": "example.com"}))
     respx.get(DNS).mock(side_effect=dns)
     respx.get(TUNNEL_CFG).mock(
         return_value=_ok({"tunnel_id": TUNNEL, "config": {"ingress": []}, "source": "cloudflare"})
@@ -160,6 +162,81 @@ def test_dns_record_of_another_type_or_name_does_not_match(env, capsys):
     assert 'create    cloudflare_dns_record.this["app.example.com"]' in capsys.readouterr().out
 
 
+def _dns_plan(tmp_path, *records):
+    """A plan of the fixture's first DNS record, once per ``(name, type, content)``."""
+    import json
+
+    doc = json.loads(PLAN.read_text())
+    base = doc["resource_changes"][0]
+    doc["resource_changes"] = []
+    for name, rtype, content in records:
+        rc = json.loads(json.dumps(base))
+        rc["address"] = f'cloudflare_dns_record.this["{name}/{rtype}"]'
+        rc["change"]["after"].update(name=name, type=rtype, content=content)
+        doc["resource_changes"].append(rc)
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(doc))
+    return plan
+
+
+@respx.mock
+def test_dns_record_other_than_cname_matches_on_content_too(env, capsys):
+    live = [
+        {"id": "rec-1", "name": "mx.example.com", "type": "A", "content": "192.0.2.1"},
+        {"id": "rec-2", "name": "mx.example.com", "type": "A", "content": "192.0.2.2"},
+    ]
+    _mock_estate(dns=lambda r: _ok(live))
+    plan = _dns_plan(env, ("mx.example.com", "A", "192.0.2.2"))
+    code, out = _run(env, plan=plan)
+    assert code == 0
+    assert f'id = "{ZONE}/rec-2"' in out.read_text()
+    assert "rec-1" not in out.read_text()
+    params = [c.request.url.params for c in respx.calls if c.request.url.path.endswith("records")]
+    assert [p["content.exact"] for p in params] == ["192.0.2.2"]
+
+
+@respx.mock
+def test_dns_record_with_other_content_stays_a_create(env, capsys):
+    live = [{"id": "rec-1", "name": "txt.example.com", "type": "TXT", "content": "v=other"}]
+    _mock_estate(dns=lambda r: _ok(live))
+    plan = _dns_plan(env, ("txt.example.com", "TXT", "v=mine"))
+    code, out = _run(env, plan=plan)
+    assert code == 0
+    assert not out.exists()
+    assert "create    " in capsys.readouterr().out
+
+
+@respx.mock
+def test_cname_is_matched_without_content(env):
+    live = [{"id": "rec-c", "name": "c.example.com", "type": "CNAME", "content": "old.target"}]
+    _mock_estate(dns=lambda r: _ok(live))
+    plan = _dns_plan(env, ("c.example.com", "CNAME", "new.target"))
+    code, out = _run(env, plan=plan)
+    assert code == 0
+    assert f'id = "{ZONE}/rec-c"' in out.read_text()
+    params = [c.request.url.params for c in respx.calls if c.request.url.path.endswith("records")]
+    assert all("content.exact" not in p for p in params)
+
+
+@respx.mock
+def test_zone_name_is_read_once_per_zone(env):
+    _mock_estate()
+    _run(env)
+    zone_reads = [c for c in respx.calls if c.request.url.path.endswith(f"/zones/{ZONE}")]
+    assert len(zone_reads) == 1
+
+
+@respx.mock
+def test_dns_name_outside_the_zone_is_skipped(env, capsys):
+    _mock_estate()
+    plan = _dns_plan(env, ("app.example.org", "CNAME", "x.example.org"))
+    code, out = _run(env, plan=plan)
+    assert code == 0
+    assert not out.exists()
+    assert "not a fully qualified hostname of the zone" in capsys.readouterr().out
+    assert not [c for c in respx.calls if c.request.url.path.endswith("records")]
+
+
 @respx.mock
 def test_two_live_objects_for_one_address_refuses_and_writes_nothing(env, capsys):
     _mock_estate(
@@ -202,6 +279,49 @@ def test_pagination_is_followed(env):
     }
     _mock_estate()
     respx.get(POLICIES).mock(side_effect=lambda r: pages[r.url.params["page"]])
+    code, out = _run(env)
+    assert code == 0
+    assert f'id = "{ACCOUNT}/pol-ssh"' in out.read_text()
+
+
+def _truncated(*pages):
+    return lambda r: pages[int(r.url.params["page"]) - 1]
+
+
+def _full_page(n=cloudflare.PER_PAGE):
+    return [{"id": f"pol-{i}", "name": "other"} for i in range(n)]
+
+
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        # A full first page and no page count: there may be more.
+        lambda r: httpx.Response(200, json={"success": True, "result": _full_page()}),
+        # An empty page before the announced last one.
+        _truncated(_ok(_full_page(), 1, 3), _ok([], 2, 3)),
+        # More pages than the client reads.
+        lambda r: _ok(_full_page(1), int(r.url.params["page"]), cloudflare.MAX_PAGES + 1),
+    ],
+    ids=["no-page-count", "empty-middle-page", "too-many-pages"],
+)
+@respx.mock
+def test_incomplete_list_fails_closed(env, capsys, side_effect):
+    _mock_estate()
+    respx.get(POLICIES).mock(side_effect=side_effect)
+    code, out = _run(env)
+    assert code == 1
+    assert not out.exists()
+    assert "nothing written" in capsys.readouterr().err
+
+
+@respx.mock
+def test_short_list_without_page_count_is_complete(env):
+    _mock_estate()
+    respx.get(POLICIES).mock(
+        return_value=httpx.Response(
+            200, json={"success": True, "result": [{"id": "pol-ssh", "name": "SSH to the host"}]}
+        )
+    )
     code, out = _run(env)
     assert code == 0
     assert f'id = "{ACCOUNT}/pol-ssh"' in out.read_text()
