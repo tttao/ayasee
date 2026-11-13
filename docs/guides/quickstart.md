@@ -132,8 +132,8 @@ tofu apply -var github_owner=my-org -var github_repository=my-platform \
 
 This uses the two modules:
 
-- [`github-environments`](../../modules/github-environments/README.md) creates `dev-plan`, `dev`, `uat`,
-  `prod-plan`, `prod`, `prod-breakglass` and `drift-dev`, `drift-uat`, `drift-prod`. Environments with
+- [`github-environments`](../../modules/github-environments/README.md) creates `dev-plan` (the pull-request
+  plan environment, `<first stage>-plan`), `dev`, `uat`, `prod-plan`, `prod`, `prod-breakglass` and `drift-dev`, `drift-uat`, `drift-prod`. Environments with
   reviewers get `prevent_self_review = true` and admins cannot bypass (D2). The `prod` and
   `prod-breakglass` reviewer sets must be non-empty and different.
 - [`azure-stage-identity`](../../modules/azure-stage-identity/README.md) creates one managed identity and one

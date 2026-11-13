@@ -57,12 +57,14 @@ STAGES = ("dev", "uat", "prod")
 # with their upstream (R52, cascading change), so `up` lands them in a second staged run, the
 # incremental bootstrap of examples/databricks-azure/README.md.
 DEPENDENT_UNITS = ("grants",)
-# Environment -> has reviewers (the gate). dev-plan is the only one not restricted to main,
+# The pull-request plan environment, <first stage>-plan (issue #11), as in iac-pr.
+PR_PLAN = f"{STAGES[0]}-plan"
+# Environment -> has reviewers (the gate). PR_PLAN is the only one not restricted to main,
 # as in modules/github-environments.
 ENVIRONMENTS = {
     **{s: False for s in STAGES},
     **{f"drift-{s}": False for s in STAGES},
-    "dev-plan": False,
+    PR_PLAN: False,
     "prod-plan": False,
     "prod": True,
     "prod-breakglass": True,
@@ -339,14 +341,14 @@ class Ephemeral:
                 "prevent_self_review": prevent_self_review,
                 "reviewers": [{"type": "User", "id": i} for i in reviewer_ids] if gated else [],
                 "deployment_branch_policy": None
-                if env == "dev-plan"
+                if env == PR_PLAN
                 else {
                     "protected_branches": False,
                     "custom_branch_policies": True,
                 },
             }
             self.api(f"/repos/{repo}/environments/{env}", method="PUT", body=body)
-            if env != "dev-plan":
+            if env != PR_PLAN:
                 self.api(
                     f"/repos/{repo}/environments/{env}/deployment-branch-policies",
                     method="POST",

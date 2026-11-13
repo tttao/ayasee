@@ -87,6 +87,32 @@ released version into the GitHub release notes.
   `run-dev`, `run-uat`, `first-stage` and `pre-prod-stage`. A matrix was not used because GitHub
   does not order matrix jobs; see [the staged run](docs/concepts/staged-run.md#stages).
 
+### Changed
+
+- **Breaking for estates whose first stage is not `dev`** (#11): the pull-request plan environment
+  is named after the first stage, `<first stage>-plan`, matching `prod-plan`: `stages: [test, prod]`
+  plans pull requests in `test-plan`, no longer in `dev-plan`. With the default stages, or any list
+  that starts with `dev`, nothing changes. A new `resolve` job of `iac-pr` names the environment
+  with the new `ayasee config pr-plan-environment`, and the plan runs in it, in a job now called
+  `plan-first-stage`. `plan-dev` stays the check to require: it no longer plans but fails unless
+  `resolve` accepted the configuration and `plan-first-stage` passed, so a refused configuration
+  turns it red instead of skipping it, and the comment says so. The comment is headed
+  "Plan of `<stage>`" instead of "Dev plan". The
+  `github-environments` module creates `<first stage>-plan` instead of `dev-plan` (new output
+  `pr_plan_environment`) and refuses a first stage named `prod`. To move an estate whose first stage
+  is not `dev`: apply the module (it destroys `dev-plan` and creates `<first stage>-plan`, so the
+  environment secrets of `dev-plan` go with it), re-create the provider tokens of
+  `identity: secrets` and the `AZURE_*` variables in the new environment, and with Azure OIDC
+  re-create the federated credential for the subject `environment:<first stage>-plan`
+  (`azure-stage-identity` with `environment = "<first stage>-plan"`). There is no setting that
+  keeps the old name. If `dev-plan` or its federated credential was created outside the module,
+  delete both: a leftover `dev-plan` accepts every branch and still holds a read identity.
+- Stage names that end in `-plan`, start with `drift-` or are `prod`, `prod-pr` or
+  `prod-breakglass` are refused by `ayasee config staged`, `ayasee config pr-plan-environment` and
+  the `github-environments` module, so a pull-request plan environment, which accepts every branch,
+  can never share a name with an environment that has a fixed role. `binding-mode: same-job` is
+  refused for every `*-plan` environment.
+
 ### Fixed
 
 - The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that

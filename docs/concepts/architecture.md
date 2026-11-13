@@ -109,7 +109,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 
 | Environment | Used by | Branches | Reviewers | Can |
 |---|---|---|---|---|
-| `dev-plan` | `iac-pr` | all | none | Read dev, plan with `-lock=false` |
+| `dev-plan` (`<first stage>-plan`) | `iac-pr` | all | none | Read the first stage, plan with `-lock=false` |
 | each pre-prod stage (default `dev`, `uat`) | `iac-staged` | `main` | none | Apply its own stage, its state, write the ledger |
 | `prod-plan` | `iac-staged` | `main` | none | Read and plan prod (state read, lock lease), wrap and unwrap the plan key (`tofu show -json` decrypts its own plan), write the prod ledger record. Cannot apply. |
 | `prod` | `iac-staged` | `main` | required, no self-review, no admin bypass | Apply prod, its state, unwrap the plan key, read and write the ledger |

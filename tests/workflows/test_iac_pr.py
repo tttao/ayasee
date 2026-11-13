@@ -43,15 +43,21 @@ def test_pr_never_runs_apply(wf):
     assert "--mirror-deployments" not in text and "SG_MIRROR" not in text
 
 
-def test_pr_plan_uses_dev_plan_environment_only(wf):
-    assert wf["jobs"]["plan-dev"]["environment"] == "dev-plan"
+def test_pr_plan_uses_the_first_stage_plan_environment_only(wf):
+    # <first-stage>-plan (issue #11), named by the resolve job: a job's environment is fixed
+    # before its steps run
+    env = "${{ needs.resolve.outputs.pr-plan-environment }}"
+    job = wf["jobs"]["plan-first-stage"]
+    assert job["environment"] == env
+    assert job["needs"] == "resolve"
+    assert "needs.resolve.outputs.pr-plan-environment != ''" in job["if"]
     assert "environment" not in wf["jobs"]["checks"]
     envs = [j.get("environment") for j in wf["jobs"].values() if j.get("environment")]
     # never an environment that can apply or holds the plan key; prod-pr-plan is the read-only
     # identity of the shared-units plan (#5)
-    assert sorted(envs) == ["dev-plan", "prod-pr-plan"]
+    assert sorted(envs) == [env, "prod-pr-plan"]
     assert wf["jobs"]["plan-shared"]["environment"] == "prod-pr-plan"
-    plans = [s for s in _steps(wf, "plan-dev") if "/actions/plan@" in _uses(s)]
+    plans = [s for s in _steps(wf, "plan-first-stage") if "/actions/plan@" in _uses(s)]
     assert len(plans) == 1
     with_ = plans[0]["with"]
     # the first configured stage (dev by default), issue #1
@@ -70,10 +76,126 @@ def test_pr_plan_uses_dev_plan_environment_only(wf):
                 assert "plan" not in step["with"]["path"].replace("pr-comment", "")
 
 
+def test_resolve_names_the_pr_plan_environment_without_an_identity(wf):
+    job = wf["jobs"]["resolve"]
+    assert "environment" not in job
+    assert job["permissions"] == {"contents": "read"}
+    assert FORK_SKIP in job["if"] and "github.event_name == 'pull_request'" in job["if"]
+    assert job["outputs"] == {"pr-plan-environment": "${{ steps.env.outputs.name }}"}
+    text = json.dumps(job["steps"])
+    assert "ayasee config pr-plan-environment" in text
+    assert "/actions/plan@" not in text and "azure/login" not in text
+    checkout = _steps(wf, "resolve")[0]
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def _run_resolve(tmp_path, stages):
+    """Run the resolve step's script against a configuration, with the real CLI."""
+    (step,) = [s for s in _steps(wf_static(), "resolve") if s.get("id") == "env"]
+    cfg = tmp_path / ".ayasee.yaml"
+    cfg.write_text(f"stages: {stages}\n")
+    out = tmp_path / "out"
+    out.write_text("")
+    env = {
+        **os.environ,
+        "CONFIG_PATH": str(cfg),
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_OUTPUT": str(out),
+    }
+    proc = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        env=env, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    return proc, out.read_text()
+
+
+def wf_static():
+    return yaml.safe_load(PATH.read_text())
+
+
+@pytest.mark.skipif(shutil.which("ayasee") is None, reason="needs the ayasee CLI on PATH")
+def test_resolve_step_writes_first_stage_plan(tmp_path):
+    proc, out = _run_resolve(tmp_path, "[test, prod]")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert out == "name=test-plan\n"
+
+
+@pytest.mark.skipif(shutil.which("ayasee") is None, reason="needs the ayasee CLI on PATH")
+def test_resolve_step_refuses_a_reserved_first_stage(tmp_path):
+    proc, out = _run_resolve(tmp_path, "[prod-pr, prod]")
+    assert proc.returncode != 0
+    assert out == ""
+    assert "::error::" in proc.stdout and "reserved" in proc.stdout
+
+
+def test_plan_dev_is_the_verdict_and_never_skipped_after_resolve(wf):
+    """A skipped required check passes branch protection: plan-dev must run whenever resolve ran
+    (also when it failed) and hold no identity, environment or checkout (review of #11)."""
+    job = wf["jobs"]["plan-dev"]
+    assert job["needs"] == ["resolve", "plan-first-stage"]
+    # always(), not !cancelled(): a cancelled run turns the verdict red instead of skipping it
+    assert job["if"].startswith("${{ always() && ")
+    assert "github.event_name == 'pull_request'" in job["if"] and FORK_SKIP in job["if"]
+    assert "needs." not in job["if"]  # runs when resolve or plan-first-stage failed
+    assert "environment" not in job and job["permissions"] == {}
+    text = json.dumps(job["steps"])
+    assert "checkout" not in text and "uses" not in text
+
+
+def _run_verdict(resolve, plan):
+    (step,) = _steps(wf_static(), "plan-dev")
+    env = {**os.environ, "RESOLVE": resolve, "PLAN": plan}
+    return subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True, check=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("resolve", "plan", "ok"),
+    [
+        ("success", "success", True),
+        ("failure", "skipped", False),  # configuration refused: red, not skipped
+        ("success", "failure", False),
+        ("success", "skipped", False),
+        ("cancelled", "skipped", False),
+    ],
+)
+def test_plan_dev_verdict(resolve, plan, ok):
+    proc = _run_verdict(resolve, plan)
+    assert (proc.returncode == 0) is ok, proc.stdout
+    if not ok:
+        assert "::error::" in proc.stdout
+
+
+def test_a_refused_configuration_is_commented(tmp_path):
+    steps = _steps(wf_static(), "comment")
+    refused = next(s for s in steps if s.get("id") == "refused")
+    env = {**os.environ, "RUNNER_TEMP": str(tmp_path), "RUN_URL": "https://example.invalid/run"}
+    proc = subprocess.run(
+        ["bash", "-e", "-c", refused["run"]], env=env, capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+    body = (tmp_path / "pr-comment" / "pr-comment.md").read_text()
+    assert "configuration was refused" in body and "https://example.invalid/run" in body
+
+
+def test_comment_body_names_the_stage(wf):
+    steps = _steps(wf, "plan-first-stage")
+    body = steps[_index(steps, lambda s: s.get("id") == "body")]
+    assert body["env"]["STAGE"] == "${{ steps.changed.outputs.stage }}"
+    assert 'echo "### Plan of $STAGE"' in body["run"]
+    assert "dev plan" not in body["run"].lower() and "Dev plan" not in body["run"]
+
+
 def test_permissions(wf):
     assert wf["permissions"] == {}
     assert wf["jobs"]["checks"]["permissions"] == {"contents": "read"}
-    assert wf["jobs"]["plan-dev"]["permissions"] == {"contents": "read", "id-token": "write"}
+    assert wf["jobs"]["resolve"]["permissions"] == {"contents": "read"}
+    assert wf["jobs"]["plan-first-stage"]["permissions"] == {
+        "contents": "read",
+        "id-token": "write",
+    }
+    assert wf["jobs"]["plan-dev"]["permissions"] == {}
     assert wf["jobs"]["upload-sarif"]["permissions"] == {
         "security-events": "write",
         "actions": "read",
@@ -92,7 +214,7 @@ def test_no_job_running_pr_code_holds_a_write_scope(wf):
         if "/actions/plan@" in text or "hcl validate" in text:
             runs_pr_code += 1
             assert not set(job["permissions"]) & {"pull-requests", "security-events"}, name
-    assert runs_pr_code == 3  # checks, plan-dev and plan-shared
+    assert runs_pr_code == 3  # checks, plan-first-stage and plan-shared
 
 
 def test_comment_job_checks_out_only_the_base_commit(wf):
@@ -109,7 +231,7 @@ def test_comment_job_checks_out_only_the_base_commit(wf):
 
 
 def test_plan_dev_refuses_unsupported_settings_before_login(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     i = _index(steps, lambda s: "config check-supported" in s.get("run", ""))
     assert steps[i]["env"]["CONFIG_PATH"] == "${{ inputs.config-path }}"
     assert "if" not in steps[i] and "exit 1" in steps[i]["run"]
@@ -130,12 +252,12 @@ def test_publishing_jobs_run_no_pr_code(wf):
     steps = _steps(wf, "comment")
     download = steps[_index(steps, lambda s: "download-artifact" in _uses(s))]
     assert download["with"]["name"] == "ayasee-pr-comment"
-    assert wf["jobs"]["comment"]["needs"] == "plan-dev"
+    assert wf["jobs"]["comment"]["needs"] == ["resolve", "plan-first-stage"]
     assert wf["jobs"]["comment"]["if"] == (
         "${{ !cancelled() && github.event_name == 'pull_request' "
-        "&& needs.plan-dev.result != 'skipped' }}"
+        "&& needs.resolve.result != 'skipped' }}"
     )
-    up = _steps(wf, "plan-dev")[-1]
+    up = _steps(wf, "plan-first-stage")[-1]
     assert up["with"]["name"] == "ayasee-pr-comment" and up["with"]["retention-days"] == 1
     sarif = _steps(wf, "checks")
     keep = sarif[_index(sarif, lambda s: "upload-artifact" in _uses(s))]
@@ -143,7 +265,7 @@ def test_publishing_jobs_run_no_pr_code(wf):
 
 
 def test_plan_runs_without_the_state_lock(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     plan = steps[_index(steps, lambda s: "/actions/plan@" in _uses(s))]
     assert plan["with"]["lock"] == "false"
     sh = (ROOT / "actions" / "plan" / "plan.sh").read_text()
@@ -161,16 +283,17 @@ def test_no_pull_request_target(wf):
 
 
 def test_fork_prs_skip_plan_dev(wf):
-    cond = wf["jobs"]["plan-dev"]["if"]
-    assert FORK_SKIP in cond
-    assert "github.event_name == 'pull_request'" in cond
+    for job in ("resolve", "plan-first-stage", "plan-dev"):
+        cond = wf["jobs"][job]["if"]
+        assert FORK_SKIP in cond, job
+        assert "github.event_name == 'pull_request'" in cond, job
     # the SARIF upload needs a write token, which a fork does not get
     assert FORK_SKIP in wf["jobs"]["upload-sarif"]["if"]
     assert wf["jobs"]["upload-sarif"]["needs"] == "checks"
 
 
 def test_plan_dev_checkout_is_the_pr_head_without_credentials(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     co = steps[0]
     assert "actions/checkout@" in _uses(co)
     assert co["with"]["persist-credentials"] is False
@@ -181,7 +304,7 @@ def test_plan_dev_checkout_is_the_pr_head_without_credentials(wf):
 
 
 def test_plan_skipped_without_changes_and_comment_says_so(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     for step in steps:
         if "/actions/plan@" in _uses(step) or "azure/login" in _uses(step):
             assert "steps.changed.outputs.any == 'true'" in step["if"]
@@ -190,7 +313,7 @@ def test_plan_skipped_without_changes_and_comment_says_so(wf):
 
 
 def test_login_then_plan_then_policy_then_comment_body(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     login = _index(steps, lambda s: "azure/login" in _uses(s))
     plan = _index(steps, lambda s: "/actions/plan@" in _uses(s))
     policy = _index(steps, lambda s: "/actions/policy@" in _uses(s))
@@ -203,7 +326,7 @@ def test_login_then_plan_then_policy_then_comment_body(wf):
 
 
 def test_comment_body_is_only_the_rendered_summary(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     body = steps[_index(steps, lambda s: s.get("id") == "body")]
     assert "steps.plan.outputs.summary-path" in body["env"]["SUMMARY"]
     # nothing reads plan JSON or the plan directory into the comment
@@ -263,7 +386,7 @@ def test_every_scanner_runs_even_after_an_earlier_failure(wf):
 
 
 def test_failed_change_detection_never_reads_as_no_changes(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     body = steps[_index(steps, lambda s: s.get("id") == "body")]
     assert body["env"]["CHANGED_OUTCOME"] == "${{ steps.changed.outcome }}"
     run = body["run"]
@@ -367,24 +490,32 @@ def test_sarif_has_no_values(tmp_path):
 
 
 def test_missing_artifact_is_a_warning_not_a_red_publishing_job(wf):
-    for job, name, skipped in (
-        ("upload-sarif", "ayasee-sarif", "found"),
-        ("comment", "ayasee-pr-comment", None),
-    ):
-        steps = _steps(wf, job)
-        i = _index(steps, lambda s: s.get("id") == "download")
-        assert steps[i]["continue-on-error"] is True
-        assert steps[i]["with"]["name"] == name
-        warn = steps[i + 1]
-        assert warn["if"] == "${{ steps.download.outcome != 'success' }}"
-        assert "::warning::no " in warn["run"]
-        later = steps[i + 2 :]
-        if skipped:
-            found = next(s for s in later if s.get("id") == skipped)
-            assert found["if"] == "${{ steps.download.outcome == 'success' }}"
-        else:
-            post = next(s for s in later if "ayasee pr-comment" in s.get("run", ""))
-            assert post["if"] == "${{ steps.download.outcome == 'success' }}"
+    steps = _steps(wf, "upload-sarif")
+    i = _index(steps, lambda s: s.get("id") == "download")
+    assert steps[i]["continue-on-error"] is True
+    assert steps[i]["with"]["name"] == "ayasee-sarif"
+    warn = steps[i + 1]
+    assert warn["if"] == "${{ steps.download.outcome != 'success' }}"
+    assert "::warning::no " in warn["run"]
+    found = next(s for s in steps[i + 2 :] if s.get("id") == "found")
+    assert found["if"] == "${{ steps.download.outcome == 'success' }}"
+    # comment: a refused configuration (resolve failed) has no artifact but still gets a comment
+    steps = _steps(wf, "comment")
+    i = _index(steps, lambda s: s.get("id") == "download")
+    assert steps[i]["continue-on-error"] is True
+    assert steps[i]["with"]["name"] == "ayasee-pr-comment"
+    refused = steps[i + 1]
+    assert refused["id"] == "refused"
+    assert refused["if"] == "${{ needs.resolve.result == 'failure' }}"
+    warn = steps[i + 2]
+    assert warn["if"] == (
+        "${{ steps.download.outcome != 'success' && steps.refused.outcome != 'success' }}"
+    )
+    assert "::warning::no " in warn["run"]
+    post = next(s for s in steps[i + 3 :] if "ayasee pr-comment" in s.get("run", ""))
+    assert post["if"] == (
+        "${{ steps.download.outcome == 'success' || steps.refused.outcome == 'success' }}"
+    )
 
 
 def test_no_uv_cache_anywhere():
@@ -425,7 +556,7 @@ def test_checks_are_scoped_to_the_iac_root(wf):
 
 
 def test_changed_units_ignores_code_outside_the_iac_root(wf):
-    steps = _steps(wf, "plan-dev")
+    steps = _steps(wf, "plan-first-stage")
     changed = steps[_index(steps, lambda s: s.get("id") == "changed")]
     assert '--iac-root "$iac_root"' in changed["run"]
     assert '--config-path "$CONFIG_PATH"' in changed["run"]
@@ -481,8 +612,8 @@ def test_shared_plan_has_its_own_sticky_comment(wf):
     assert "--marker pr-plan-shared" in post["run"]
     dl = steps[_index(steps, lambda s: "download-artifact" in _uses(s))]
     assert dl["with"]["name"] == "ayasee-pr-comment-shared"
-    # the dev plan's comment does not wait for the shared plan
-    assert wf["jobs"]["comment"]["needs"] == "plan-dev"
+    # the first stage's comment does not wait for the shared plan
+    assert wf["jobs"]["comment"]["needs"] == ["resolve", "plan-first-stage"]
 
 
 def test_checks_refuse_a_shared_unit_outside_prod(wf):

@@ -2,7 +2,7 @@
 
 One user-assigned managed identity (`ayasee-<repo>-<environment>`) and one federated credential
 (audience `api://AzureADTokenExchange`) per GitHub environment. Call it once per environment:
-`dev-plan`, `drift-<stage>`, each stage, `prod-plan`, `prod`, `prod-breakglass`. Never share an
+`<first stage>-plan` (`dev-plan` by default), `drift-<stage>`, each stage, `prod-plan`, `prod`, `prod-breakglass`. Never share an
 identity between environments. Provider: `azurerm`.
 
 Outputs: `client_id` (set it as `AZURE_CLIENT_ID` on the environment), `principal_id`, `subject`.
@@ -38,7 +38,7 @@ They depend on your estate, so assign them yourself with `principal_id`. Minimum
 
 | Environment | Minimum roles |
 |---|---|
-| `dev-plan` | Reader; Storage Blob Data Reader on the dev state container (PR plans run with `-lock=false`). No apply rights, no ledger access |
+| `dev-plan` (`<first stage>-plan`) | Reader; Storage Blob Data Reader on the first stage's state container (PR plans run with `-lock=false`). No apply rights, no ledger access |
 | `dev`, `uat` | Apply rights on that stage's estate; Storage Blob Data Contributor on that stage's state container (state and lock lease); write (Storage Blob Data Contributor) on the ledger |
 | `prod-plan` | Reader on prod; Storage Blob Data Contributor on the prod state container (state read and the lock lease); `wrapKey` **and** `unwrapKey` on the Key Vault key (`AYASEE_KEY_VAULT_KEY_ID`): it encrypts its plan and then runs `tofu show -json` on that encrypted plan, which decrypts it; write on the prod ledger record (the `prod-in-sync` job, R31). Cannot apply |
 | `prod` | Apply rights on prod; Storage Blob Data Contributor on the prod state container; `unwrapKey` on the same key; read and write on the ledger |

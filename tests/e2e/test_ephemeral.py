@@ -284,11 +284,14 @@ def test_up_gates_prod_and_breakglass_and_restricts_to_main(tmp_path):
         if c[:4] == ["gh", "api", "-X", "PUT"] and "/environments/" in c[4]
     }
     assert set(bodies) == set(ephemeral.ENVIRONMENTS)
+    # the fixture's first stage names the pull-request plan environment (issue #11)
+    stages = load_config(ephemeral.FIXTURE / ".ayasee.yaml").stages
+    assert list(ephemeral.STAGES) == stages and ephemeral.PR_PLAN == f"{stages[0]}-plan"
     for env, body in bodies.items():
         gated = env in ("prod", "prod-breakglass")
         assert body["reviewers"] == ([{"type": "User", "id": 7}] if gated else [])
         assert body["prevent_self_review"] is True
-        assert (body["deployment_branch_policy"] is None) == (env == "dev-plan")
+        assert (body["deployment_branch_policy"] is None) == (env == ephemeral.PR_PLAN)
     policies = [c[4] for c, _ in fake.gh() if c[4].endswith("/deployment-branch-policies")]
     assert len(policies) == len(ephemeral.ENVIRONMENTS) - 1
 

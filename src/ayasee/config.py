@@ -34,8 +34,12 @@ IDENTITIES = ("oidc", "secrets")
 KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
 STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-# Environments with a fixed role that a pre-prod stage of iac-staged must never run in.
-RESERVED_ENVIRONMENTS = frozenset({"prod-plan", "prod-breakglass", "dev-plan"})
+# Environments with a fixed role that a pre-prod stage must never be called. Besides these, every
+# name that starts with drift- or ends in -plan is reserved: prod-plan, prod-pr-plan and
+# <first stage>-plan, the pull-request plan environment (issue #11), which accepts every branch.
+# prod-pr is reserved because, as a first stage, its PR plan environment would be prod-pr-plan.
+RESERVED_ENVIRONMENTS = frozenset({"prod", "prod-pr", "prod-breakglass"})
+PLAN_SUFFIX = "-plan"
 # a unit name as the plan action writes it: the path below <units_root>/<stage>, / written __
 _UNIT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 
@@ -245,6 +249,34 @@ def load_config(path: Path = DEFAULT_PATH) -> Config:
 PRE_PROD_SLOTS = 4
 
 
+def _check_preprod_name(name: str) -> None:
+    """Refuse a pre-prod stage name that is not a safe GitHub environment name or that is one of
+    the environments with a fixed role (prod, prod-pr, prod-breakglass, drift-*, *-plan)."""
+    if not STAGE_NAME.match(name):
+        raise ConfigError(f"stages: invalid stage name {name!r} (use [a-z0-9][a-z0-9_-]*)")
+    if name in RESERVED_ENVIRONMENTS or name.startswith("drift-") or name.endswith(PLAN_SUFFIX):
+        raise ConfigError(f"stages: {name!r} is a reserved environment name")
+
+
+def pr_plan_environment(stages: list[str]) -> str:
+    """The GitHub environment ``iac-pr`` plans a pull request in: ``<first stage>-plan`` (issue
+    #11), so ``[test, prod]`` plans in ``test-plan`` and the default stages in ``dev-plan``.
+
+    That environment accepts every branch, so its name must never be one with a fixed role: the
+    first stage must be a pre-prod stage, and no pre-prod stage may itself be called ``*-plan``
+    (``[dev, dev-plan, prod]`` would give the PR plan and the second stage one environment).
+    """
+    pre = [s for s in stages if s != "prod"]
+    if not pre or stages[0] == "prod":
+        raise ConfigError(
+            "stages: a pull request plans the first stage, which must be a pre-prod stage "
+            f"(got {stages!r})"
+        )
+    for name in pre:
+        _check_preprod_name(name)
+    return stages[0] + PLAN_SUFFIX
+
+
 def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
     """Map ``stages`` onto the fixed jobs of ``iac-staged`` (issues #1, #10), or raise ConfigError.
 
@@ -265,10 +297,7 @@ def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
         raise ConfigError("stages: iac-staged needs prod as the last stage")
     pre = stages[:-1]
     for name in pre:
-        if not STAGE_NAME.match(name):
-            raise ConfigError(f"stages: invalid stage name {name!r} (use [a-z0-9][a-z0-9_-]*)")
-        if name in RESERVED_ENVIRONMENTS or name.startswith("drift-") or name == "prod":
-            raise ConfigError(f"stages: {name!r} is a reserved environment name")
+        _check_preprod_name(name)
     start = start_stage or pre[0]
     if start not in (*pre, "prod-plan"):
         raise ConfigError(
@@ -340,6 +369,17 @@ def _staged(args: argparse.Namespace) -> int:
         return 1
     for key, value in layout.items():
         print(f"{key}={value}")
+    return 0
+
+
+def _pr_plan_environment(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_config(Path(args.path))
+        name = pr_plan_environment(cfg.stages)
+    except ConfigError as exc:
+        print(f"ayasee: config error: {exc}", file=sys.stderr)
+        return 1
+    print(name)
     return 0
 
 
@@ -439,6 +479,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     staged.add_argument("--path", default=str(DEFAULT_PATH))
     staged.add_argument("--start-stage", default="", help="empty, a pre-prod stage or prod-plan")
     staged.set_defaults(handler=_staged)
+    prplan = sub.add_parser(
+        "pr-plan-environment",
+        help="print the environment of the pull-request plan (<first stage>-plan) or exit 1",
+    )
+    prplan.add_argument("--path", default=str(DEFAULT_PATH))
+    prplan.set_defaults(handler=_pr_plan_environment)
     lab = sub.add_parser(
         "labels",
         help="print one line per opt-in that weakens a compliant default (solo_mode, identity)",

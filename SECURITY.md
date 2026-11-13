@@ -45,8 +45,12 @@ that pin; the changelog of a fix will say which workflows and actions it touches
 
 **PR code is untrusted (R39, R40).**
 - `iac-pr` runs on `pull_request`, never `pull_request_target`, and the jobs check the event name.
-- Pull requests only ever get a dev plan identity: read-only roles, plans with `-lock=false`, in the
-  separate `dev-plan` environment. The workflow reads no uat or prod variable and no secret.
+- Pull requests only ever get a plan identity of the first stage: read-only roles, plans with
+  `-lock=false`, in the separate `<first stage>-plan` environment (`dev-plan` by default), never
+  `prod-plan`: `iac-pr` refuses a first stage named `prod` or a reserved name. That name comes
+  from the pull request's own `.ayasee.yaml`, as the calling workflow does: the boundary is each
+  environment's branch policy and reviewers, so a cloud trust policy must name the exact subject
+  `environment:<first stage>-plan`, never a wildcard such as `environment:*`. The workflow reads no uat or prod variable and no secret.
 - **The job split (R39).** No job that evaluates PR code (`terragrunt hcl validate`, plan) holds
   `pull-requests: write` or `security-events: write`. The comment and the SARIF upload run in small
   separate jobs that run no PR code and only consume artifacts.
@@ -78,9 +82,9 @@ with GitHub OIDC: the workflows skip `azure/login` and pass the provider tokens 
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the plan and apply steps only. They must be
 environment secrets, one set per environment, never repository or organisation secrets. Every
 configuration load prints a `DEVIATION:` line and each run shows it as a warning and in its summary,
-in the same way `solo_mode` is labelled. Stored tokens are long-lived, and the `dev-plan` ones are
-reachable by same-repository pull-request code: keep them read-only. Other provider variables
-travel in one more environment secret, `AYASEE_PROVIDER_ENV` (JSON), limited to the names that
+in the same way `solo_mode` is labelled. Stored tokens are long-lived, and the `<first stage>-plan`
+ones (`dev-plan` by default) are reachable by same-repository pull-request code: keep them
+read-only. Other provider variables travel in one more environment secret, `AYASEE_PROVIDER_ENV` (JSON), limited to the names that
 `provider_env` in `.ayasee.yaml` declares; names that change how the job runs or where the named
 credentials go (`LD_*`, `BASH_ENV`, `GITHUB_*`, `TF_CLI_ARGS`, `AWS_*`, `CLOUDFLARE_*`, proxies,
 ...) are refused and every value is masked. Protect `.ayasee.yaml` with `CODEOWNERS`. See
@@ -104,8 +108,8 @@ token is limited to the data repository (R62). Hosting is a confidentiality deci
 
 ### Known gaps
 
-- **Read-only is not secret-safe.** A pull request's plan job can read dev state with the dev-plan
-  identity. Keep secrets out of dev state, and keep dev data non-sensitive.
+- **Read-only is not secret-safe.** A pull request's plan job can read the first stage's state with
+  the `<first stage>-plan` identity. Keep secrets out of that state, and keep its data non-sensitive.
 - The `binding-mode: breakglass` check in the actions is a consistency check, not an authorisation
   boundary. The boundaries are the environment's reviewers and branch policy and the identity's
   federated credential subject.

@@ -31,7 +31,7 @@ before you adopt it.</p>
 
 <figure class="ay-route">
 <ol class="ay-route__line" aria-label="One run per merge, in order">
-<li class="ay-stop"><span class="ay-stop__name">Pull request</span><span class="ay-stop__does">scans, read-only dev plan, risk summary</span></li>
+<li class="ay-stop"><span class="ay-stop__name">Pull request</span><span class="ay-stop__does">scans, read-only plan of the first stage, risk summary</span></li>
 <li class="ay-stop"><span class="ay-stop__name">push to main</span><span class="ay-stop__does">after review and merge</span></li>
 <li class="ay-stop"><span class="ay-stop__name">dev</span><span class="ay-stop__does">plan, apply, converge check</span></li>
 <li class="ay-stop"><span class="ay-stop__name">uat</span><span class="ay-stop__does">plan, apply, converge check</span></li>

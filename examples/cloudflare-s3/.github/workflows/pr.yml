@@ -15,7 +15,7 @@ jobs:
       security-events: write
       actions: read
     uses: OWNER/ayasee/.github/workflows/iac-pr.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
-    # identity: secrets: environment secrets of dev-plan and prod-pr-plan, passed by name
+    # identity: secrets: environment secrets of test-plan and prod-pr-plan, passed by name
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

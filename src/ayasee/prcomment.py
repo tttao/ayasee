@@ -17,8 +17,8 @@ from ayasee import cli
 from ayasee.github import GitHub, GitHubError
 
 MARKER = "<!-- ayasee:pr-plan -->"
-# one sticky comment per kind: the dev plan, and the plan of the shared prod units (#5), which may
-# wait for the prod-pr-plan approval and must not hold back the dev plan's comment
+# one sticky comment per kind: the first stage's plan, and the plan of the shared prod units (#5),
+# which may wait for the prod-pr-plan approval and must not hold back the other
 MARKERS = {"pr-plan": MARKER, "pr-plan-shared": "<!-- ayasee:pr-plan-shared -->"}
 MAX_BODY = 65536  # GitHub's comment size limit
 _CUT = "\n\n_(summary truncated)_\n"

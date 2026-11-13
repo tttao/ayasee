@@ -188,8 +188,8 @@ also creates a GitHub deployment and a status:
 - `production_environment` is true for `prod`; the status is `success` or `failure` by convergence,
   with a log URL to the run.
 - The mirror is refused unless `GITHUB_REF` is `refs/heads/main` (D5), so only runs from `main`
-  produce records. PR plan jobs run in the separate `dev-plan` environment so they do not pollute the
-  `dev` history.
+  produce records. PR plan jobs run in the separate `<first stage>-plan` environment (`dev-plan` by
+  default) so they do not pollute the first stage's history.
 - If the mirror fails after the ledger was written, the command reports "ledger written, but
   deployment mirror failed". The ledger is already correct.
 

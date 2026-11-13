@@ -53,6 +53,8 @@ def test_configuration_declares_the_profile(capsys):
     assert unsupported(cfg) == []
     layout = staged_layout(cfg.stages, "")
     assert (layout["run-stage-3"], layout["stage-4"]) == ("false", "test")
+    # pull requests plan test in test-plan, not dev-plan (issue #11)
+    assert config.pr_plan_environment(cfg.stages) == "test-plan"
     assert "DEVIATION: identity: secrets" in capsys.readouterr().err
     assert config.label_keys(cfg) == [{"kind": "deviation", "setting": "identity"}]
 

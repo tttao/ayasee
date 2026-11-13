@@ -12,6 +12,24 @@ variable "stages" {
     condition     = contains(var.stages, "prod")
     error_message = "stages must include \"prod\"."
   }
+
+  # the first stage names the pull-request plan environment, <first stage>-plan, which accepts
+  # every branch: it must never be prod-plan, nor collide with another environment (issue #11)
+  validation {
+    condition     = try(var.stages[0], "prod") != "prod"
+    error_message = "the first stage must be a pre-prod stage: pull requests plan it in <first stage>-plan."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.stages : s == "prod" || (
+        can(regex("^[a-z0-9][a-z0-9_-]*$", s)) &&
+        !endswith(s, "-plan") && !startswith(s, "drift-") &&
+        !contains(["prod-breakglass", "prod-pr"], s)
+      )
+    ])
+    error_message = "stage names use [a-z0-9][a-z0-9_-]* and must not end in -plan, start with drift- or be prod-breakglass or prod-pr (reserved environment names)."
+  }
 }
 
 variable "prod_reviewers" {

@@ -1,4 +1,5 @@
-# Pull-request checks: static checks and scans, plus a dev-only plan with a risk comment. It never applies.
+# Pull-request checks: static checks and scans, plus a plan of the first stage (dev by default) with a
+# risk comment. It never applies.
 # See docs/concepts/pr-checks.md.
 #
 # Token scopes (R39): a job that evaluates the PR's HCL (validate, plan) never holds
@@ -7,8 +8,13 @@
 #
 # Trigger: this is a reusable workflow. The calling workflow must use `pull_request`, never
 # `pull_request_target` (which would run with secrets and a write token against untrusted code).
-# Pull requests from forks get no OIDC token: plan-dev is skipped for them, and so is the SARIF
-# upload (a fork's token cannot write security events). The checks still run.
+# Pull requests from forks get no OIDC token: the plan (resolve, plan-first-stage, plan-dev) is
+# skipped for them, and so is the SARIF upload (a fork's token cannot write security events). The
+# checks still run.
+#
+# Required checks: `checks` and `plan-dev`. plan-dev is the verdict of the pull-request plan: it is
+# red when resolve refuses the configuration (and plan-first-stage is skipped) or when the plan or
+# the policy pack fails, so a configuration that does not load never reads as a passed check.
 #
 # Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
 # rewrites them at release (or to ./actions for in-repo runs). This file is not callable before that.
@@ -38,20 +44,23 @@ on:
       CLOUDFLARE_API_TOKEN:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
-          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
-          or organisation level; only the plan step receives it.
+          <first-stage>-plan (dev-plan with the default stages; read-only tokens: a pull
+          request runs untrusted code), never at repository or organisation level; only the plan
+          step receives it.
         required: false
       AWS_ACCESS_KEY_ID:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
-          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
-          or organisation level; only the plan step receives it.
+          <first-stage>-plan (dev-plan with the default stages; read-only tokens: a pull
+          request runs untrusted code), never at repository or organisation level; only the plan
+          step receives it.
         required: false
       AWS_SECRET_ACCESS_KEY:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
-          dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
-          or organisation level; only the plan step receives it.
+          <first-stage>-plan (dev-plan with the default stages; read-only tokens: a pull
+          request runs untrusted code), never at repository or organisation level; only the plan
+          step receives it.
         required: false
       AYASEE_PROVIDER_ENV:
         description: >-
@@ -219,13 +228,48 @@ jobs:
           sarif_file: ${{ runner.temp }}/sarif/checkov.sarif
           category: ayasee-checkov
 
-  plan-dev:
-    # plan the changed dev units with a read-only identity, run the pack, comment the risk summary
-    name: plan-dev
-    # Fork pull requests get no OIDC token; the event check keeps a pull_request_target caller out.
+  resolve:
+    # names the environment plan-first-stage runs in, <first-stage>-plan (issue #11): a job's
+    # environment is fixed before its steps run, so it comes from this job. No identity, no
+    # environment. It fails on a configuration that does not load or a refused stage name; then
+    # plan-first-stage is skipped, plan-dev fails and comment says so.
+    name: resolve
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
-    environment: dev-plan
+    permissions:
+      contents: read # check out the code
+    outputs:
+      pr-plan-environment: ${{ steps.env.outputs.name }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: env
+        name: Name the pull-request plan environment
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # refuses a first stage that is prod, and any stage name with a fixed role (drift-*, *-plan)
+          if ! name="$(ayasee config pr-plan-environment --path "$CONFIG_PATH" 2>"$RUNNER_TEMP/err")"; then
+            while IFS= read -r line; do echo "::error::$line"; done <"$RUNNER_TEMP/err"
+            exit 1
+          fi
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+
+  plan-first-stage:
+    # plan the changed units of the first stage with a read-only identity, run the pack, write the
+    # risk summary for the comment job. Its verdict is plan-dev.
+    name: plan-first-stage
+    needs: resolve
+    # Fork pull requests get no OIDC token; the event check keeps a pull_request_target caller out.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.resolve.outputs.pr-plan-environment != '' }}
+    runs-on: ubuntu-latest
+    # <first-stage>-plan: dev-plan with the default stages, test-plan with [test, prod]
+    environment: ${{ needs.resolve.outputs.pr-plan-environment }}
     permissions:
       contents: read # check out the code
       id-token: write # OIDC login to Azure and Databricks (read-only identity)
@@ -263,7 +307,7 @@ jobs:
             echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
           done <<<"$labels"
       - id: changed
-        name: Find the changed dev units
+        name: Find the changed units of the first stage
         env:
           CONFIG_PATH: ${{ inputs.config-path }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -288,7 +332,7 @@ jobs:
               echo "any=false"
             else
               echo "any=true"
-              # ALL (a change outside the dev units) plans every dev unit
+              # ALL (a change outside the stage's units) plans every unit of the stage
               if [ "$units" = ALL ]; then echo "only-units="; else echo "only-units=$units"; fi
             fi
           } >>"$GITHUB_OUTPUT"
@@ -333,6 +377,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           CHANGED_OUTCOME: ${{ steps.changed.outcome }}
+          STAGE: ${{ steps.changed.outputs.stage }}
           ANY: ${{ steps.changed.outputs.any }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
@@ -340,14 +385,14 @@ jobs:
         run: |
           out="$RUNNER_TEMP/pr-comment.md"
           if [ "$CHANGED_OUTCOME" != success ]; then
-            printf 'The dev plan failed before it started. See the [run](%s).\n' "$RUN_URL" >"$out"
+            printf 'The pull-request plan failed before it started. See the [run](%s).\n' "$RUN_URL" >"$out"
           elif [ "$ANY" != true ]; then
             echo "No IaC changes in this pull request; nothing was planned." >"$out"
           elif [ "$PLAN_OUTCOME" != success ]; then
-            printf 'The dev plan failed. See the [run](%s).\n' "$RUN_URL" >"$out"
+            printf 'The plan of %s failed. See the [run](%s).\n' "$STAGE" "$RUN_URL" >"$out"
           else
             {
-              echo "### Dev plan"
+              echo "### Plan of $STAGE"
               echo
               cat "$SUMMARY"
               echo
@@ -522,12 +567,37 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  plan-dev:
+    # the verdict of the pull-request plan, and the check to require: a skipped job reads as passed
+    # in branch protection, so this job runs whenever resolve ran, even in a cancelled run (always()),
+    # and fails unless resolve accepted the configuration and plan-first-stage passed. No checkout,
+    # no identity, no environment.
+    name: plan-dev
+    needs: [resolve, plan-first-stage]
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail unless the configuration was accepted and the plan passed
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+          PLAN: ${{ needs.plan-first-stage.result }}
+        run: |
+          if [ "$RESOLVE" != success ]; then
+            echo "::error::the pull-request plan did not start: resolve $RESOLVE (the configuration was refused; see that job)"
+            exit 1
+          fi
+          if [ "$PLAN" != success ]; then
+            echo "::error::the pull-request plan did not pass: plan-first-stage $PLAN (see that job)"
+            exit 1
+          fi
+
   comment:
     # posts the sticky comment; no OIDC and no PR code: only the BASE commit is checked out (R39),
     # which also gives the in-repo (--local, ./actions) form its actions
     name: comment
-    needs: plan-dev
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.plan-dev.result != 'skipped' }}
+    needs: [resolve, plan-first-stage]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.resolve.result != 'skipped' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # check out the base commit
@@ -543,15 +613,24 @@ jobs:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: download
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        continue-on-error: true # plan-dev reports its own failure
+        continue-on-error: true # plan-first-stage reports its own failure
         with:
           name: ayasee-pr-comment
           path: ${{ runner.temp }}/pr-comment
+      - id: refused
+        name: Write the comment body when the configuration was refused
+        if: ${{ needs.resolve.result == 'failure' }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-comment"
+          printf 'The pull-request plan failed before it started: the configuration was refused. See the [run](%s).\n' \
+            "$RUN_URL" >"$RUNNER_TEMP/pr-comment/pr-comment.md"
       - name: Explain a missing artifact
-        if: ${{ steps.download.outcome != 'success' }}
-        run: echo "::warning::no comment body from plan-dev; see that job"
+        if: ${{ steps.download.outcome != 'success' && steps.refused.outcome != 'success' }}
+        run: echo "::warning::no comment body from plan-first-stage; see that job"
       - name: Post the sticky comment
-        if: ${{ steps.download.outcome == 'success' }}
+        if: ${{ steps.download.outcome == 'success' || steps.refused.outcome == 'success' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -559,7 +638,7 @@ jobs:
         run: ayasee pr-comment --repo "$REPO" --pr "$PR_NUMBER" --body-file "$RUNNER_TEMP/pr-comment/pr-comment.md"
 
   comment-shared:
-    # posts the shared-units plan as its own sticky comment, so the dev plan's comment never waits
+    # posts the shared-units plan as its own sticky comment, so the first stage's comment never waits
     # for the prod-pr-plan approval; same rules as comment: base commit only, no OIDC (R39)
     name: comment-shared
     needs: plan-shared

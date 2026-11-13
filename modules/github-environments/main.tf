@@ -10,12 +10,16 @@ terraform {
 }
 
 locals {
+  # The environment iac-pr plans a pull request in: <first stage>-plan (dev-plan with the default
+  # stages, test-plan with [test, prod]), the name `ayasee config pr-plan-environment` prints.
+  pr_plan_environment = "${var.stages[0]}-plan"
+
   # Environments the workflows use, and their reviewers (null = none).
-  # dev-plan and prod-pr-plan are the only ones that are not restricted to main (PR plans).
-  # prod-pr-plan (opt-in) plans the shared prod units of a PR read-only; it carries the prod
-  # reviewers because the PR's code runs with a prod identity.
+  # <first stage>-plan and prod-pr-plan are the only ones that are not restricted to main (PR
+  # plans). prod-pr-plan (opt-in) plans the shared prod units of a PR read-only; it carries the
+  # prod reviewers because the PR's code runs with a prod identity.
   pr_plan = merge(
-    { "dev-plan" = null },
+    { (local.pr_plan_environment) = null },
     var.shared_units_pr_plan ? { "prod-pr-plan" = var.prod_reviewers } : {},
   )
 

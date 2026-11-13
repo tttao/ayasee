@@ -280,6 +280,9 @@ def test_staged_layout_slots_are_right_aligned_and_skips_are_a_prefix(n):
         (["prod-plan", "prod"], "", "reserved"),
         (["prod-breakglass", "prod"], "", "reserved"),
         (["dev-plan", "prod"], "", "reserved"),
+        (["prod-pr-plan", "prod"], "", "reserved"),
+        # <stage>-plan is the pull-request plan environment of a first stage (issue #11)
+        (["test", "test-plan", "prod"], "", "reserved"),
         (["drift-dev", "prod"], "", "reserved"),
         (["Dev", "prod"], "", "stage name"),
         (["../x", "prod"], "", "stage name"),
@@ -319,6 +322,54 @@ def test_cli_staged_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, cap
     assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 1
     cap = capsys.readouterr()
     assert cap.out == "" and "2 to 5 stages" in cap.err
+
+
+# ---- pull-request plan environment (issue #11) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("stages", "expected"),
+    [
+        (["dev", "uat", "prod"], "dev-plan"),
+        (["test", "prod"], "test-plan"),
+        (["staging", "pre_prod", "prod"], "staging-plan"),
+    ],
+)
+def test_pr_plan_environment_is_first_stage_plan(stages, expected):
+    assert config.pr_plan_environment(stages) == expected
+
+
+@pytest.mark.parametrize(
+    ("stages", "match"),
+    [
+        # a pull request never plans prod in a pull-request environment
+        (["prod"], "pre-prod"),
+        (["prod", "dev"], "pre-prod"),
+        (["Test", "prod"], "stage name"),
+        (["../x", "prod"], "stage name"),
+        (["drift-dev", "prod"], "reserved"),
+        (["prod-pr", "prod"], "reserved"),
+        (["x-plan", "prod"], "reserved"),
+        (["dev", "dev-plan", "prod"], "reserved"),
+        (["prod-breakglass", "prod"], "reserved"),
+    ],
+)
+def test_pr_plan_environment_refuses(stages, match):
+    with pytest.raises(ConfigError, match=match):
+        config.pr_plan_environment(stages)
+
+
+def test_cli_pr_plan_environment(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [test, prod]\n")
+    assert _cli(monkeypatch, "pr-plan-environment", "--path", str(p)) == 0
+    assert capsys.readouterr().out == "test-plan\n"
+
+
+def test_cli_pr_plan_environment_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [prod]\n")
+    assert _cli(monkeypatch, "pr-plan-environment", "--path", str(p)) == 1
+    cap = capsys.readouterr()
+    assert cap.out == "" and "pre-prod" in cap.err
 
 
 # ---- plan_encryption.key_provider (issue #1) --------------------------------------------

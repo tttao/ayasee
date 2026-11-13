@@ -182,7 +182,7 @@ combination.
 
 | Mode | Environments | Encryption | What it does | Verification before apply |
 |---|---|---|---|---|
-| `same-job` | pre-prod stages only (never `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`) | off (the plan never leaves the job) | Plans every unit as a preview, then applies unit by unit: plan again, apply, converge-check | None, the plan was made in this job |
+| `same-job` | pre-prod stages only (never `prod`, `prod-breakglass`, `*-plan` or `drift-*`) | off (the plan never leaves the job) | Plans every unit as a preview, then applies unit by unit: plan again, apply, converge-check | None, the plan was made in this job |
 | `encrypted_plan` | any, used for `prod` | required (`encrypt=true`, OpenTofu) | `prod-plan` plans and encrypts; `prod` applies the approved files | Manifest: SHA, engine, units, plan hash, lock hash |
 | `replan` | any, secondary profile | may be off; plan files are deleted after the manifest | `prod` re-plans, compares, applies the fresh plan | `(address, actions)` plus values hash per unit |
 | `breakglass` | `prod` only, and only with a valid incident reference (`ABC-123` or `INC123`) | on in `iac-breakglass` | Plan, policy pack, apply in one job, like `same-job` | The plan checked by the policy pack must equal the plan applied (R53, below) |

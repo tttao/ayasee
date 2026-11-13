@@ -82,6 +82,69 @@ run "dev_plan_has_no_branch_policy" {
   }
 }
 
+run "pr_plan_environment_is_named_after_the_first_stage" {
+  command = plan
+  variables {
+    stages = ["test", "prod"]
+  }
+
+  assert {
+    condition     = output.pr_plan_environment == "test-plan"
+    error_message = "the pull-request plan environment is <first stage>-plan"
+  }
+  assert {
+    condition = toset(output.environments) == toset([
+      "test", "prod", "test-plan", "prod-plan", "prod-breakglass", "drift-test", "drift-prod",
+    ])
+    error_message = "with [test, prod] there is a test-plan and no dev-plan"
+  }
+  assert {
+    condition     = length(github_repository_environment.this["test-plan"].deployment_branch_policy) == 0
+    error_message = "test-plan must allow all branches"
+  }
+  assert {
+    condition     = !contains(keys(github_repository_environment_deployment_policy.main), "test-plan")
+    error_message = "test-plan must have no main policy"
+  }
+  assert {
+    condition     = github_repository_environment_deployment_policy.main["test"].branch_pattern == "main"
+    error_message = "the test stage stays main-only"
+  }
+}
+
+run "default_pr_plan_environment_is_dev_plan" {
+  command = plan
+
+  assert {
+    condition     = output.pr_plan_environment == "dev-plan"
+    error_message = "with the default stages the pull-request plan environment keeps the name dev-plan"
+  }
+}
+
+run "first_stage_prod_fails" {
+  command = plan
+  variables {
+    stages = ["prod", "dev"]
+  }
+  expect_failures = [var.stages]
+}
+
+run "stage_named_like_a_plan_environment_fails" {
+  command = plan
+  variables {
+    stages = ["dev", "dev-plan", "prod"]
+  }
+  expect_failures = [var.stages]
+}
+
+run "first_stage_prod_pr_fails" {
+  command = plan
+  variables {
+    stages = ["prod-pr", "prod"]
+  }
+  expect_failures = [var.stages]
+}
+
 run "every_other_environment_is_main_only" {
   command = plan
 
