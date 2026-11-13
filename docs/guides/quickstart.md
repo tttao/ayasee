@@ -43,7 +43,30 @@ spawn an [ephemeral sandbox](../../e2e/README.md#ephemeral-sandbox-one-command-n
 
 ## 1. Start from the example
 
-Copy `examples/databricks-azure/` into a new repository. It contains:
+The shortest path is `ayasee init`, run at the root of your repository with the release you adopt:
+
+```bash
+uvx ayasee@X.Y.Z init --profile databricks-azure          # or cloudflare-s3
+uvx ayasee@X.Y.Z init --profile cloudflare-s3 --stages test,prod --iac-root infra/iac   # a monorepo
+```
+
+It writes `.ayasee.yaml` (with your stages, and `iac_root` and `units_root` for a monorepo), the
+callers under `.github/workflows/`, `root.hcl`, the bootstrap root and an empty directory per stage,
+and pins them all to the release commit of that version: the callers'
+`tttao/ayasee/...@<release SHA>` and the bootstrap's
+`git::https://github.com/tttao/ayasee.git//modules/<module>?ref=<release SHA>`. It finds that commit
+on GitHub as the head of `release/vX.Y.Z` and accepts it only when its single parent is the tagged
+commit; `--ref <release SHA>` skips the lookup, `--source owner/name` names a
+[mirror](releasing.md#mirrors-for-ghes-and-air-gapped-estates). It writes no unit and starts with
+`shared_units: []`. In a monorepo the `push` caller gets a `paths:` filter on `iac_root`, the
+configuration file and `.github/` ([monorepos](../concepts/pr-checks.md#monorepos)). It never
+overwrites a file without `--force`, and on a refusal it writes nothing. From a source checkout of
+ayasee it needs `--ref`, because its templates may differ from any release. The placeholders that
+only you can fill (subscription and tenant GUIDs, storage account names, the Cloudflare IDs) stay,
+and step 2 below is then already done.
+
+To start from the full example instead, with its units, copy `examples/databricks-azure/` into a new
+repository. It contains:
 
 | Path | Purpose |
 |---|---|
@@ -59,7 +82,7 @@ Search for the placeholders and replace them: `OWNER`, the all-zero subscription
 
 ## 2. Pin an ayasee release
 
-The callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
+`ayasee init` (step 1) has done this. A copied example's callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
 cannot reference its own actions by a relative path from another repository, so the workflow files hold
 a placeholder that a release rewrites (see
 [where the actions come from](../concepts/staged-run.md#where-the-actions-come-from)).
@@ -164,6 +187,42 @@ grants.
   `-var key_vault_key_id=https://<vault>.vault.azure.net/keys/<key>`: **no key version**, so rotating
   the key does not break a pending approval. It is written as `AYASEE_KEY_VAULT_KEY_ID` on those
   environments.
+
+### Check it all before the first run
+
+`ayasee doctor` checks, read-only, what the first run needs and prints one list of what is missing,
+instead of failed jobs found one at a time. Run it at the root of your repository with a token of a
+repository administrator (environments, environment secrets and variables are not readable with
+less; only names are read, never a secret value):
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" ayasee doctor
+```
+
+It checks:
+
+- **the configuration**: `.ayasee.yaml` loads, uses only supported settings, fits the staged job
+  slots, matches `shared_units` on disk, and each stage has its directory under `units_root`;
+- **the callers**: every workflow that calls an ayasee reusable workflow pins one full release SHA
+  (no `OWNER` or all-zero placeholder left), the `iac-staged` and `iac-pr` callers exist, and the
+  pull-request caller has no `paths:` filter;
+- **GitHub**: every environment the callers use exists; `prod`, `prod-breakglass` and
+  `prod-pr-plan` have required reviewers and prevent self-review (unless `solo_mode`); every
+  environment except the pull-request plan ones deploys from `main` only; each secret a caller
+  passes exists where its jobs read it (provider and plan-key secrets as environment secrets, not
+  repository secrets); `AYASEE_LEDGER_URL`, the `AZURE_*` variables (`identity: oidc`) and the
+  plan-key ID are set; and `main` has a pull-request ruleset when a `ledger-token` is passed;
+- **the state lock**, only when asked, once per state bucket:
+  `--lock-check 's3://<bucket>?region=<region>&endpoint=https://<host>'` with `AWS_ACCESS_KEY_ID`
+  and `AWS_SECRET_ACCESS_KEY` set. It is
+  [the lock check below](#check-that-the-store-honours-the-lock) without the AWS CLI, and the only
+  check that writes: one object, deleted afterwards.
+
+It exits 0 when everything passed, 1 when a check failed, and 2 when nothing failed but a check
+could not run (no `GITHUB_TOKEN`, no `--lock-check`). `--repo owner/name` overrides the repository
+read from the `origin` remote; `--root` and `--config-path` point it at another checkout or
+configuration file. Organization secrets and variables are not visible to it: a secret it does not
+find at repository level is a warning, not a failure.
 
 ## 6. The first pull request
 

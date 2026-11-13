@@ -37,6 +37,12 @@ committed as unit inputs. Everything uses placeholders: `OWNER`, the all-zero ID
 
 ## Adoption steps
 
+`ayasee init --profile cloudflare-s3` writes the configuration, the callers, `root.hcl` and the
+bootstrap root of this example into your repository, with your stages and `iac_root`, pinned to one
+release (step 5 is then done); it writes no unit. See
+[start from the example](../../docs/guides/quickstart.md#1-start-from-the-example). The steps below
+apply either way.
+
 ### 1. Bootstrap the environments
 
 ```bash
@@ -131,7 +137,21 @@ The cockpit tags the repository `secrets identity · deviation`, read from `.aya
 Follow the [quickstart](../../docs/guides/quickstart.md#2-pin-an-ayasee-release): replace `OWNER`
 and the all-zero SHA in `.github/workflows/*.yml` with `tttao/ayasee` and a release commit SHA.
 
-### 6. First adoption
+### 6. Check before the first run
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" ayasee doctor \
+  --lock-check "s3://ayasee-state-test?region=$AYASEE_STATE_REGION&endpoint=$AYASEE_STATE_ENDPOINT" \
+  --lock-check "s3://ayasee-state-prod?region=$AYASEE_STATE_REGION&endpoint=$AYASEE_STATE_ENDPOINT"
+```
+
+It lists, in one pass, what steps 1 to 5 left out: a missing environment or reviewer, a provider
+secret missing from an environment or set at repository level, a missing passphrase or
+`AYASEE_LEDGER_URL`, a caller still on the placeholder pin, no pull-request ruleset on `main`, and a
+store that ignores the lock condition. See
+[check it all](../../docs/guides/quickstart.md#check-it-all-before-the-first-run).
+
+### 7. First adoption
 
 Each unit reads existing objects; import them before the first apply so that ayasee does not try to
 create a second tunnel configuration or Access application (`import` blocks in the unit, landed in a

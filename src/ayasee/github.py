@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -44,7 +44,8 @@ class GitHub:
             base_url=base_url.rstrip("/"),
             timeout=timeout,
             headers={
-                "Authorization": f"Bearer {token}",
+                # an empty token makes anonymous calls (public repositories, low rate limit)
+                **({"Authorization": f"Bearer {token}"} if token else {}),
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": _API_VERSION,
             },
@@ -373,6 +374,37 @@ class GitHub:
             raise GitHubError(0, "unexpected ref response")
         return sha
 
+    def tag_commit(self, repo: str, tag: str) -> str | None:
+        """Commit SHA a tag points at (an annotated tag is followed), or None when it does not
+        exist."""
+        try:
+            data = self._get(f"/repos/{repo}/git/ref/tags/{quote(tag, safe='')}", "ref")
+        except GitHubError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        obj = data.get("object") if isinstance(data, dict) else None
+        for _ in range(3):  # a tag of a tag is legal; follow a few levels at most
+            if not isinstance(obj, dict) or not isinstance(obj.get("sha"), str):
+                raise GitHubError(0, "unexpected tag response")
+            if obj.get("type") == "commit":
+                return obj["sha"]
+            if obj.get("type") != "tag":
+                raise GitHubError(0, f"tag {tag} does not point at a commit")
+            data = self._get(f"/repos/{repo}/git/tags/{obj['sha']}", "tag")
+            obj = data.get("object") if isinstance(data, dict) else None
+        raise GitHubError(0, f"tag {tag} is nested too deep")
+
+    def commit_parents(self, repo: str, commit_sha: str) -> list[str]:
+        data = self._get(f"/repos/{repo}/git/commits/{commit_sha}", "commit")
+        parents = data.get("parents") if isinstance(data, dict) else None
+        if not isinstance(parents, list):
+            raise GitHubError(0, "unexpected commit response")
+        out = [p.get("sha") for p in parents if isinstance(p, dict)]
+        if len(out) != len(parents) or not all(isinstance(x, str) for x in out):
+            raise GitHubError(0, "unexpected commit response (parents)")
+        return out  # type: ignore[return-value]
+
     def commit_tree_sha(self, repo: str, commit_sha: str) -> str:
         data = self._get(f"/repos/{repo}/git/commits/{commit_sha}", "commit")
         sha = data.get("tree", {}).get("sha") if isinstance(data, dict) else None
@@ -541,6 +573,46 @@ class GitHub:
                 "comment": comment,
             },
         )
+
+    # ---- doctor (read-only; environments, secrets and variables need an admin's token) ------
+
+    def environments(self, repo: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/environments``: every environment with its protection rules."""
+        return self._paginate(
+            f"/repos/{repo}/environments", {"per_page": 100}, "environments", "environments"
+        )
+
+    def environment_branch_policies(self, repo: str, env: str) -> list[dict[str, Any]]:
+        """The custom deployment branch and tag policies of ``env``."""
+        return self._paginate(
+            f"/repos/{repo}/environments/{quote(env, safe='')}/deployment-branch-policies",
+            {"per_page": 100},
+            "deployment branch policies",
+            "branch_policies",
+        )
+
+    def _names(self, path: str, what: str, key: str) -> set[str]:
+        names = set()
+        for item in self._paginate(path, {"per_page": 100}, what, key):
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                raise GitHubError(0, f"unexpected {what} response (name)")
+            names.add(name)
+        return names
+
+    def secret_names(self, repo: str, env: str | None = None) -> set[str]:
+        """Names of the Actions secrets of ``env``, or of the repository without ``env``."""
+        if env is None:
+            return self._names(f"/repos/{repo}/actions/secrets", "secrets", "secrets")
+        path = f"/repos/{repo}/environments/{quote(env, safe='')}/secrets"
+        return self._names(path, "environment secrets", "secrets")
+
+    def variable_names(self, repo: str, env: str | None = None) -> set[str]:
+        """Names of the Actions variables of ``env``, or of the repository without ``env``."""
+        if env is None:
+            return self._names(f"/repos/{repo}/actions/variables", "variables", "variables")
+        path = f"/repos/{repo}/environments/{quote(env, safe='')}/variables"
+        return self._names(path, "environment variables", "variables")
 
     # ---- cockpit collector (read-only) ----------------------------------------------------
 

@@ -62,6 +62,7 @@ def entrypoint() -> None:
     import ayasee.changeset  # noqa: F401  (registers its subcommand)
     import ayasee.cockpit.collect  # noqa: F401  (registers its subcommand)
     import ayasee.config  # noqa: F401  (registers its subcommand)
+    import ayasee.doctor  # noqa: F401  (registers its subcommand)
     import ayasee.drift  # noqa: F401  (registers its subcommand)
     import ayasee.features  # noqa: F401  (registers its subcommand)
     import ayasee.findings  # noqa: F401  (registers its subcommand)
@@ -73,6 +74,7 @@ def entrypoint() -> None:
     import ayasee.prcomment  # noqa: F401  (registers its subcommand)
     import ayasee.providerenv  # noqa: F401  (registers its subcommand)
     import ayasee.sarif  # noqa: F401  (registers its subcommand)
+    import ayasee.scaffold  # noqa: F401  (registers its subcommand)
     import ayasee.trunkguard  # noqa: F401  (registers its subcommand)
 
     raise SystemExit(main())

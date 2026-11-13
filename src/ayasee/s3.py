@@ -303,6 +303,13 @@ class S3Client:
         if resp.status_code != 200:
             raise self._fail("PUT", resp)
 
+    def delete(self, key: str) -> None:
+        """DeleteObject (204, or 200 on some S3-compatible stores; a missing key is not an
+        error)."""
+        resp = self._request("DELETE", self.key_root + key)
+        if resp.status_code not in (200, 204):
+            raise self._fail("DELETE", resp)
+
     def list_keys(self, prefix: str) -> list[str]:
         """Every key under ``prefix`` (ListObjectsV2, all pages)."""
         keys: list[str] = []

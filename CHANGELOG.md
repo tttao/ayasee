@@ -9,6 +9,27 @@ released version into the GitHub release notes.
 
 ### Added
 
+- `ayasee init --profile cloudflare-s3|databricks-azure [--stages] [--iac-root] [--source] [--ref]`
+  (#11): writes the configuration, the callers, `root.hcl`, the bootstrap root and an empty
+  directory per stage, pinned to one release commit: the callers' `uses:` and the bootstrap's
+  module sources (`git::https://github.com/<source>.git//modules/<m>?ref=<SHA>`). The commit is
+  the head of `release/v<version>` of the installed version, accepted only when its single parent
+  is the tagged commit; `--ref` gives it instead and is required from a source checkout. A
+  monorepo gets `iac_root`, `units_root` and a `paths:` filter on the `push` caller. Existing files
+  are never overwritten without `--force`. The wheel packages the profile templates file by file.
+- The Cloudflare and S3 example's bootstrap derives its environments from one `stages` local.
+
+- `ayasee doctor` (#11): checks, before the first run and in one pass, what it needs: the
+  configuration (supported settings, job slots, `shared_units`, stage directories), the callers
+  (one full release SHA, no placeholder, `iac-staged` and `iac-pr` present, no `paths:` filter on
+  the pull-request caller), and on GitHub, read-only with an administrator's token: the
+  environments, their reviewers and self-review setting, the `main`-only deployment policies,
+  every secret a caller passes in each environment that reads it (environment, not repository,
+  secrets for providers and plan keys), the ledger, OIDC and plan-key variables, and a
+  pull-request ruleset on `main` when a `ledger-token` is passed. `--lock-check s3://...` runs the
+  conditional-write lock check against a state bucket without the AWS CLI. Exit 0 all passed, 1 a
+  failure, 2 something could not be checked. The quickstart and the Cloudflare and S3 example run
+  it before the first pull request.
 - Pre-commit hooks (`.pre-commit-config.yaml`, `uv run pre-commit install`; `pre-commit` joins the
   dev group): gitleaks on the staged changes and `detect-private-key`, the standard hygiene hooks of
   `pre-commit-hooks`, ruff check and format, shellcheck, zizmor, actionlint, `tofu fmt`, `opa fmt`

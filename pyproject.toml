@@ -43,6 +43,27 @@ packages = ["src/ayasee"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "rules" = "ayasee/rules"
+# ayasee init: the profile templates of the released version
+# file by file, so that nothing untracked (.terraform/) is packaged; tests/test_scaffold.py
+# keeps this list equal to the files the profiles read
+"examples/cloudflare-s3/.ayasee.yaml" = "ayasee/templates/cloudflare-s3/.ayasee.yaml"
+"examples/cloudflare-s3/root.hcl" = "ayasee/templates/cloudflare-s3/root.hcl"
+"examples/cloudflare-s3/.github/workflows/pr.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/pr.yml"
+"examples/cloudflare-s3/.github/workflows/main.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/main.yml"
+"examples/cloudflare-s3/.github/workflows/nightly.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/nightly.yml"
+"examples/cloudflare-s3/.github/workflows/breakglass.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/breakglass.yml"
+"examples/cloudflare-s3/bootstrap/main.tf" = "ayasee/templates/cloudflare-s3/bootstrap/main.tf"
+"examples/cloudflare-s3/bootstrap/.terraform.lock.hcl" = "ayasee/templates/cloudflare-s3/bootstrap/.terraform.lock.hcl"
+"examples/databricks-azure/.ayasee.yaml" = "ayasee/templates/databricks-azure/.ayasee.yaml"
+"examples/databricks-azure/root.hcl" = "ayasee/templates/databricks-azure/root.hcl"
+"examples/databricks-azure/.github/workflows/pr.yml" = "ayasee/templates/databricks-azure/.github/workflows/pr.yml"
+"examples/databricks-azure/.github/workflows/main.yml" = "ayasee/templates/databricks-azure/.github/workflows/main.yml"
+"examples/databricks-azure/.github/workflows/nightly.yml" = "ayasee/templates/databricks-azure/.github/workflows/nightly.yml"
+"examples/databricks-azure/.github/workflows/breakglass.yml" = "ayasee/templates/databricks-azure/.github/workflows/breakglass.yml"
+"examples/databricks-azure/bootstrap/main.tf" = "ayasee/templates/databricks-azure/bootstrap/main.tf"
+"examples/databricks-azure/bootstrap/variables.tf" = "ayasee/templates/databricks-azure/bootstrap/variables.tf"
+"examples/databricks-azure/bootstrap/outputs.tf" = "ayasee/templates/databricks-azure/bootstrap/outputs.tf"
+"examples/databricks-azure/bootstrap/.terraform.lock.hcl" = "ayasee/templates/databricks-azure/bootstrap/.terraform.lock.hcl"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
