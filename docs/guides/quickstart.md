@@ -43,7 +43,30 @@ spawn an [ephemeral sandbox](../../e2e/README.md#ephemeral-sandbox-one-command-n
 
 ## 1. Start from the example
 
-Copy `examples/databricks-azure/` into a new repository. It contains:
+The shortest path is `ayasee init`, run at the root of your repository with the release you adopt:
+
+```bash
+uvx ayasee@X.Y.Z init --profile databricks-azure          # or cloudflare-s3
+uvx ayasee@X.Y.Z init --profile cloudflare-s3 --stages test,prod --iac-root infra/iac   # a monorepo
+```
+
+It writes `.ayasee.yaml` (with your stages, and `iac_root` and `units_root` for a monorepo), the
+callers under `.github/workflows/`, `root.hcl`, the bootstrap root and an empty directory per stage,
+and pins them all to the release commit of that version: the callers'
+`tttao/ayasee/...@<release SHA>` and the bootstrap's
+`git::https://github.com/tttao/ayasee.git//modules/<module>?ref=<release SHA>`. It finds that commit
+on GitHub as the head of `release/vX.Y.Z` and accepts it only when its single parent is the tagged
+commit; `--ref <release SHA>` skips the lookup, `--source owner/name` names a
+[mirror](releasing.md#mirrors-for-ghes-and-air-gapped-estates). It writes no unit and starts with
+`shared_units: []`. In a monorepo the `push` caller gets a `paths:` filter on `iac_root`, the
+configuration file and `.github/` ([monorepos](../concepts/pr-checks.md#monorepos)). It never
+overwrites a file without `--force`, and on a refusal it writes nothing. From a source checkout of
+ayasee it needs `--ref`, because its templates may differ from any release. The placeholders that
+only you can fill (subscription and tenant GUIDs, storage account names, the Cloudflare IDs) stay,
+and step 2 below is then already done.
+
+To start from the full example instead, with its units, copy `examples/databricks-azure/` into a new
+repository. It contains:
 
 | Path | Purpose |
 |---|---|
@@ -59,7 +82,7 @@ Search for the placeholders and replace them: `OWNER`, the all-zero subscription
 
 ## 2. Pin an ayasee release
 
-The callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
+`ayasee init` (step 1) has done this. A copied example's callers carry `OWNER/ayasee/...@0000000000000000000000000000000000000000`. A reusable workflow
 cannot reference its own actions by a relative path from another repository, so the workflow files hold
 a placeholder that a release rewrites (see
 [where the actions come from](../concepts/staged-run.md#where-the-actions-come-from)).
