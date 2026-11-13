@@ -164,6 +164,21 @@ documentation and the skills or runbooks that describe it.
 | "What is live" is a branch tip | "What is live" is the [ledger](../concepts/ledger.md), shown in the cockpit |
 | Drift found by accident | A nightly drift issue per environment; prod drift holds the next prod run |
 
+## Applications on `develop`, infrastructure on `main`
+
+A monorepo can keep a `feature → develop → main` flow for its applications while the IaC under
+`iac_root` uses the one trunk. ayasee promotes from `main` only: `iac-staged` runs on a push to
+`main`, and every environment except `dev-plan` and `prod-pr-plan` accepts deployments from `main`
+only (`modules/github-environments`). An IaC change merged to `develop` therefore reaches the first
+stage only when `develop` is merged to `main`, together with every other IaC change waiting there,
+behind one prod gate; if one of them reads the outputs of another, `prod-plan` refuses the batch
+([R52](../concepts/staged-run.md#dependencies-between-units-r52)) and they land again one at a time.
+Let pull requests that only touch `iac_root` target `main`, and split a pull request that changes
+both application and IaC code into two. Leave the callers without a `paths:` filter and with no
+`branches:` filter on `pull_request`: `iac-pr` stays green with "No IaC changes" on application
+pull requests, so it can be a required check on both branches, and it still plans an IaC change
+that was opened against `develop` ([monorepos](../concepts/pr-checks.md#monorepos)).
+
 ## Related repositories that need a different path
 
 A repository with no `uat` or `prod` branch, or whose stages differ in kind (for example organisation

@@ -245,9 +245,9 @@ Leave `AYASEE_KEY_VAULT_KEY_ID` unset: a key URL next to `pbkdf2` is refused as 
 unit like the azurerm one. This reference targets an S3-compatible store (MinIO, Scaleway, OVH and
 similar); for AWS S3 itself drop `endpoints`, `use_path_style` and the `skip_*` lines. Locking uses
 `use_lockfile` (a `.tflock` object written with a conditional `PutObject`), so the store must
-support conditional writes and OpenTofu must be 1.10 or later. The backend reads
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; one bucket per stage lets each stage's key reach
-only its own state.
+support conditional writes ([check it](#check-that-the-store-honours-the-lock)) and OpenTofu
+must be 1.10 or later. The backend reads `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; one
+bucket per stage lets each stage's key reach only its own state.
 
 ```hcl
 # root.hcl: S3-compatible state backend, one bucket per stage
@@ -298,6 +298,40 @@ branch with `github-branch://`, which is read-only. There is no `s3://` ledger s
 
 All of this, worked out for a Cloudflare and S3 estate with a tunnel shared by two stages, is the
 second reference repository, [`examples/cloudflare-s3/`](../../examples/cloudflare-s3/README.md).
+
+### Check that the store honours the lock
+
+With `use_lockfile`, OpenTofu takes the lock with a conditional write: a `PutObject` of the lock
+object with the header `If-None-Match` ([S3
+backend](https://opentofu.org/docs/language/settings/backends/s3/)), which asks the store to refuse
+the write when the object already exists. A store that ignores the header accepts both writes: two
+runs then hold the "lock" at once, and neither reports an error. ayasee has not been checked against
+any vendor's store, so run this against each state bucket, with credentials that can write it and the
+endpoint in `AWS_ENDPOINT_URL`. It needs the AWS CLI v2 with `put-object --if-none-match`.
+
+```bash
+export AWS_ENDPOINT_URL=https://s3.example.invalid   # your store; AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY set
+bucket=ayasee-state-test key=ayasee-lock-check.tflock
+if aws s3api put-object --bucket "$bucket" --key "$key" --if-none-match '*' >/dev/null; then
+  out="$(aws s3api put-object --bucket "$bucket" --key "$key" --if-none-match '*' 2>&1)"
+  case "$out" in
+    *PreconditionFailed*) echo "ok: the second write was refused" ;;
+    *ETag*) echo "NO LOCK: the store accepted the second write; it ignores If-None-Match" ;;
+    *) echo "inconclusive: $out" ;;
+  esac
+  aws s3api delete-object --bucket "$bucket" --key "$key"
+fi
+```
+
+`ok` is the only answer that allows `use_lockfile`. `NO LOCK` means the store needs another lock
+(the S3 backend's DynamoDB table, where the store offers one) or another store. `inconclusive`
+prints the store's error: a `NotImplemented` answer means no conditional writes; a checksum error on
+the first write comes from the CLI, which sends a CRC checksum by default, and
+`AWS_REQUEST_CHECKSUM_CALCULATION=when_required` turns that off. The check writes one after the
+other, so it shows that the store reads the header, not that two simultaneous writes are
+serialised; the store's documentation has to say that. The commands were tried against moto 5.2.5,
+an S3 emulator, which refuses the second write, and against the same emulator behind a proxy that
+drops the header, which gives `NO LOCK`.
 
 ## If something is red
 

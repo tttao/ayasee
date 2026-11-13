@@ -35,6 +35,19 @@ released version into the GitHub release notes.
   NON-COMPLIANT label, a self-approved prod gate with the maintainer recorded as approver, and a
   self-approved break-glass with its post-approval issue. `Sandbox.review(as_self=True)`,
   `Sandbox.login` and `Sandbox.read_file` support it.
+- Adoption notes from the first adopter (#11): a monorepo section in the `cloudflare-s3` README
+  (`iac_root: infra/iac`, `units_root: infra/iac/stages`); in the quickstart, a check that an
+  S3-compatible store refuses a second `If-None-Match` write, which `use_lockfile` needs; in the
+  migration guide, how a repository whose applications use `develop` routes its IaC pull requests
+  to `main`. The monorepo notes now also say why the `iac-staged` caller takes no `paths:` filter:
+  with the superseded-commit refusal (R70) it can leave an IaC commit unpromoted.
+
+### Changed
+
+- A `units_root` outside `iac_root` was already refused on every load of `.ayasee.yaml`; when the
+  value looks written relative to `iac_root` (`stages`, or no `units_root`, next to
+  `iac_root: infra/iac`), the error now says that `units_root` is relative to the repository root
+  and names the path to write (#11).
 
 ### Fixed
 
