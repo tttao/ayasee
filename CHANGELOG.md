@@ -7,6 +7,16 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- R70 (#15): `resolve` in `iac-staged` refuses a commit that is no longer the tip of `main` only
+  when a later commit changes the IaC: a file inside `iac_root` (documentation excepted, R38), the
+  configuration file, or anything under `.github/`. Otherwise the run goes on and records its own
+  SHA. `ayasee main-tip --check SHA [--config-path]` makes the decision through the GitHub compare
+  API and refuses on any doubt (an API error, a tip that does not descend from the SHA, a
+  comparison of 300 files or more). The monorepo docs now recommend a `paths:` filter on the
+  `push` caller of `iac-staged` (still none on the `pull_request` caller of `iac-pr`).
+
 ### Added
 
 - `ayasee init --profile cloudflare-s3|databricks-azure [--stages] [--iac-root] [--source] [--ref]`

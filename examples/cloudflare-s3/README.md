@@ -185,13 +185,21 @@ to `iac_root`, and the first job of every workflow stops on it. The units find `
 `find_in_parent_folders`, and `root.hcl` takes the stage and the unit from the last two directories,
 so neither changes.
 
-Do not add a `paths:` filter to `pr.yml` or `main.yml`. A pull request that touches only
-application code gets "No IaC changes" and a green `iac-pr`, which can then stay a required check;
-a push of application code to `main` gives a staged run (a login and a plan per stage) that plans
-clean and, when prod is in sync, asks no approval. If an IaC change is waiting at the prod gate at
-that moment, the application push supersedes it and reviewers approve it again in the newer run. A
-filter would skip the required check, and on `main` it can leave an IaC commit unpromoted: see
-[monorepos](../../docs/concepts/pr-checks.md#monorepos). With `iac_root` set, the format checks and
+Do not add a `paths:` filter to `pr.yml`: a pull request that touches only application code gets
+"No IaC changes" and a green `iac-pr`, which can then stay a required check, and a filter would
+skip it. Do add one to `main.yml`, so that a push of application code to `main` starts no staged
+run and does not supersede an IaC change waiting at the prod gate:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: ["infra/iac/**", ".ayasee.yaml", ".github/**"]
+```
+
+The run of an IaC commit followed by an application commit still goes on: `resolve` refuses it as
+superseded only when a later commit changes the IaC (see
+[monorepos](../../docs/concepts/pr-checks.md#monorepos)). With `iac_root` set, the format checks and
 the scanners look only at `iac_root`, and Checkov skips the `github_actions` framework.
 
 ## What is not covered
