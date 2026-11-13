@@ -658,6 +658,34 @@ class GitHub:
             raise GitHubError(0, "unexpected compare response")
         return ahead, url
 
+    # The compare API lists at most this many changed files for the whole comparison.
+    COMPARE_FILES_CAP = 300
+
+    def compare_files(self, repo: str, base: str, head: str) -> tuple[str, list[str], bool]:
+        """``(status, paths, complete)`` of ``head`` relative to ``base``.
+
+        ``status`` is the compare API's (``ahead``, ``behind``, ``diverged``, ``identical``).
+        ``paths`` holds every changed path, the old path of a rename included. ``complete`` is
+        False when the API may have cut the list (it returns at most 300 files)."""
+        data = self._get(f"/repos/{repo}/compare/{base}...{head}", "compare", per_page=1)
+        status = data.get("status") if isinstance(data, dict) else None
+        # a missing "files" key is an error, never "no change"
+        files = data.get("files") if isinstance(data, dict) else None
+        if not isinstance(status, str) or not isinstance(files, list):
+            raise GitHubError(0, "unexpected compare response")
+        paths: list[str] = []
+        for entry in files:
+            name = entry.get("filename") if isinstance(entry, dict) else None
+            if not isinstance(name, str) or not name:
+                raise GitHubError(0, "compare file without a filename")
+            paths.append(name)
+            old = entry.get("previous_filename")
+            if old is not None:
+                if not isinstance(old, str) or not old:
+                    raise GitHubError(0, "compare file with a bad previous_filename")
+                paths.append(old)
+        return status, paths, len(files) < self.COMPARE_FILES_CAP
+
     def waiting_runs(self, repo: str, workflows: list[str] | None = None) -> list[dict[str, Any]]:
         """Workflow runs waiting on an environment gate (paginated, capped). With ``workflows``
         (workflow file paths) only runs of those files are kept: a run's ``path`` may carry a
