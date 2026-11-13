@@ -159,6 +159,43 @@ pull request whose plan shows only imports). Land `dns` first, then `tunnel`, th
 its own merge: the pull request of each shared unit shows its prod plan, and its first prod apply is
 the one to watch.
 
+`ayasee import-plan` writes the `import` blocks, so you do not look IDs up in the dashboard. Run it
+per stage and unit, from the unit's directory, with the read-only token of that stage's plan
+environment (`test-plan` for `stages/test/dns`, `prod-plan` for the prod units) and credentials for
+the state bucket:
+
+```bash
+cd stages/prod/tunnel                     # then stages/prod/dns, stages/test/dns, stages/prod/access
+export CLOUDFLARE_API_TOKEN=...           # the read-only token of that plan environment
+terragrunt plan -out=adopt.tfplan && terragrunt show -json adopt.tfplan > adopt.json
+uvx --from "git+https://github.com/tttao/ayasee@<release SHA>" ayasee import-plan --plan-json adopt.json
+rm adopt.json && find .terragrunt-cache -name adopt.tfplan -delete
+```
+
+It reads the creates of the plan, looks each one up with GET requests only, and writes
+`imports.tf` next to `terragrunt.hcl` (Terragrunt copies it into the working directory with the
+shared code, so each stage has its own IDs). The plan file and `adopt.json` hold plan values:
+delete them, never commit them. What each unit's resources are matched on:
+
+| Unit | Resource | Matched on | Import ID |
+|---|---|---|---|
+| `dns` | `cloudflare_dns_record.this["<hostname>"]` | zone, hostname, type `CNAME` | `<zone_id>/<record_id>` |
+| `tunnel` | `cloudflare_zero_trust_tunnel_cloudflared_config.this` | the tunnel of `tunnel_id` | `<account_id>/<tunnel_id>` |
+| `access` | `cloudflare_zero_trust_access_policy.ssh` | policy name | `<account_id>/<policy_id>` |
+| `access` | `cloudflare_zero_trust_access_application.ssh` | `domain` and type `ssh` | `accounts/<account_id>/<app_id>` |
+
+Each planned create is printed with its outcome: `import` (one live object matches), `create` (none
+does: a new object), `skip` (no lookup for that type, or a value unknown at plan time: write that
+block by hand) or `ambiguous`. When two live objects match one address (two Access policies with the
+same name, for example), or one object matches two addresses, the command writes nothing and exits
+1: it never guesses. It also refuses to overwrite an existing `imports.tf` without `--force`.
+
+The pull-request plan must then show `import` for each of those addresses and no `create`. An
+import followed by an `update` is a difference between the code and the live object: on the
+tunnel, an ingress list that differs from the one the host serves today. Fix the code to match
+before you merge, unless the update is the change you want. Remove `imports.tf` in a later pull
+request once the objects are in state.
+
 ## In a monorepo
 
 This directory puts the estate at the repository root. When it sits beside application code, move

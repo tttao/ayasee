@@ -103,6 +103,29 @@ each unit.
 A follow-up pull request can remove the `import` blocks once the objects are in state; they are
 harmless to keep but they are noise in later plans.
 
+### Import blocks without the exporter: `ayasee import-plan`
+
+When the code already exists (you wrote it, or copied an example) and only the import IDs are
+missing, `ayasee import-plan` writes the `import` blocks from a plan of the unit made without them.
+Every object the code would create shows as a `create`; for each one of a supported type it lists
+the live objects through the provider API, with GET requests only and the provider's own token
+variable (a read-only token is enough), and writes `import { to = <address>, id = "<id>" }` for the
+one that matches:
+
+```bash
+cd stages/<stage>/<unit>
+terragrunt plan -out=adopt.tfplan && terragrunt show -json adopt.tfplan > adopt.json
+ayasee import-plan --plan-json adopt.json        # writes imports.tf next to terragrunt.hcl
+```
+
+It never guesses: when two live objects match one address, or one object matches two addresses, it
+writes nothing and exits 1. A resource type without a lookup, or a value that is unknown at plan
+time, is listed as `skip`; write that block by hand. Any API error writes nothing. The lookups exist
+today for the Cloudflare resources of the [Cloudflare example](../../examples/cloudflare-s3/README.md#6-first-adoption)
+(DNS records, the tunnel configuration, Access applications and policies); none for Databricks,
+where the exporter above writes the import blocks. The plan file and `adopt.json` hold plan values:
+delete them. The pull-request plan must then show the result described in step 4.
+
 ## 5. Drift noise lists
 
 After adoption, the nightly drift check ([drift](../concepts/drift.md)) will report any difference

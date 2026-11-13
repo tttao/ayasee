@@ -67,6 +67,7 @@ def entrypoint() -> None:
     import ayasee.features  # noqa: F401  (registers its subcommand)
     import ayasee.findings  # noqa: F401  (registers its subcommand)
     import ayasee.guard  # noqa: F401  (registers its subcommand)
+    import ayasee.importplan  # noqa: F401  (registers its subcommand)
     import ayasee.issues  # noqa: F401  (registers its subcommand)
     import ayasee.ledger  # noqa: F401  (registers its subcommand)
     import ayasee.maintip  # noqa: F401  (registers its subcommand)
