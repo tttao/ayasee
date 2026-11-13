@@ -18,8 +18,9 @@ released version into the GitHub release notes.
 - A `secret scan` CI job: gitleaks over every commit of a pull request (the whole history on a push
   to `main`), through `scripts/check-secrets.sh` with values redacted, and the allowlist tests
   against the real binary. `scripts/install-dev-tools.sh gitleaks` installs gitleaks 8.30.1,
-  checksum-verified. `.gitleaks.toml` allowlists only test values marked `ayasee-test` /
-  `ayasee-fixture` under `tests/` or `e2e/`.
+  checksum-verified. `.gitleaks.toml` allowlists only a single-token value marked `ayasee-test` /
+  `ayasee-fixture` under `tests/` or `e2e/`; inline `gitleaks:allow` comments are ignored, and a
+  rotated finding is recorded by fingerprint in `.gitleaksignore` (CONTRIBUTING.md).
 - `ayasee trunk-guard` and a step in the `resolve` job of `iac-staged` and `iac-nightly` (#11): when
   `ledger-token` is passed, the run checks with that token that an active ruleset with a
   `pull_request` rule applies to `main` with no bypass for the token (so it cannot push to `main`

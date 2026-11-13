@@ -73,9 +73,10 @@ up the hook ([prek](https://github.com/j178/prek) reads the same file). Run them
 repository with `uv run pre-commit run --all-files`.
 
 - **Secrets:** gitleaks on the staged changes (`scripts/check-secrets.sh --staged`, the repository's
-  `.gitleaks.toml`, values redacted) and `detect-private-key`. The CI job `secret scan` runs the same
-  scan on every commit of a pull request, so a commit made without the hook is still caught.
-  `uv run pre-commit run gitleaks-history --hook-stage manual` scans the whole history.
+  `.gitleaks.toml`, values redacted) and `detect-private-key`. The CI job `secret scan` runs the
+  same gitleaks scan on every commit of a pull request (the whole history on a push to `main`), so a
+  commit made without the hook is still caught; gitleaks' own `private-key` rule covers private keys
+  there. `uv run pre-commit run gitleaks-history --hook-stage manual` scans the whole history.
 - **Hygiene:** large files (over 500 KB), merge-conflict markers, YAML, JSON and TOML syntax,
   shebangs and executable bits, final newline, trailing whitespace, LF line endings, and no commit on
   `main`.
@@ -90,11 +91,24 @@ the install command when one is missing; they never skip silently. Vendored file
 `website/javascripts/vendor/` are excluded, since their SHA-256 is recorded in
 [provenance](docs/governance/PROVENANCE.md).
 
-**Fake credentials in tests.** A test that needs a credential-shaped value marks it with `ayasee`
-followed by `test` or `fixture` (for example `AKIAAYASEETEST000001` or
-`ayasee-fixture-secret-marker`) and lives under `tests/` or `e2e/`. Only that combination is
-allowlisted in `.gitleaks.toml`; never add an allowlist by path alone or by value alone. If the scan
-flags a real secret, rotate it first: removing it from the branch does not remove it from history.
+**Fake credentials in tests.** A test that needs a credential-shaped value lives under `tests/` or
+`e2e/` and writes it as one token holding `ayasee` followed by `test` or `fixture`: an AWS key id
+such as `AKIAAYASEETEST` followed by six more of `[A-Z2-7]`, or `ayasee-fixture-secret-marker`. Only
+that combination is allowlisted in `.gitleaks.toml`. A marker next to a value, in a comment or in a
+PEM label does not count, so a fake private key cannot be allowlisted: build one at run time.
+Never add an allowlist by path alone or by value alone; an inline `gitleaks:allow` comment is
+ignored.
+
+**If the scan flags a real secret:**
+
+1. Rotate it first (revoke the credential at its provider). Removing it from the branch does not
+   remove it from history, and a pushed commit must be treated as public.
+2. If the commit is only local, amend or rebase it out and commit again.
+3. If it reached a pushed branch or `main`, the finding stays in history and every later full scan
+   (each push to `main`) would fail on it. Once the secret is rotated, record the finding's
+   `Fingerprint:` line from the scan output (`<commit>:<file>:<rule>:<line>`) in `.gitleaksignore`
+   at the root, with a comment saying when it was rotated, in the same pull request. A fingerprint
+   names one commit, so the same value committed again is still caught.
 
 ## Docs and links
 

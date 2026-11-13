@@ -135,9 +135,10 @@ jobs:
           persist-credentials: false
       - run: python3 scripts/check-links.py
 
-  # The pre-commit gitleaks hook is opt-in; this job is the backstop. On a pull request it scans
-  # every commit of the PR (a squash merge would hide an intermediate commit, the PR keeps it);
-  # on a push to main, the whole history. The gitleaks binary is checksum-verified, no
+  # The pre-commit hooks are opt-in; this job is the backstop for their gitleaks scan (not for
+  # detect-private-key: gitleaks' private-key rule covers private keys here). On a pull request it
+  # scans every commit of the PR (a squash merge would hide an intermediate commit, the PR keeps
+  # it); on a push to main, the whole history. The gitleaks binary is checksum-verified, no
   # gitleaks-action (it needs a licence key for organisations), no token.
   secrets:
     name: secret scan

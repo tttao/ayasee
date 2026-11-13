@@ -8,7 +8,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # --verbose prints each finding (rule, file, line, commit); --redact replaces the value in it.
-args=(git --config "$root/.gitleaks.toml" --redact --verbose --no-banner --exit-code 1)
+# Exceptions live only in .gitleaks.toml and .gitleaksignore (fingerprints of findings already
+# rotated), both at the root and reviewed as files: an inline `gitleaks:allow` comment is ignored.
+args=(git --config "$root/.gitleaks.toml" --gitleaks-ignore-path "$root" --ignore-gitleaks-allow
+  --redact --verbose --no-banner --exit-code 1)
 
 case "${1:-}" in
   "") ;;

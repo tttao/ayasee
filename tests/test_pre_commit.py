@@ -5,6 +5,8 @@ The behaviour tests run the real gitleaks binary when it is installed (.tools/bi
 skipping.
 """
 
+import base64
+import hashlib
 import os
 import re
 import shutil
@@ -79,6 +81,9 @@ def test_local_tool_hooks_go_through_dev_tool():
         for h in r["hooks"]:
             entry = h["entry"].split()[0]
             assert entry.startswith("scripts/") or entry in ("python3", "uv"), h["id"]
+    hooks = _hooks()
+    for tool_hook in ("actionlint", "tofu-fmt", "opa-fmt", "opa-check"):
+        assert hooks[tool_hook]["entry"].startswith("scripts/dev-tool.sh "), tool_hook
 
 
 def test_tests_run_only_before_push_and_only_unit():
@@ -151,9 +156,19 @@ def _gitleaks():
     return found
 
 
-# Built at run time so this file does not itself hold a detectable value.
-REAL_LOOKING_AWS_KEY = "AKIA" + "Q7ZK4XW2M9PLV3RN"
+# Built at run time so this file does not itself hold a detectable value. The key bodies are
+# 16 of [A-Z2-7], the shape gitleaks' aws-access-token rule matches.
+AWS_KEY = "AKIA" + "Z5TPQ3XMB7NV4HKR"
+MARKED_AWS_KEY = "AKIA" + "AYASEETESTZ7K4MQ"  # the marker inside a valid-shape key id
 MARKED_SECRET = "ayasee" + "TestSecretKey0123456789/+abcdefghi"
+_PEM_BODY = base64.b64encode(hashlib.sha512(b"ayasee").digest() * 3).decode()
+_PEM_LINES = "\n".join(_PEM_BODY[i : i + 64] for i in range(0, len(_PEM_BODY), 64))
+_BEGIN, _END = "-----BEGIN ", "-----END "
+PEM = f"{_BEGIN}{'PRIVATE'} KEY-----\n{_PEM_LINES}\n{_END}{'PRIVATE'} KEY-----\n"
+# a real key with a marker comment inside the block, and one whose label carries the marker
+PEM_MARKER_LINE = PEM.replace("\n", "\n# ayasee-test\n", 1)
+PEM_MARKER_LABEL = PEM.replace(" PRIVATE KEY", " AYASEE-TEST PRIVATE KEY")
+VALUES = (AWS_KEY, MARKED_AWS_KEY, MARKED_SECRET, _PEM_BODY[:40])
 
 
 def _repo_with(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -175,34 +190,84 @@ def _repo_with(tmp_path: Path, files: dict[str, str]) -> Path:
 
 
 def _scan(gitleaks: str, repo: Path) -> subprocess.CompletedProcess:
+    flags = re.search(r"^args=\(git (.*?)\)$", CHECK_SECRETS.read_text(), re.M | re.S).group(1)
+    assert '--config "$root/.gitleaks.toml" --gitleaks-ignore-path "$root"' in flags
+    assert "--ignore-gitleaks-allow" in flags and "--redact" in flags
     return subprocess.run(
-        # the flags of scripts/check-secrets.sh
-        [gitleaks, "git", "--config", str(GITLEAKS_TOML), "--redact", "--verbose", "--no-banner"]
-        + [str(repo)],
+        # the flags of scripts/check-secrets.sh, with the scanned repository as $root
+        [gitleaks, "git", "--config", str(GITLEAKS_TOML), "--gitleaks-ignore-path", str(repo)]
+        + ["--ignore-gitleaks-allow", "--redact", "--verbose", "--no-banner", str(repo)],
         capture_output=True,
         text=True,
     )
 
 
 @pytest.mark.parametrize(
-    "rel,line,leak",
+    "rel,text,rule",
     [
-        ("tests/test_x.py", f'SECRET = "{MARKED_SECRET}"\n', False),
-        ("e2e/fixture/x.py", f'SECRET = "{MARKED_SECRET}"\n', False),
-        ("src/ayasee/x.py", f'SECRET = "{MARKED_SECRET}"\n', True),
-        ("tests/test_x.py", f'KEY = "{REAL_LOOKING_AWS_KEY}"\n', True),
-        ("src/ayasee/x.py", f'KEY = "{REAL_LOOKING_AWS_KEY}"\n', True),
+        ("tests/test_x.py", f'SECRET = "{MARKED_SECRET}"\n', None),
+        ("e2e/fixture/x.py", f'SECRET = "{MARKED_SECRET}"\n', None),
+        ("tests/test_x.py", f'ids = ["{MARKED_AWS_KEY}"]\n', None),
+        ("src/ayasee/x.py", f'SECRET = "{MARKED_SECRET}"\n', "generic-api-key"),
+        ("src/ayasee/x.py", f'ids = ["{MARKED_AWS_KEY}"]\n', "aws-access-token"),
+        ("tests/test_x.py", f'ids = ["{AWS_KEY}"]\n', "aws-access-token"),
+        ("src/ayasee/x.py", f'ids = ["{AWS_KEY}"]\n', "aws-access-token"),
+        ("tests/fixtures/k.pem", PEM, "private-key"),
+        ("tests/fixtures/k.pem", PEM_MARKER_LINE, "private-key"),
+        ("tests/fixtures/k.pem", PEM_MARKER_LABEL, "private-key"),
+    ],
+    # explicit ids: the default would put the values in the test names and the pytest cache
+    ids=[
+        "marked-secret-tests",
+        "marked-secret-e2e",
+        "marked-aws-key-tests",
+        "marked-secret-src",
+        "marked-aws-key-src",
+        "aws-key-tests",
+        "aws-key-src",
+        "pem-tests",
+        "pem-marker-line-tests",
+        "pem-marker-label-tests",
     ],
 )
-def test_allowlist_needs_both_the_test_path_and_the_marker(tmp_path, rel, line, leak):
+def test_allowlist_needs_the_test_path_and_a_marked_single_token(tmp_path, rel, text, rule):
     gitleaks = _gitleaks()
-    p = _scan(gitleaks, _repo_with(tmp_path, {rel: line}))
-    assert p.returncode == (1 if leak else 0), p.stdout + p.stderr
-    # a finding names its file; the value never reaches the log
-    if leak:
-        assert rel in p.stdout + p.stderr
-    assert MARKED_SECRET not in p.stdout + p.stderr
-    assert REAL_LOOKING_AWS_KEY not in p.stdout + p.stderr
+    p = _scan(gitleaks, _repo_with(tmp_path, {rel: text}))
+    out = p.stdout + p.stderr
+    assert p.returncode == (0 if rule is None else 1), out
+    if rule:
+        # a finding names its rule and file
+        assert f"RuleID:      {rule}" in out and rel in out, out
+    # the value never reaches the log
+    for v in VALUES:
+        assert v not in out
+
+
+def test_an_inline_gitleaks_allow_comment_does_not_hide_a_secret(tmp_path):
+    gitleaks = _gitleaks()
+    text = f'ids = ["{AWS_KEY}"]  # gitleaks:allow\n'
+    p = _scan(gitleaks, _repo_with(tmp_path, {"src/ayasee/x.py": text}))
+    assert p.returncode == 1, p.stdout + p.stderr
+
+
+def test_a_rotated_finding_is_recorded_by_fingerprint_in_gitleaksignore(tmp_path):
+    gitleaks = _gitleaks()
+    repo = _repo_with(tmp_path, {"src/ayasee/x.py": f'ids = ["{AWS_KEY}"]\n'})
+    first = _scan(gitleaks, repo)
+    assert first.returncode == 1
+    fingerprint = re.search(r"^Fingerprint:\s+(\S+)$", first.stdout + first.stderr, re.M).group(1)
+    assert re.fullmatch(r"[0-9a-f]{40}:src/ayasee/x\.py:aws-access-token:1", fingerprint)
+    (repo / ".gitleaksignore").write_text(f"# rotated\n{fingerprint}\n")
+    assert _scan(gitleaks, repo).returncode == 0
+    # the fingerprint names one commit: the same key committed again is caught
+    (repo / "src/ayasee/y.py").write_text(f'ids = ["{AWS_KEY}"]\n')
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "d"],
+        cwd=repo,
+        check=True,
+    )
+    assert _scan(gitleaks, repo).returncode == 1
 
 
 def test_check_secrets_rejects_anything_but_a_sha_range():
