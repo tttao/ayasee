@@ -21,7 +21,8 @@ NON_COMPLIANT = (
 )
 DEVIATION_SECRETS = (
     "DEVIATION: identity: secrets stores provider API tokens as GitHub environment secrets "
-    "instead of OIDC federation (D7)"
+    "instead of OIDC federation (D7); stages are isolated only as far as the token scopes are "
+    "(a pre-prod token scoped to a shared DNS zone can change prod records without the prod gate)"
 )
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")

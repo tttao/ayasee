@@ -9,6 +9,14 @@ released version into the GitHub release notes.
 
 ### Added
 
+- `ayasee trunk-guard` and a step in the `resolve` job of `iac-staged` and `iac-nightly` (#11): when
+  `ledger-token` is passed, the run checks with that token that an active ruleset with a
+  `pull_request` rule applies to `main` and that the token can never bypass it, and warns in the log
+  and the run summary otherwise (also when it cannot tell). Read-only calls with Metadata read; no
+  job permission added. Classic branch protection is not visible to the check.
+- The `identity: secrets` DEVIATION label now says that stages are isolated only as far as the
+  provider token scopes are (#11): a pre-prod token scoped to a shared DNS zone can change prod
+  records without the prod gate.
 - The cockpit shows the opt-ins that weaken a compliant default (#1): the collector reads each
   repository's `.ayasee.yaml` at `main` (`config` in `repos.yaml`) and the snapshot carries an
   optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,
