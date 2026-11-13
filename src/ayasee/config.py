@@ -162,7 +162,7 @@ def _parse(raw: Any) -> Config:
             # the usual mistake: units_root written relative to iac_root (or left at its default)
             message += (
                 "; units_root is relative to the repository root, not to iac_root: "
-                f"write units_root: {joined}"
+                f"if it was written relative to iac_root, write units_root: {joined}"
             )
         raise ConfigError(message)
     if "ledger" in top:

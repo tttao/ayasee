@@ -171,13 +171,16 @@ A monorepo can keep a `feature → develop → main` flow for its applications w
 `main`, and every environment except `dev-plan` and `prod-pr-plan` accepts deployments from `main`
 only (`modules/github-environments`). An IaC change merged to `develop` therefore reaches the first
 stage only when `develop` is merged to `main`, together with every other IaC change waiting there,
-behind one prod gate; if one of them reads the outputs of another, `prod-plan` refuses the batch
-([R52](../concepts/staged-run.md#dependencies-between-units-r52)) and they land again one at a time.
-Let pull requests that only touch `iac_root` target `main`, and split a pull request that changes
-both application and IaC code into two. Leave the callers without a `paths:` filter and with no
-`branches:` filter on `pull_request`: `iac-pr` stays green with "No IaC changes" on application
-pull requests, so it can be a required check on both branches, and it still plans an IaC change
-that was opened against `develop` ([monorepos](../concepts/pr-checks.md#monorepos)).
+behind one prod gate. With `allow_cascade: false` (the default), if the batch changes a unit and
+also a unit that reads its outputs, `prod-plan` refuses it
+([R52](../concepts/staged-run.md#dependencies-between-units-r52)). By then the pre-prod stages have
+applied it and the commits are on `main`, so the way out is a revert of the dependent change on
+`main`, a run that takes the upstream change to prod, and then the dependent change again in its own
+pull request. Let pull requests that only touch `iac_root` target `main`, and split a pull request
+that changes both application and IaC code into two. Leave the callers without a `paths:` filter and
+with no `branches:` filter on `pull_request`: `iac-pr` stays green with "No IaC changes" on
+application pull requests, so it can be a required check on both branches, and it still plans an IaC
+change that was opened against `develop` ([monorepos](../concepts/pr-checks.md#monorepos)).
 
 ## Related repositories that need a different path
 

@@ -311,18 +311,23 @@ endpoint in `AWS_ENDPOINT_URL`. It needs the AWS CLI v2 with `put-object --if-no
 
 ```bash
 export AWS_ENDPOINT_URL=https://s3.example.invalid   # your store; AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY set
-bucket=ayasee-state-test key=ayasee-lock-check.tflock
-if aws s3api put-object --bucket "$bucket" --key "$key" --if-none-match '*' >/dev/null; then
+(
+  bucket=ayasee-state-test key=ayasee-lock-check.tflock
+  if ! aws s3api put-object --bucket "$bucket" --key "$key" --if-none-match '*' >/dev/null; then
+    echo "inconclusive: the first write failed (see the error above; delete $key if it is left over from an earlier check)"
+    exit 1
+  fi
   out="$(aws s3api put-object --bucket "$bucket" --key "$key" --if-none-match '*' 2>&1)"
+  aws s3api delete-object --bucket "$bucket" --key "$key"
   case "$out" in
     *PreconditionFailed*) echo "ok: the second write was refused" ;;
-    *ETag*) echo "NO LOCK: the store accepted the second write; it ignores If-None-Match" ;;
-    *) echo "inconclusive: $out" ;;
+    *ETag*) echo "NO LOCK: the store accepted the second write; it ignores If-None-Match"; exit 1 ;;
+    *) echo "inconclusive: $out"; exit 1 ;;
   esac
-  aws s3api delete-object --bucket "$bucket" --key "$key"
-fi
+)
 ```
 
+The parentheses run it in a subshell, so it exits 0 only on `ok` and leaves your shell open.
 `ok` is the only answer that allows `use_lockfile`. `NO LOCK` means the store needs another lock
 (the S3 backend's DynamoDB table, where the store offers one) or another store. `inconclusive`
 prints the store's error: a `NotImplemented` answer means no conditional writes; a checksum error on

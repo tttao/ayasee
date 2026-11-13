@@ -154,17 +154,23 @@ Then:
   and stays green, so `iac-pr` can be a required check. Do not add a `paths:` filter to the caller:
   a skipped workflow cannot satisfy a required check.
 - leave the `push` caller of `iac-staged` without a `paths:` filter too. A push to `main` that
-  touches only application code runs a staged run in which every unit plans clean: the first stage
-  applies nothing and `prod-in-sync` records the SHA without asking for an approval
-  ([the empty-plan path](staged-run.md#the-empty-plan-path)). The filter would save that run but
-  can lose a promotion: `resolve` refuses a commit that is no longer the tip of `main` (R70), so an
-  IaC commit followed quickly by an application commit gets a `superseded` run, and the filtered
-  application commit, which would have promoted it, gets no run at all. The change then waits for
-  the next push that touches `iac_root`.
+  touches only application code still runs every stage: each pre-prod stage logs in, plans, applies
+  nothing and writes its ledger record, and `prod-plan` logs in and plans. When prod is in sync,
+  every unit plans clean and `prod-in-sync` records the SHA without asking for an approval
+  ([the empty-plan path](staged-run.md#the-empty-plan-path)). When an IaC change is waiting at the
+  prod gate, the application push supersedes it: its pre-prod stage records the newer SHA, the
+  guard of the waiting run then refuses the approved apply as `superseded`
+  ([the supersession guard](staged-run.md#the-supersession-guard)), and reviewers approve the same
+  change again in the newer run. The filter would save these runs but can lose a promotion:
+  `resolve` refuses a commit that is no longer the tip of `main` (R70), so an IaC commit followed
+  quickly by an application commit gets a `superseded` run, and the filtered application commit,
+  which would have promoted it, gets no run at all. The change then waits for the next push that
+  touches `iac_root`.
 
 `units_root` is relative to the repository root, not to `iac_root`, and must be inside it. Setting
 `iac_root` alone fails every load of `.ayasee.yaml`, because the default `units_root`, `stages`, is
-then outside it; the error names the path to write ([the keys](../reference/ayasee-yaml.md#keys)).
+then outside it; the error says which path to write if the value was meant relative to `iac_root`
+([the keys](../reference/ayasee-yaml.md#keys)).
 
 Create the Checkov baseline with `--directory <iac_root>` (next section), because Checkov records
 file paths relative to the directory it scanned.

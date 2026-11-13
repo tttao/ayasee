@@ -47,7 +47,7 @@ released version into the GitHub release notes.
 - A `units_root` outside `iac_root` was already refused on every load of `.ayasee.yaml`; when the
   value looks written relative to `iac_root` (`stages`, or no `units_root`, next to
   `iac_root: infra/iac`), the error now says that `units_root` is relative to the repository root
-  and names the path to write (#11).
+  and, if that was the intent, which path to write (#11).
 
 ### Fixed
 

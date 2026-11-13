@@ -410,7 +410,7 @@ def test_units_root_written_relative_to_iac_root_names_the_fix(tmp_path, text):
         load_config(write(tmp_path, text + "\n"))
     message = str(err.value)
     assert "relative to the repository root, not to iac_root" in message
-    assert "units_root: infra/iac/stages" in message
+    assert "if it was written relative to iac_root, write units_root: infra/iac/stages" in message
 
 
 @pytest.mark.parametrize(
