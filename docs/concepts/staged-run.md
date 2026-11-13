@@ -22,35 +22,56 @@ jobs:
 
 ## Stages
 
-The run promotes through the `stages` of `.ayasee.yaml`. `iac-staged` accepts two layouts, and
-`resolve` refuses any other list (`ayasee config staged`):
+The run promotes through the `stages` of `.ayasee.yaml`: one to four pre-prod stages, then
+`prod`. `iac-staged` has four pre-prod job slots, `stage-1` to `stage-4`, each needing the one
+before it. The pre-prod stages fill them right-aligned, so `stage-4` always runs the stage just
+before prod and the unused slots come first, skipped. `resolve` refuses any other list
+(`ayasee config staged`):
 
-| `stages` | `dev` job slot | `uat` job slot | Guard of `prod-plan` and `prod` chains from |
-|---|---|---|---|
-| `[dev, uat, prod]` (default), or any `[<first>, <pre-prod>, prod]` | `<first>` | `<pre-prod>` | `<pre-prod>` |
-| `[<pre-prod>, prod]` | skipped | `<pre-prod>` | `<pre-prod>` |
+| `stages` | `stage-1` | `stage-2` | `stage-3` | `stage-4` | Guard of `prod-plan` and `prod` chains from |
+|---|---|---|---|---|---|
+| `[<a>, prod]` | skipped | skipped | skipped | `<a>` | `<a>` |
+| `[dev, uat, prod]` (default), or any `[<a>, <b>, prod]` | skipped | skipped | `<a>` | `<b>` | `<b>` |
+| `[<a>, <b>, <c>, prod]` | skipped | `<a>` | `<b>` | `<c>` | `<c>` |
+| `[<a>, <b>, <c>, <d>, prod]` | `<a>` | `<b>` | `<c>` | `<d>` | `<d>` |
 
-The job ids stay `dev` and `uat`; each job's display name, `environment`, concurrency group,
+The job ids are the slot names; each job's display name, `environment`, concurrency group,
 units directory (`<units_root>/<stage>`), ledger record, stop-the-line label and notifications use
 the configured stage name. `prod` must be the last stage. A pre-prod stage name must match
 `[a-z0-9][a-z0-9_-]*` and must not be `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` or
-start with `drift-`, because those environments have a fixed role. With two stages the `dev` slot is
-skipped exactly as `start-stage` skips it, so `prod-plan` still runs. The guard reads the stage
-order from the same list, so `prod-plan` and `prod` require the stage just before prod to have this
-SHA live and converged, whatever it is called. Lists of four or more stages are not supported yet.
-`iac-pr` plans the first configured stage, and `iac-nightly` drifts every listed stage.
+start with `drift-`, because those environments have a fixed role. An unused slot is skipped
+exactly as `start-stage` skips it, so the slots after it and `prod-plan` still run. The guard of
+every stage job reads the stage order from the same list, so each stage requires the stage before
+it to have this SHA live and converged, whatever it is called and whatever slot ran it. Lists of
+six or more stages are refused. `iac-pr` plans the first configured stage, and `iac-nightly`
+drifts every listed stage.
+
+Why fixed slots and not a matrix over the stages: GitHub does not guarantee the order in which
+matrix jobs run, even with `max-parallel: 1`, and `fail-fast` cancels the other legs only on a
+best-effort basis. Out of order, the guard would still refuse the later stage (its predecessor has
+no record at this SHA), so the run would stay safe but fail at random; and the order would be a
+property of the runner, not of the workflow file. With fixed slots the order and the stop on
+failure are in `needs:` and `if:`, and the workflow tests check them statically
+(`tests/workflows/test_iac_staged.py`): each slot needs the one before it, and a skipped slot
+counts as passed only when `resolve` said to skip it, and the slots are identical apart from their
+name, `needs:` and `if:`. Raising the limit means adding a slot to the workflow, as a copy of
+`stage-1` chained after the last slot and named in `prod-plan`'s `needs:` and `if:`, and raising
+`PRE_PROD_SLOTS` in `ayasee.config` (the tests derive the slot list from it). An unused slot is
+skipped; its concurrency group carries the run id (`unused-<run id>-stage-<i>`), so it never
+waits for or cancels another job.
 
 These layouts are covered by unit tests of the CLI, the guard and the workflow definition; no
-two-stage run has been executed on GitHub yet.
+two-stage, four-stage or five-stage run has been executed on GitHub yet.
 
 ## Flow
 
 | Job | Needs | Runs when | What it does |
 |---|---|---|---|
 | `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` (R70, `ayasee main-tip`: the run of the newer commit promotes the change; a redrive dispatches on the tip), refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `stages` and `start-stage` (`ayasee config staged`: empty for the first stage, a pre-prod stage name, or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`, `identity`). |
-| `dev` | `resolve` | three stages, and `start-stage` is empty or the first stage | Runs the first stage: setup, guard, plan, apply (binding mode `same-job`), ledger write. |
-| `uat` | `dev` | `start-stage` is not `prod-plan`; `dev` succeeded, or was skipped (by `start-stage` or a two-stage list) | Runs the stage just before prod. Same as `dev`. |
-| `prod-plan` | `dev`, `uat` | after `dev` and `uat` succeeded or were skipped by `start-stage` | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
+| `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. |
+| `stage-2`, `stage-3` | the slot before | its stage is in the list and not before `start-stage`; the slot before succeeded, or was skipped (by `start-stage` or as unused) | Same as `stage-1`. |
+| `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
+| `prod-plan` | `stage-1` to `stage-4` | after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
 | `prod` | `prod-plan` | `has-changes == 'true'` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
 | `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
 
@@ -65,7 +86,7 @@ Every plan and apply that takes the state lock (including the converge re-plan a
 apply actions to change it). A nightly drift plan (see `drift.md`) holds the same lock, so an overlapping
 run waits instead of failing on the blob lease. Plans run with `lock: false` do not use it.
 
-A stage job is skipped only when `start-stage` (or a two-stage list, for the `dev` slot) says so. A
+A stage job is skipped only when `start-stage` (or a list too short to use its slot) says so. A
 skipped predecessor counts as passed only if it was skipped on purpose; a predecessor skipped because *its* predecessor failed
 stops the chain.
 

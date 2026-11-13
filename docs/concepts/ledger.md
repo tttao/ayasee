@@ -97,7 +97,7 @@ The cost is one extra directory listing per read.
 
 | Actor | Access |
 |---|---|
-| `dev`, `uat` jobs | Write their own environment's record |
+| pre-prod stage jobs (`stage-1` to `stage-4`) | Write their own environment's record |
 | `prod` job | Writes the `prod` record (with the approver) |
 | `prod-in-sync` (runs in `prod-plan`) | Writes the `prod` record for an empty plan. The `prod-plan` identity therefore needs write on the prod record, but it cannot apply (R31). |
 | `iac-breakglass` | Writes the `prod` record with the incident reference |

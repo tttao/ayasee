@@ -181,11 +181,10 @@ def _called_environments() -> set[str]:
                 layout = staged_layout(stages, "")
                 if env == "drift-${{ matrix.env }}":
                     found |= {f"drift-{s}" for s in stages}
-                elif env == "${{ needs.resolve.outputs.first-stage }}":
-                    found |= {layout["first-stage"]} - {""}
                 else:
-                    assert env == "${{ needs.resolve.outputs.pre-prod-stage }}", env
-                    found.add(layout["pre-prod-stage"])
+                    m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.(stage-\d+) \}\}", env)
+                    assert m, env
+                    found |= {layout[m.group(1)]} - {""}
             else:
                 found.add(env)
     return found

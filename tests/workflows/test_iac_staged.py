@@ -8,13 +8,15 @@ from conftest import AYASEE_USES, ROOT, SHA_REF, WORKFLOWS
 from conftest import index as _index
 from conftest import steps as _steps
 
+from ayasee.config import PRE_PROD_SLOTS
+
 PATH = WORKFLOWS / "iac-staged.yml"
-STAGE_JOBS = ["dev", "uat", "prod-plan", "prod", "prod-in-sync"]
+# the pre-prod job slots, in order; they run the stages named in `stages` (issues #1, #10)
+SLOTS = [f"stage-{i}" for i in range(1, PRE_PROD_SLOTS + 1)]
+STAGE_JOBS = [*SLOTS, "prod-plan", "prod", "prod-in-sync"]
 # prod-plan and prod-in-sync never wait for prod reviewers (R31)
 EXPECTED_ENV = {
-    # the two pre-prod slots run the stages named in `stages` (issue #1)
-    "dev": "${{ needs.resolve.outputs.first-stage }}",
-    "uat": "${{ needs.resolve.outputs.pre-prod-stage }}",
+    **{slot: f"${{{{ needs.resolve.outputs.{slot} }}}}" for slot in SLOTS},
     "prod-plan": "prod-plan",
     "prod": "prod",
     "prod-in-sync": "prod-plan",
@@ -137,7 +139,7 @@ def test_prod_guard_runs_before_download_and_apply(wf):
 
 
 def test_azure_login_precedes_plan_in_every_stage_job(wf):
-    for name in ("dev", "uat", "prod-plan", "prod"):
+    for name in (*SLOTS, "prod-plan", "prod"):
         steps = _steps(wf, name)
         login = _index(steps, lambda s: "azure/login" in s.get("uses", ""))
         plan = _index(steps, lambda s: re.search(r"/actions/(plan|apply)@", s.get("uses", "")))
@@ -183,8 +185,8 @@ def test_start_stage_validated_in_resolve(wf):
     assert wf[True]["workflow_call"]["inputs"]["start-stage"]["default"] == ""
 
 
-def test_dev_uat_use_same_job_and_write_ledger_with_mirror(wf):
-    for name in ("dev", "uat"):
+def test_pre_prod_slots_use_same_job_and_write_ledger_with_mirror(wf):
+    for name in SLOTS:
         steps = _steps(wf, name)
         plan = steps[_index(steps, lambda s: "/actions/plan@" in s.get("uses", ""))]
         apply = steps[_index(steps, lambda s: "/actions/apply@" in s.get("uses", ""))]
@@ -197,7 +199,7 @@ def test_dev_uat_use_same_job_and_write_ledger_with_mirror(wf):
 def test_oidc_environment(wf):
     """ARM_* and the Databricks auth type are set for identity: oidc only (issue #1)."""
     oidc = "needs.resolve.outputs.identity == 'oidc'"
-    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+    for name in (*SLOTS, "prod-plan", "prod", "prod-in-sync"):
         env = wf["jobs"][name]["env"]
         assert env["ARM_USE_OIDC"] == f"${{{{ {oidc} && 'true' || '' }}}}"
         assert env["DATABRICKS_AUTH_TYPE"] == f"${{{{ {oidc} && 'github-oidc-azure' || '' }}}}"
@@ -207,7 +209,7 @@ def test_oidc_environment(wf):
 
 
 def test_azure_login_only_for_the_oidc_identity(wf):
-    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+    for name in (*SLOTS, "prod-plan", "prod", "prod-in-sync"):
         logins = [s for s in _steps(wf, name) if "azure/login" in s.get("uses", "")]
         assert len(logins) == 1, name
         assert logins[0]["if"] == "${{ needs.resolve.outputs.identity == 'oidc' }}", name
@@ -216,12 +218,16 @@ def test_azure_login_only_for_the_oidc_identity(wf):
 
 
 def test_pre_prod_slots_run_the_configured_stage(wf):
-    for job, output in (("dev", "first-stage"), ("uat", "pre-prod-stage")):
+    for job in SLOTS:
         j = wf["jobs"][job]
-        expr = f"${{{{ needs.resolve.outputs.{output} }}}}"
+        expr = f"${{{{ needs.resolve.outputs.{job} }}}}"
         assert j["env"]["STAGE"] == expr
-        assert j["name"] == f"${{{{ needs.resolve.outputs.{output} || '{job}' }}}}"
-        assert j["concurrency"]["group"] == f"ayasee-${{{{ github.repository }}}}-{expr}"
+        assert j["name"] == f"${{{{ needs.resolve.outputs.{job} || '{job}' }}}}"
+        # an unused (skipped) slot gets a group of its own run, never the shared empty-stage one
+        assert j["concurrency"]["group"] == (
+            f"ayasee-${{{{ github.repository }}}}-${{{{ needs.resolve.outputs.{job} || "
+            f"format('unused-{{0}}-{job}', github.run_id) }}}}"
+        )
         steps = _steps(wf, job)
         for kind in ("plan", "apply", "ledger", "notify"):
             step = next(s for s in steps if f"/actions/{kind}@" in s.get("uses", ""))
@@ -232,8 +238,51 @@ def test_pre_prod_slots_run_the_configured_stage(wf):
         text = PATH.read_text()
         assert f"stage: {job}\n" not in text and f"env: {job}\n" not in text
     out = wf["jobs"]["resolve"]["outputs"]
-    assert out["first-stage"] == "${{ steps.resolve.outputs.first-stage }}"
-    assert out["pre-prod-stage"] == "${{ steps.resolve.outputs.pre-prod-stage }}"
+    for job in SLOTS:
+        assert out[job] == f"${{{{ steps.resolve.outputs.{job} }}}}"
+        assert out[f"run-{job}"] == f"${{{{ steps.resolve.outputs.run-{job} }}}}"
+    # every slot and its run flag the CLI prints is wired; no other slot exists
+    jobs = [j for j in wf["jobs"] if re.fullmatch(r"stage-\d+", j)]
+    assert jobs == SLOTS
+
+
+def test_pre_prod_slots_are_identical_but_for_their_name(wf):
+    """Every slot is a copy of stage-1 except `needs` and `if` (#10), so the per-step checks on
+    one slot hold for all, and a new slot only has to be a copy to be covered."""
+
+    def shape(job):
+        j = {k: v for k, v in wf["jobs"][job].items() if k not in ("needs", "if")}
+        return yaml.safe_dump(j, sort_keys=True).replace(job, "<slot>")
+
+    assert "<slot>" in shape(SLOTS[0])
+    for job in SLOTS[1:]:
+        assert shape(job) == shape(SLOTS[0]), job
+
+
+def test_pre_prod_slots_and_prod_plan_form_one_chain(wf):
+    """Slot i needs slot i-1 and runs only after it succeeded or was skipped on purpose (#10).
+
+    Together with the right-aligned layout (tests/test_config.py), this is what keeps the order:
+    no slot starts before the one before it has finished, and a failure anywhere stops the rest.
+    """
+    jobs = wf["jobs"]
+    assert jobs[SLOTS[0]]["needs"] == "resolve"
+    assert "'skipped'" not in jobs[SLOTS[0]]["if"]
+    for prev, job in zip(SLOTS, SLOTS[1:], strict=False):
+        assert jobs[job]["needs"] == ["resolve", prev], job
+        cond = jobs[job]["if"]
+        assert cond.startswith("${{ !cancelled() && github.ref == 'refs/heads/main' && ")
+        assert f"needs.resolve.outputs.run-{job} == 'true'" in cond
+        assert (
+            f"(needs.{prev}.result == 'success' || (needs.resolve.outputs.run-{prev} == 'false'"
+            f" && needs.{prev}.result == 'skipped'))" in cond
+        ), job
+    assert jobs["prod-plan"]["needs"] == ["resolve", *SLOTS]
+    for slot in SLOTS:
+        assert (
+            f"(needs.{slot}.result == 'success' || (needs.resolve.outputs.run-{slot} == 'false'"
+            f" && needs.{slot}.result == 'skipped'))" in jobs["prod-plan"]["if"]
+        ), slot
 
 
 def test_prod_in_sync_mirrors_and_notifies_failure(wf):
@@ -247,16 +296,17 @@ def test_prod_in_sync_mirrors_and_notifies_failure(wf):
 
 def test_skipped_needs_only_count_when_the_skip_was_intended(wf):
     pattern = re.compile(r"needs\.(\w+)\.result == 'skipped'")
-    for name in ("uat", "prod-plan"):
+    for name in (*SLOTS[1:], "prod-plan"):
         cond = wf["jobs"][name]["if"]
         for m in pattern.finditer(cond):
             prev = m.group(1)
             assert f"needs.resolve.outputs.run-{prev} == 'false' && {m.group(0)}" in cond
             assert f"needs.{prev}.result == 'success'" in cond
-    assert wf["jobs"]["uat"]["if"].count("'skipped'") == 1
-    assert wf["jobs"]["prod-plan"]["if"].count("'skipped'") == 2
-    assert wf["jobs"]["prod-plan"]["needs"] == ["resolve", "dev", "uat"]
-    assert "'skipped'" not in wf["jobs"]["dev"]["if"]
+    for slot in SLOTS[1:]:
+        assert wf["jobs"][slot]["if"].count("'skipped'") == 1, slot
+    assert wf["jobs"]["prod-plan"]["if"].count("'skipped'") == len(SLOTS)
+    assert wf["jobs"]["prod-plan"]["needs"] == ["resolve", *SLOTS]
+    assert "'skipped'" not in wf["jobs"][SLOTS[0]]["if"]
 
 
 def test_prod_reads_the_approver_before_download_and_apply(wf):
@@ -273,7 +323,7 @@ def test_prod_reads_the_approver_before_download_and_apply(wf):
 
 
 def test_binding_failure_does_not_open_stop_the_line(wf):
-    for name in ("dev", "uat", "prod"):
+    for name in (*SLOTS, "prod"):
         steps = _steps(wf, name)
         issue = steps[_index(steps, lambda s: "stop-the-line" in s.get("run", ""))]
         assert "steps.apply.outcome == 'failure'" in issue["if"]
@@ -336,7 +386,7 @@ def test_ledger_credentials_are_step_scoped_env_only(wf):
     text = PATH.read_text()
     assert "credential.helper" not in text and "git config" not in text
     assert "ledger-git-credentials" not in text
-    for name in ("dev", "uat", "prod-plan", "prod", "prod-in-sync"):
+    for name in (*SLOTS, "prod-plan", "prod", "prod-in-sync"):
         for step in _steps(wf, name):
             uses = step.get("uses", "")
             env = step.get("env", {})
@@ -470,14 +520,14 @@ def test_prod_plan_passes_allow_cascade_from_the_configuration(wf):
     plan = next(x for x in _steps(wf, "prod-plan") if x.get("id") == "plan")
     assert plan["with"]["allow-cascade"] == "${{ needs.resolve.outputs.allow-cascade }}"
     assert "allow_cascade" in PATH.read_text()
-    for stage in ("dev", "uat"):
+    for stage in SLOTS:
         step = next(x for x in _steps(wf, stage) if x.get("id") == "plan")
         assert "allow-cascade" not in step["with"]
 
 
 def test_extra_secret_reaches_only_plan_and_apply_steps(wf):
     text = PATH.read_text()
-    assert text.count("secrets.extra-env-secret") == 6
+    assert text.count("secrets.extra-env-secret") == 2 * len(SLOTS) + 2
     for name, job in wf["jobs"].items():
         for step in job["steps"]:
             has = "AYASEE_EXTRA_SECRET" in (step.get("env") or {})
@@ -570,22 +620,32 @@ def _resolve(wf, tmp_path, config_text, start=""):
 def test_resolve_step_defaults_keep_dev_uat_prod(wf, tmp_path):
     proc, out = _resolve(wf, tmp_path, "")
     assert proc.returncode == 0, proc.stderr
-    assert out["run-dev"] == out["run-uat"] == out["run-prod-plan"] == "true"
-    assert (out["first-stage"], out["pre-prod-stage"]) == ("dev", "uat")
+    assert [out[f"run-{s}"] for s in SLOTS] == ["false", "false", "true", "true"]
+    assert [out[s] for s in SLOTS] == ["", "", "dev", "uat"]
+    assert out["run-prod-plan"] == "true"
     assert out["order"] == "dev,uat,prod" and out["identity"] == "oidc"
 
 
 def test_resolve_step_two_stages_and_secrets_identity(wf, tmp_path):
     proc, out = _resolve(wf, tmp_path, "stages: [staging, prod]\nidentity: secrets\n")
     assert proc.returncode == 0, proc.stderr
-    assert (out["run-dev"], out["run-uat"]) == ("false", "true")
-    assert (out["first-stage"], out["pre-prod-stage"]) == ("", "staging")
+    assert [out[f"run-{s}"] for s in SLOTS] == ["false", "false", "false", "true"]
+    assert [out[s] for s in SLOTS] == ["", "", "", "staging"]
     assert out["order"] == "staging,prod" and out["identity"] == "secrets"
+
+
+def test_resolve_step_five_stages_from_a_middle_stage(wf, tmp_path):
+    """Issue #10: four pre-prod stages fill every slot; start-stage skips the ones before it."""
+    proc, out = _resolve(wf, tmp_path, "stages: [dev, sit, uat, preprod, prod]\n", "uat")
+    assert proc.returncode == 0, proc.stderr
+    assert [out[s] for s in SLOTS] == ["dev", "sit", "uat", "preprod"]
+    assert [out[f"run-{s}"] for s in SLOTS] == ["false", "false", "true", "true"]
+    assert out["run-prod-plan"] == "true" and out["order"] == "dev,sit,uat,preprod,prod"
 
 
 @pytest.mark.parametrize(
     ("text", "start"),
-    [("stages: [a, b, c, prod]\n", ""), ("stages: [prod-plan, prod]\n", ""), ("", "qa")],
+    [("stages: [a, b, c, d, e, prod]\n", ""), ("stages: [prod-plan, prod]\n", ""), ("", "qa")],
 )
 def test_resolve_step_refuses_an_unsupported_layout(wf, tmp_path, text, start):
     proc, out = _resolve(wf, tmp_path, text, start)

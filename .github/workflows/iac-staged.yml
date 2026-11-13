@@ -1,6 +1,7 @@
-# One run per push to main: dev -> uat -> prod-plan -> gated prod. See docs/concepts/staged-run.md.
-# The dev and uat jobs are the two pre-prod slots: they run the stages named in `stages`
-# ([<first>, <pre-prod>, prod], or [<pre-prod>, prod] with the dev slot skipped; issue #1).
+# One run per push to main: pre-prod stages -> prod-plan -> gated prod. See docs/concepts/staged-run.md.
+# The jobs stage-1 .. stage-4 are the pre-prod slots, each after the one before: they run the
+# pre-prod stages named in `stages`, right-aligned (stage-4 runs the stage just before prod) and
+# unused slots skipped (issues #1, #10). A matrix would not do: GitHub does not order matrix jobs.
 #
 # Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
 # rewrites them at release (or to ./actions for in-repo runs). This file is not callable before that.
@@ -78,8 +79,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      run-dev: ${{ steps.resolve.outputs.run-dev }}
-      run-uat: ${{ steps.resolve.outputs.run-uat }}
+      run-stage-1: ${{ steps.resolve.outputs.run-stage-1 }}
+      run-stage-2: ${{ steps.resolve.outputs.run-stage-2 }}
+      run-stage-3: ${{ steps.resolve.outputs.run-stage-3 }}
+      run-stage-4: ${{ steps.resolve.outputs.run-stage-4 }}
       run-prod-plan: ${{ steps.resolve.outputs.run-prod-plan }}
       ledger-url: ${{ steps.resolve.outputs.ledger-url }}
       units-root: ${{ steps.resolve.outputs.units-root }}
@@ -87,8 +90,10 @@ jobs:
       engine: ${{ steps.resolve.outputs.engine }}
       allow-cascade: ${{ steps.resolve.outputs.allow-cascade }}
       order: ${{ steps.resolve.outputs.order }}
-      first-stage: ${{ steps.resolve.outputs.first-stage }}
-      pre-prod-stage: ${{ steps.resolve.outputs.pre-prod-stage }}
+      stage-1: ${{ steps.resolve.outputs.stage-1 }}
+      stage-2: ${{ steps.resolve.outputs.stage-2 }}
+      stage-3: ${{ steps.resolve.outputs.stage-3 }}
+      stage-4: ${{ steps.resolve.outputs.stage-4 }}
       identity: ${{ steps.resolve.outputs.identity }}
       key-provider: ${{ steps.resolve.outputs.key-provider }}
       shared-units: ${{ steps.resolve.outputs.shared-units }}
@@ -153,8 +158,8 @@ jobs:
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
           cfg="$RUNNER_TEMP/ayasee-config.json"
-          # [<first>, <pre-prod>, prod] or [<pre-prod>, prod] onto the dev and uat job slots (issue #1);
-          # prints run-dev, run-uat, first-stage, pre-prod-stage and order
+          # one to four pre-prod stages, then prod, right-aligned onto the job slots stage-1..stage-4
+          # (issues #1, #10); prints run-stage-<i>, stage-<i> and order
           err="$RUNNER_TEMP/ayasee-staged.err"
           if ! layout="$(ayasee config staged --path "$CONFIG_PATH" --start-stage "$START_STAGE" 2>"$err")"; then
             # only the error lines; the NON-COMPLIANT and DEVIATION labels stay plain lines
@@ -197,13 +202,13 @@ jobs:
             echo "features={}" >>"$GITHUB_OUTPUT"
           fi
 
-  dev:
-    # plan, apply and record in one job; no approval needed
-    name: ${{ needs.resolve.outputs.first-stage || 'dev' }}
+  stage-1:
+    # pre-prod slot 1 of 4: plan, apply and record in one job; no approval needed
+    name: ${{ needs.resolve.outputs.stage-1 || 'stage-1' }}
     needs: resolve
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-dev == 'true' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-1 == 'true' }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.first-stage }}
+    environment: ${{ needs.resolve.outputs.stage-1 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -211,7 +216,8 @@ jobs:
       issues: write # stop-the-line issues
       actions: read # approvals and the plan artifact of this run
     concurrency:
-      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.first-stage }}
+      # an unused slot is skipped; its own group keeps it apart from every other job and run
+      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.stage-1 || format('unused-{0}-stage-1', github.run_id) }}
       cancel-in-progress: false
     env:
       # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
@@ -222,7 +228,7 @@ jobs:
       DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
       AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.resolve.outputs.ledger-url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      STAGE: ${{ needs.resolve.outputs.first-stage }} # the stage this job slot runs (issue #1)
+      STAGE: ${{ needs.resolve.outputs.stage-1 }} # the stage this job slot runs (issues #1, #10)
     steps:
       - name: Require a ledger URL
         run: |
@@ -322,13 +328,13 @@ jobs:
           run-url: ${{ env.RUN_URL }}
           teams-webhook: ${{ secrets.teams-webhook }}
 
-  uat:
-    # uat (user acceptance): same shape as dev, after dev
-    name: ${{ needs.resolve.outputs.pre-prod-stage || 'uat' }}
-    needs: [resolve, dev]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-uat == 'true' && (needs.dev.result == 'success' || (needs.resolve.outputs.run-dev == 'false' && needs.dev.result == 'skipped')) }}
+  stage-2:
+    # pre-prod slot 2 of 4: same shape as stage-1, after it
+    name: ${{ needs.resolve.outputs.stage-2 || 'stage-2' }}
+    needs: [resolve, stage-1]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-2 == 'true' && (needs.stage-1.result == 'success' || (needs.resolve.outputs.run-stage-1 == 'false' && needs.stage-1.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.pre-prod-stage }}
+    environment: ${{ needs.resolve.outputs.stage-2 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -336,7 +342,8 @@ jobs:
       issues: write # stop-the-line issues
       actions: read # approvals and the plan artifact of this run
     concurrency:
-      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.pre-prod-stage }}
+      # an unused slot is skipped; its own group keeps it apart from every other job and run
+      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.stage-2 || format('unused-{0}-stage-2', github.run_id) }}
       cancel-in-progress: false
     env:
       # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
@@ -347,7 +354,259 @@ jobs:
       DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
       AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.resolve.outputs.ledger-url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      STAGE: ${{ needs.resolve.outputs.pre-prod-stage }} # the stage this job slot runs (issue #1)
+      STAGE: ${{ needs.resolve.outputs.stage-2 }} # the stage this job slot runs (issues #1, #10)
+    steps:
+      - name: Require a ledger URL
+        run: |
+          [ -n "$AYASEE_LEDGER_URL" ] || {
+            echo "::error::no ledger URL: set AYASEE_LEDGER_URL on the environment or ledger.url in .ayasee.yaml"
+            exit 1
+          }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ needs.resolve.outputs.identity == 'oidc' }}
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - id: guard
+        uses: OWNER/ayasee/actions/guard@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+        with:
+          store: ${{ env.AYASEE_LEDGER_URL }}
+          repo: ${{ github.repository }}
+          stage: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          order: ${{ needs.resolve.outputs.order }}
+      - id: plan
+        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+        with:
+          env: ${{ env.STAGE }}
+          units-root: ${{ needs.resolve.outputs.units-root }}
+          engine: ${{ needs.resolve.outputs.engine }}
+          encrypt: "false"
+          binding-mode: same-job
+      - id: apply
+        uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+        with:
+          env: ${{ env.STAGE }}
+          units-root: ${{ needs.resolve.outputs.units-root }}
+          engine: ${{ needs.resolve.outputs.engine }}
+          encrypt: "false"
+          binding-mode: same-job
+      - id: units
+        name: Locate the units record
+        if: ${{ !cancelled() }}
+        run: |
+          f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
+          if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
+      - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
+        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+        with:
+          store: ${{ env.AYASEE_LEDGER_URL }}
+          repo: ${{ github.repository }}
+          env: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          run-id: ${{ github.run_id }}
+          run-attempt: ${{ github.run_attempt }}
+          units-json: ${{ steps.units.outputs.units-json }}
+          mirror-deployments: "true"
+      - name: Open the stop-the-line issue
+        if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: ayasee issue stop-the-line --repo "$REPO" --env "$STAGE" --sha "$SHA" --run-url "$RUN_URL"
+      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+        if: ${{ failure() && steps.guard.outcome != 'failure' }}
+        with:
+          event: stage_failed
+          repo: ${{ github.repository }}
+          env: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          run-url: ${{ env.RUN_URL }}
+          teams-webhook: ${{ secrets.teams-webhook }}
+
+  stage-3:
+    # pre-prod slot 3 of 4: same shape as stage-2, after it
+    name: ${{ needs.resolve.outputs.stage-3 || 'stage-3' }}
+    needs: [resolve, stage-2]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-3 == 'true' && (needs.stage-2.result == 'success' || (needs.resolve.outputs.run-stage-2 == 'false' && needs.stage-2.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.stage-3 }}
+    permissions:
+      id-token: write # OIDC login to Azure and Databricks
+      contents: read # check out the code
+      deployments: write # mirror the ledger as a GitHub deployment
+      issues: write # stop-the-line issues
+      actions: read # approvals and the plan artifact of this run
+    concurrency:
+      # an unused slot is skipped; its own group keeps it apart from every other job and run
+      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.stage-3 || format('unused-{0}-stage-3', github.run_id) }}
+      cancel-in-progress: false
+    env:
+      # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+      ARM_USE_OIDC: ${{ needs.resolve.outputs.identity == 'oidc' && 'true' || '' }}
+      ARM_CLIENT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+      ARM_TENANT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+      ARM_SUBSCRIPTION_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+      DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
+      AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.resolve.outputs.ledger-url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      STAGE: ${{ needs.resolve.outputs.stage-3 }} # the stage this job slot runs (issues #1, #10)
+    steps:
+      - name: Require a ledger URL
+        run: |
+          [ -n "$AYASEE_LEDGER_URL" ] || {
+            echo "::error::no ledger URL: set AYASEE_LEDGER_URL on the environment or ledger.url in .ayasee.yaml"
+            exit 1
+          }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ needs.resolve.outputs.identity == 'oidc' }}
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - id: guard
+        uses: OWNER/ayasee/actions/guard@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+        with:
+          store: ${{ env.AYASEE_LEDGER_URL }}
+          repo: ${{ github.repository }}
+          stage: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          order: ${{ needs.resolve.outputs.order }}
+      - id: plan
+        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+        with:
+          env: ${{ env.STAGE }}
+          units-root: ${{ needs.resolve.outputs.units-root }}
+          engine: ${{ needs.resolve.outputs.engine }}
+          encrypt: "false"
+          binding-mode: same-job
+      - id: apply
+        uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+        with:
+          env: ${{ env.STAGE }}
+          units-root: ${{ needs.resolve.outputs.units-root }}
+          engine: ${{ needs.resolve.outputs.engine }}
+          encrypt: "false"
+          binding-mode: same-job
+      - id: units
+        name: Locate the units record
+        if: ${{ !cancelled() }}
+        run: |
+          f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
+          if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
+      - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
+        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+        with:
+          store: ${{ env.AYASEE_LEDGER_URL }}
+          repo: ${{ github.repository }}
+          env: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          run-id: ${{ github.run_id }}
+          run-attempt: ${{ github.run_attempt }}
+          units-json: ${{ steps.units.outputs.units-json }}
+          mirror-deployments: "true"
+      - name: Open the stop-the-line issue
+        if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: ayasee issue stop-the-line --repo "$REPO" --env "$STAGE" --sha "$SHA" --run-url "$RUN_URL"
+      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+        if: ${{ failure() && steps.guard.outcome != 'failure' }}
+        with:
+          event: stage_failed
+          repo: ${{ github.repository }}
+          env: ${{ env.STAGE }}
+          sha: ${{ github.sha }}
+          run-url: ${{ env.RUN_URL }}
+          teams-webhook: ${{ secrets.teams-webhook }}
+
+  stage-4:
+    # pre-prod slot 4 of 4: same shape as stage-3, after it
+    name: ${{ needs.resolve.outputs.stage-4 || 'stage-4' }}
+    needs: [resolve, stage-3]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-4 == 'true' && (needs.stage-3.result == 'success' || (needs.resolve.outputs.run-stage-3 == 'false' && needs.stage-3.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.stage-4 }}
+    permissions:
+      id-token: write # OIDC login to Azure and Databricks
+      contents: read # check out the code
+      deployments: write # mirror the ledger as a GitHub deployment
+      issues: write # stop-the-line issues
+      actions: read # approvals and the plan artifact of this run
+    concurrency:
+      # an unused slot is skipped; its own group keeps it apart from every other job and run
+      group: ayasee-${{ github.repository }}-${{ needs.resolve.outputs.stage-4 || format('unused-{0}-stage-4', github.run_id) }}
+      cancel-in-progress: false
+    env:
+      # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+      ARM_USE_OIDC: ${{ needs.resolve.outputs.identity == 'oidc' && 'true' || '' }}
+      ARM_CLIENT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+      ARM_TENANT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+      ARM_SUBSCRIPTION_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+      DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
+      AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.resolve.outputs.ledger-url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      STAGE: ${{ needs.resolve.outputs.stage-4 }} # the stage this job slot runs (issues #1, #10)
     steps:
       - name: Require a ledger URL
         run: |
@@ -455,8 +714,8 @@ jobs:
       critical: ${{ steps.summary.outputs.critical }}
       high: ${{ steps.summary.outputs.high }}
       units: ${{ steps.summary.outputs.units }}
-    needs: [resolve, dev, uat]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-prod-plan == 'true' && (needs.dev.result == 'success' || (needs.resolve.outputs.run-dev == 'false' && needs.dev.result == 'skipped')) && (needs.uat.result == 'success' || (needs.resolve.outputs.run-uat == 'false' && needs.uat.result == 'skipped')) }}
+    needs: [resolve, stage-1, stage-2, stage-3, stage-4]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-prod-plan == 'true' && (needs.stage-1.result == 'success' || (needs.resolve.outputs.run-stage-1 == 'false' && needs.stage-1.result == 'skipped')) && (needs.stage-2.result == 'success' || (needs.resolve.outputs.run-stage-2 == 'false' && needs.stage-2.result == 'skipped')) && (needs.stage-3.result == 'success' || (needs.resolve.outputs.run-stage-3 == 'false' && needs.stage-3.result == 'skipped')) && (needs.stage-4.result == 'success' || (needs.resolve.outputs.run-stage-4 == 'false' && needs.stage-4.result == 'skipped')) }}
     runs-on: ubuntu-latest
     environment: prod-plan
     permissions:

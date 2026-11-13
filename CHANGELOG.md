@@ -41,6 +41,7 @@ released version into the GitHub release notes.
   migration guide, how a repository whose applications use `develop` routes its IaC pull requests
   to `main`. The monorepo notes now also say why the `iac-staged` caller takes no `paths:` filter:
   with the superseded-commit refusal (R70) it can leave an IaC commit unpromoted.
+- `iac-staged` runs up to four pre-prod stages (#10), for example `[dev, sit, uat, preprod, prod]`.
 
 ### Changed
 
@@ -48,6 +49,13 @@ released version into the GitHub release notes.
   value looks written relative to `iac_root` (`stages`, or no `units_root`, next to
   `iac_root: infra/iac`), the error now says that `units_root` is relative to the repository root
   and, if that was the intent, which path to write (#11).
+- The pre-prod jobs of `iac-staged` are four fixed slots, `stage-1` to `stage-4`, instead of `dev`
+  and `uat` (#10). Each needs the one before it; the pre-prod stages fill them right-aligned, so
+  `stage-4` always runs the stage just before prod and unused slots are skipped like slots before
+  `start-stage`. Display names, environments and ledger records still use the stage names. The
+  `resolve` outputs and `ayasee config staged` print `run-stage-<i>` and `stage-<i>` instead of
+  `run-dev`, `run-uat`, `first-stage` and `pre-prod-stage`. A matrix was not used because GitHub
+  does not order matrix jobs; see [the staged run](docs/concepts/staged-run.md#stages).
 
 ### Fixed
 

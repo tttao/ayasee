@@ -224,19 +224,25 @@ def load_config(path: Path = DEFAULT_PATH) -> Config:
     return cfg
 
 
-def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
-    """Map ``stages`` onto the fixed jobs of ``iac-staged`` (issue #1), or raise ConfigError.
+# Pre-prod job slots of iac-staged: jobs stage-1 .. stage-4 (issue #10).
+PRE_PROD_SLOTS = 4
 
-    ``iac-staged`` has two pre-prod job slots, ``dev`` and ``uat``. Three stages ``[a, b, prod]``
-    use both; two stages ``[b, prod]`` use only the ``uat`` slot, so the job just before
-    ``prod-plan`` always runs the stage just before prod and the guard of ``prod-plan`` chains from
-    it. ``start_stage`` is empty (the first stage), a pre-prod stage name, or ``prod-plan``.
+
+def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
+    """Map ``stages`` onto the fixed jobs of ``iac-staged`` (issues #1, #10), or raise ConfigError.
+
+    ``iac-staged`` has :data:`PRE_PROD_SLOTS` pre-prod job slots, ``stage-1`` to ``stage-4``, each
+    needing the one before it. The pre-prod stages fill the slots right-aligned: the last slot
+    always runs the stage just before prod, and unused slots come first. ``start_stage`` (empty
+    for the first stage, a pre-prod stage name, or ``prod-plan``) skips the slots before it, so
+    the skipped slots are always a prefix and every slot after the first running one runs. The
+    guard of each job chains from the stage before it in ``order``, whatever slot that is.
     The returned mapping is written to ``$GITHUB_OUTPUT`` as ``key=value`` lines.
     """
-    if len(stages) not in (2, 3):
+    if not 2 <= len(stages) <= PRE_PROD_SLOTS + 1:
         raise ConfigError(
-            f"stages: iac-staged runs two or three stages ([<pre-prod>, prod] or "
-            f"[<first>, <pre-prod>, prod]), got {len(stages)}"
+            f"stages: iac-staged runs 2 to {PRE_PROD_SLOTS + 1} stages (one to "
+            f"{PRE_PROD_SLOTS} pre-prod stages, then prod), got {len(stages)}"
         )
     if stages[-1] != "prod":
         raise ConfigError("stages: iac-staged needs prod as the last stage")
@@ -246,22 +252,20 @@ def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
             raise ConfigError(f"stages: invalid stage name {name!r} (use [a-z0-9][a-z0-9_-]*)")
         if name in RESERVED_ENVIRONMENTS or name.startswith("drift-") or name == "prod":
             raise ConfigError(f"stages: {name!r} is a reserved environment name")
-    first = pre[0] if len(pre) == 2 else ""
-    preprod = pre[-1]
     start = start_stage or pre[0]
     if start not in (*pre, "prod-plan"):
         raise ConfigError(
             f"start-stage must be empty, one of {', '.join(pre)} or prod-plan; got {start!r}"
         )
-    run_dev = bool(first) and start == first
-    run_uat = start != "prod-plan"
-    return {
-        "run-dev": "true" if run_dev else "false",
-        "run-uat": "true" if run_uat else "false",
-        "first-stage": first,
-        "pre-prod-stage": preprod,
-        "order": ",".join(stages),
+    slots = [""] * (PRE_PROD_SLOTS - len(pre)) + pre
+    first_run = len(slots) if start == "prod-plan" else slots.index(start)
+    out = {
+        f"run-stage-{i}": "true" if i - 1 >= first_run else "false"
+        for i in range(1, PRE_PROD_SLOTS + 1)
     }
+    out.update({f"stage-{i}": name for i, name in enumerate(slots, 1)})
+    out["order"] = ",".join(stages)
+    return out
 
 
 def label_keys(cfg: Config) -> list[dict[str, str]]:

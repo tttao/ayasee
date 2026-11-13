@@ -220,26 +220,31 @@ def test_cli_show_has_identity(tmp_path, monkeypatch, capsys):
 # ---- iac-staged stage layout (issue #1) -------------------------------------------------
 
 
-def _layout(run_dev, run_uat, first, pre):
-    return {
-        "run-dev": run_dev,
-        "run-uat": run_uat,
-        "first-stage": first,
-        "pre-prod-stage": pre,
-    }
+def _layout(runs, names):
+    """Expected outputs: ``runs`` and ``names`` list the four pre-prod slots, stage-1 first."""
+    out = {f"run-stage-{i}": "true" if r else "false" for i, r in enumerate(runs, 1)}
+    out.update({f"stage-{i}": n for i, n in enumerate(names, 1)})
+    return out
 
 
 @pytest.mark.parametrize(
     ("stages", "start", "expected"),
     [
-        (["dev", "uat", "prod"], "", _layout("true", "true", "dev", "uat")),
-        (["dev", "uat", "prod"], "dev", _layout("true", "true", "dev", "uat")),
-        (["dev", "uat", "prod"], "uat", _layout("false", "true", "dev", "uat")),
-        (["dev", "uat", "prod"], "prod-plan", _layout("false", "false", "dev", "uat")),
-        (["staging", "prod"], "", _layout("false", "true", "", "staging")),
-        (["staging", "prod"], "staging", _layout("false", "true", "", "staging")),
-        (["staging", "prod"], "prod-plan", _layout("false", "false", "", "staging")),
-        (["test", "pre_prod", "prod"], "", _layout("true", "true", "test", "pre_prod")),
+        (["dev", "uat", "prod"], "", _layout([0, 0, 1, 1], ["", "", "dev", "uat"])),
+        (["dev", "uat", "prod"], "dev", _layout([0, 0, 1, 1], ["", "", "dev", "uat"])),
+        (["dev", "uat", "prod"], "uat", _layout([0, 0, 0, 1], ["", "", "dev", "uat"])),
+        (["dev", "uat", "prod"], "prod-plan", _layout([0, 0, 0, 0], ["", "", "dev", "uat"])),
+        (["staging", "prod"], "", _layout([0, 0, 0, 1], ["", "", "", "staging"])),
+        (["staging", "prod"], "staging", _layout([0, 0, 0, 1], ["", "", "", "staging"])),
+        (["staging", "prod"], "prod-plan", _layout([0, 0, 0, 0], ["", "", "", "staging"])),
+        (["test", "pre_prod", "prod"], "", _layout([0, 0, 1, 1], ["", "", "test", "pre_prod"])),
+        (["a", "b", "c", "prod"], "", _layout([0, 1, 1, 1], ["", "a", "b", "c"])),
+        (["a", "b", "c", "prod"], "b", _layout([0, 0, 1, 1], ["", "a", "b", "c"])),
+        (["a", "b", "c", "d", "prod"], "", _layout([1, 1, 1, 1], ["a", "b", "c", "d"])),
+        (["a", "b", "c", "d", "prod"], "a", _layout([1, 1, 1, 1], ["a", "b", "c", "d"])),
+        (["a", "b", "c", "d", "prod"], "c", _layout([0, 0, 1, 1], ["a", "b", "c", "d"])),
+        (["a", "b", "c", "d", "prod"], "d", _layout([0, 0, 0, 1], ["a", "b", "c", "d"])),
+        (["a", "b", "c", "d", "prod"], "prod-plan", _layout([0, 0, 0, 0], ["a", "b", "c", "d"])),
     ],
 )
 def test_staged_layout(stages, start, expected):
@@ -247,11 +252,30 @@ def test_staged_layout(stages, start, expected):
     assert out == {**expected, "order": ",".join(stages)}
 
 
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+def test_staged_layout_slots_are_right_aligned_and_skips_are_a_prefix(n):
+    """The last slot always runs the stage just before prod; skipped slots precede running ones.
+
+    The workflow's skip rule (a skipped slot passes only when ``run-stage-<i>`` is false) relies
+    on this: a slot that runs never follows one that was skipped because it failed upstream.
+    """
+    pre = [f"s{i}" for i in range(n)]
+    for start in ["", *pre, "prod-plan"]:
+        out = config.staged_layout([*pre, "prod"], start)
+        names = [out[f"stage-{i}"] for i in range(1, config.PRE_PROD_SLOTS + 1)]
+        runs = [out[f"run-stage-{i}"] == "true" for i in range(1, config.PRE_PROD_SLOTS + 1)]
+        assert names == [""] * (config.PRE_PROD_SLOTS - n) + pre
+        assert runs == sorted(runs), (start, runs)  # false..false, true..true
+        assert all(names[i] for i, r in enumerate(runs) if r)  # a running slot has a stage
+        first = names.index(start or pre[0]) if start != "prod-plan" else len(names)
+        assert runs == [i >= first for i in range(len(names))]
+
+
 @pytest.mark.parametrize(
     ("stages", "start", "match"),
     [
-        (["prod"], "", "two or three stages"),
-        (["a", "b", "c", "prod"], "", "two or three stages"),
+        (["prod"], "", "2 to 5 stages"),
+        (["a", "b", "c", "d", "e", "prod"], "", "2 to 5 stages"),
         (["dev", "prod", "uat"], "", "last"),
         (["prod-plan", "prod"], "", "reserved"),
         (["prod-breakglass", "prod"], "", "reserved"),
@@ -263,9 +287,13 @@ def test_staged_layout(stages, start, expected):
         (["dev", "uat", "prod"], "prod", "start-stage"),
         (["dev", "uat", "prod"], "staging", "start-stage"),
         (["staging", "prod"], "dev", "start-stage"),
+        (["a", "b", "c", "d", "prod"], "", None),
     ],
 )
 def test_staged_layout_refuses(stages, start, match):
+    if match is None:  # the longest supported list, as a boundary check
+        config.staged_layout(stages, start)
+        return
     with pytest.raises(ConfigError, match=match):
         config.staged_layout(stages, start)
 
@@ -274,19 +302,23 @@ def test_cli_staged_prints_github_outputs(tmp_path, monkeypatch, capsys):
     p = write(tmp_path, "stages: [staging, prod]\n")
     assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 0
     assert capsys.readouterr().out.splitlines() == [
-        "run-dev=false",
-        "run-uat=true",
-        "first-stage=",
-        "pre-prod-stage=staging",
+        "run-stage-1=false",
+        "run-stage-2=false",
+        "run-stage-3=false",
+        "run-stage-4=true",
+        "stage-1=",
+        "stage-2=",
+        "stage-3=",
+        "stage-4=staging",
         "order=staging,prod",
     ]
 
 
 def test_cli_staged_refuses_with_exit_1_and_no_output(tmp_path, monkeypatch, capsys):
-    p = write(tmp_path, "stages: [a, b, c, prod]\n")
+    p = write(tmp_path, "stages: [a, b, c, d, e, prod]\n")
     assert _cli(monkeypatch, "staged", "--path", str(p), "--start-stage", "") == 1
     cap = capsys.readouterr()
-    assert cap.out == "" and "two or three stages" in cap.err
+    assert cap.out == "" and "2 to 5 stages" in cap.err
 
 
 # ---- plan_encryption.key_provider (issue #1) --------------------------------------------

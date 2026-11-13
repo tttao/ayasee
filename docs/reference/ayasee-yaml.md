@@ -20,7 +20,7 @@ ayasee config check-shared [--path FILE]
 summary.
 
 `staged` prints how `iac-staged` maps `stages` onto its jobs, as `key=value` lines for
-`$GITHUB_OUTPUT` (`run-dev`, `run-uat`, `first-stage`, `pre-prod-stage`, `order`), or exits 1 with
+`$GITHUB_OUTPUT` (`run-stage-1` to `run-stage-4`, `stage-1` to `stage-4`, `order`), or exits 1 with
 a configuration error for a stage list or `start-stage` that `iac-staged` cannot run.
 
 `check-supported` exits 1 and prints one line per setting that the parser accepts but no workflow
@@ -38,7 +38,7 @@ Run it from the repository root.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `stages` | list of strings | `[dev, uat, prod]` | Promotion order. Names must be unique, the list must be non-empty and it must contain `prod`. `iac-staged` accepts two or three stages with `prod` last, `[<pre-prod>, prod]` or `[<first>, <pre-prod>, prod]`, and fails the run on any other list (`ayasee config staged`; pre-prod names match `[a-z0-9][a-z0-9_-]*` and are not `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`); see [the staged run](../concepts/staged-run.md#stages). `iac-pr` plans the first stage, `iac-nightly` drifts every listed stage and the cockpit reads its own `stages` from `repos.yaml`. |
+| `stages` | list of strings | `[dev, uat, prod]` | Promotion order. Names must be unique, the list must be non-empty and it must contain `prod`. `iac-staged` accepts two to five stages with `prod` last (one to four pre-prod stages, then `prod`), and fails the run on any other list (`ayasee config staged`; pre-prod names match `[a-z0-9][a-z0-9_-]*` and are not `prod-plan`, `prod-breakglass`, `dev-plan` or `drift-*`); see [the staged run](../concepts/staged-run.md#stages). `iac-pr` plans the first stage, `iac-nightly` drifts every listed stage and the cockpit reads its own `stages` from `repos.yaml`. |
 | `engine` | `opentofu` or `terraform` | `opentofu` | IaC engine. `opentofu` binds prod to the exact approved encrypted plan (D1). `terraform` selects the replan fallback, which compares `(address, actions)` plus a hash of non-sensitive `after` values (D1b), in the actions and the CLI. **Not supported by the workflows yet**: every reusable workflow refuses it in its first job with "engine: not supported yet" (R73). See [plan binding](../concepts/plan-binding.md#the-replan-fallback). |
 | `terragrunt` | boolean | `true` | Units are always discovered and driven through Terragrunt. `false` (plain OpenTofu layouts) is **not supported yet**: the workflows refuse it with "terragrunt: not supported yet" (R73). |
 | `iac_root` | string | `.` | Directory, relative to the repository root, that holds the estate: `root.hcl`, the modules and `units_root`. Set it in a monorepo where the IaC sits beside application code (for example `infra/iac`). The PR and nightly format checks, the Terragrunt validation, Trivy and Checkov are scoped to it, and `changed-units` ignores files outside it (except the configuration file), so an application-only pull request plans nothing. Checkov's `github_actions` framework runs only when `iac_root` is `.`. It must be relative and stay inside the repository. See [monorepos](../concepts/pr-checks.md#monorepos). |
