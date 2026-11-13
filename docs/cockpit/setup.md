@@ -58,7 +58,7 @@ A snapshot is committed only when it changed apart from `generated_at`; an uncha
 
 A YAML list of `{repo, ledger, stages?, workflows?, config?}`. `config` (default `.ayasee.yaml`) is the repository's ayasee configuration, read at `main` for the cockpit's [labels](../concepts/cockpit.md#the-snapshot-contract-v1).
 
-**`cockpit-collect` reads only `github-branch://` ledgers.** It reads each ledger through the read token (the contents API), and it has no cloud login. A repository whose ayasee ledger is a `git-branch://` store is listed with the matching `github-branch://owner/repo?branch=<branch>` URL. A ledger in Azure Blob storage (`azure-blob://`) or in S3 (`s3://`), or any other store URL, is refused by `ayasee cockpit repos` and the run fails before any token is minted. Keep the ledger of a repository on a branch if it should appear in the cockpit.
+**`cockpit-collect` reads `github-branch://` and `s3://` ledgers.** It reads a `github-branch://` ledger through the read token (the contents API). A repository whose ayasee ledger is a `git-branch://` store is listed with the matching `github-branch://owner/repo?branch=<branch>` URL. An `s3://` ledger (experimental) is read with the cockpit's own read-only key, see [s3 ledgers](#s3-ledgers). A ledger in Azure Blob storage (`azure-blob://`), or any other store URL, is refused by `ayasee cockpit repos` and the run fails before any token is minted. The collector never writes a ledger, whatever the store: it only ever holds a read-only view of it.
 
 ```yaml
 - repo: acme/payments
@@ -67,9 +67,45 @@ A YAML list of `{repo, ledger, stages?, workflows?, config?}`. `config` (default
   ledger: github-branch://acme/platform?branch=ayasee-ledger
   stages: [dev, uat, prod]
   workflows: [.github/workflows/main.yml]   # callers of iac-staged; their waiting runs count as gates
+- repo: acme/edge
+  ledger: s3://acme-ledger?region=auto&endpoint=https://<account>.r2.cloudflarestorage.com
 ```
 
 The format, defaults and error handling are described in the docstring of `src/ayasee/cockpit/collect.py`.
+
+### s3 ledgers
+
+**Experimental**, like [the s3 store](../concepts/ledger.md#the-s3-store) itself: tested against an in-process fake S3 only, not yet against a real S3 or R2 bucket.
+
+- **The URL** is the one the repository uses (`s3://<bucket>?region=<region>&prefix=<prefix>&endpoint=https://<host>`), with `region` always in the URL: the workflow sets no `AWS_REGION`, and `ayasee cockpit repos` refuses an `s3://` ledger without it, or one that the store would refuse, before any token is minted. An `s3://` ledger adds no repository to the read token.
+- **The key** is the cockpit's own, read-only, held as two optional secrets of the wrapper repository and passed by name: `AYASEE_COCKPIT_AWS_ACCESS_KEY_ID` and `AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY`. Only the "Collect the snapshot" step receives them, as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; no step that holds the write or issue token does. One pair serves every `s3://` ledger of the estate, so ledgers in several accounts need one key that can read all of them. Never reuse a ledger writer's key here: give it only
+
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      { "Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::<bucket>/<prefix>/*" },
+      {
+        "Effect": "Allow",
+        "Action": "s3:ListBucket",
+        "Resource": "arn:aws:s3:::<bucket>",
+        "Condition": { "StringLike": { "s3:prefix": "<prefix>/*" } }
+      }
+    ]
+  }
+  ```
+
+  (on Cloudflare R2, an API token with "Object Read only" on the ledger bucket).
+- **The endpoint** comes from `repos.yaml`, which lives in the data repository: whoever can change that file chooses where the cockpit's signed read requests go. Restrict who may push to the data repository accordingly; the key it exposes can only read the ledgers.
+- **Errors**: a missing key, a refused request or an unreachable store marks that repository with an error naming the variable, or the HTTP status and S3 error code, never a response body or a credential. Each environment costs one listing and up to two GETs, and no GitHub API request.
+
+```yaml
+    secrets:
+      app-id: ${{ secrets.COCKPIT_APP_ID }}
+      app-private-key: ${{ secrets.COCKPIT_APP_PRIVATE_KEY }}
+      AYASEE_COCKPIT_AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_COCKPIT_AWS_ACCESS_KEY_ID }}       # s3:// ledgers only
+      AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY }}
+```
 
 ## 3. The wrapper workflow
 
@@ -129,4 +165,4 @@ The snapshot reveals the estate shape (repositories, environments, commit addres
 
 ## 5. Rate-limit cost
 
-Per repository and run, about `6 + 7 x environments` API requests (default three environments: about 27). A hundred repositories is about 2,700 requests per run, 130,000 per day at the 30-minute cadence, spread over the App installation's budget (it scales with the installation size, starting at 5,000 per hour; GHES and enterprise limits differ). The collector sends conditional requests (ETags) and the workflow keeps the cache file `.ayasee/etag-cache.json` in `actions/cache` between runs, so unchanged responses come back 304 and do not count against the primary limit. The cache holds API JSON only (never credentials), at most 2,000 entries and about 20 MB. A repository that fails to collect is still listed with an error; the job fails only when every repository failed, and then nothing is committed.
+Per repository and run, about `6 + 7 x environments` API requests (`6 + 4 x environments` with an `s3://` ledger, whose reads go to the store) (default three environments: about 27). A hundred repositories is about 2,700 requests per run, 130,000 per day at the 30-minute cadence, spread over the App installation's budget (it scales with the installation size, starting at 5,000 per hour; GHES and enterprise limits differ). The collector sends conditional requests (ETags) and the workflow keeps the cache file `.ayasee/etag-cache.json` in `actions/cache` between runs, so unchanged responses come back 304 and do not count against the primary limit. The cache holds API JSON only (never credentials), at most 2,000 entries and about 20 MB. A repository that fails to collect is still listed with an error; the job fails only when every repository failed, and then nothing is committed.

@@ -42,6 +42,18 @@ on:
       ledger-token:
         description: Optional fine-grained token (contents read on the repository) for a git-branch:// ledger store.
         required: false
+      AYASEE_LEDGER_AWS_ACCESS_KEY_ID:
+        description: >-
+          Only for an s3:// ledger (experimental). Access key id of a key dedicated to the
+          ledger, never the state key: s3:GetObject on the ledger prefix and s3:ListBucket on it (reads only), nothing else. Pass it by name and create
+          it as an environment secret of each drift-<stage> environment, never at repository or organisation level.
+          Only the guard and ledger steps receive it, as AWS_ACCESS_KEY_ID.
+        required: false
+      AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY:
+        description: >-
+          Only for an s3:// ledger. The secret access key that goes with
+          AYASEE_LEDGER_AWS_ACCESS_KEY_ID; same rules.
+        required: false
       CLOUDFLARE_API_TOKEN:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
@@ -210,6 +222,8 @@ jobs:
           GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
           GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
           GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
           REPO: ${{ github.repository }}
         run: |
           ayasee ledger show --store "$AYASEE_LEDGER_URL" --repo "$REPO" --env "$DRIFT_ENV" \

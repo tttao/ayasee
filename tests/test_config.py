@@ -607,3 +607,53 @@ def test_provider_env_declares_names_for_the_secrets_identity(tmp_path):
 def test_provider_env_refusals(tmp_path, text, message):
     with pytest.raises(ConfigError, match=message):
         load_config(write(tmp_path, text))
+
+
+# ---- issue #10: an s3:// ledger endpoint never comes from the file ----
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "s3://bkt?region=auto&endpoint=https://acct.r2.cloudflarestorage.com",
+        "S3://bkt?endpoint=https://evil.example&region=auto",
+        "s3://bkt?region=auto&%65ndpoint=https://evil.example",  # percent-encoded key
+        "s3://bkt?region=auto&endpoint=",  # even an empty one
+        "s3://bkt?region=auto&endpoint=https://a.example&endpoint=https://b.example",
+    ],
+)
+def test_ledger_url_with_s3_endpoint_is_refused(tmp_path, url):
+    """The file is code a pull request can change; an endpoint chosen there would receive the
+    signed ledger requests of the job. It must come from AYASEE_LEDGER_URL (the variable)."""
+    with pytest.raises(ConfigError, match="AYASEE_LEDGER_URL") as exc:
+        load_config(write(tmp_path, f'ledger: {{url: "{url}"}}\n'))
+    assert "evil" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "s3://bkt?region=eu-west-1&prefix=p",
+        "git-branch:///repo?branch=ayasee-ledger&remote=origin",
+        "file:///tmp/l?endpoint=https://x.example",  # only s3 sends signed requests
+    ],
+)
+def test_ledger_url_without_s3_endpoint_is_accepted(tmp_path, url):
+    assert load_config(write(tmp_path, f'ledger: {{url: "{url}"}}\n')).ledger.url == url
+
+
+def test_endpoint_refusal_covers_every_url_open_store_reads_an_endpoint_from(monkeypatch):
+    """The config check and open_store parse the URL the same way: whatever open_store would
+    send to an endpoint, the config check refuses."""
+    from ayasee.ledger import names_s3_endpoint, open_store
+
+    monkeypatch.setenv("AWS_REGION", "auto")
+    for url in (
+        "s3://bkt?endpoint=https://h.example",
+        "S3://bkt?endpoint=https://h.example",
+        "s3://bkt?%65ndpoint=https://h.example",
+        " s3://bkt?endpoint=https://h.example",
+    ):
+        store = open_store(url)
+        assert store.client.base == "https://h.example"
+        assert names_s3_endpoint(url)

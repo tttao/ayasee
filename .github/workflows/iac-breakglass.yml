@@ -60,6 +60,18 @@ on:
       ledger-token:
         description: Optional fine-grained token (contents write on the repository) for a git-branch:// ledger store.
         required: false
+      AYASEE_LEDGER_AWS_ACCESS_KEY_ID:
+        description: >-
+          Only for an s3:// ledger (experimental). Access key id of a key dedicated to the
+          ledger, never the state key: s3:GetObject and s3:PutObject on the ledger prefix and s3:ListBucket on it, nothing else. Pass it by name and create
+          it as an environment secret of prod-breakglass, never at repository or organisation level.
+          Only the guard and ledger steps receive it, as AWS_ACCESS_KEY_ID.
+        required: false
+      AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY:
+        description: >-
+          Only for an s3:// ledger. The secret access key that goes with
+          AYASEE_LEDGER_AWS_ACCESS_KEY_ID; same rules.
+        required: false
       AYASEE_PLAN_PASSPHRASE:
         description: >-
           Only for plan_encryption.key_provider pbkdf2. Pass it by name
@@ -283,6 +295,8 @@ jobs:
           GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
           GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
           GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
           REPO: ${{ github.repository }}
           SHA: ${{ needs.validate.outputs.sha }}
           ALLOW_ROLLBACK: ${{ needs.validate.outputs.allow-rollback }}
@@ -407,6 +421,8 @@ jobs:
           GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
           GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
           GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
         with:
           store: ${{ env.AYASEE_LEDGER_URL }}
           repo: ${{ github.repository }}

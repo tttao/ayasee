@@ -720,6 +720,17 @@ def open_store(url: str, gh: GitHub | None = None) -> LedgerStore:
     )
 
 
+def names_s3_endpoint(url: str) -> bool:
+    """True when ``url`` is an ``s3://`` URL with an ``endpoint`` parameter (even an empty one).
+
+    Parsed exactly as :func:`open_store` parses it, so whatever open_store would send signed
+    requests to is caught. The configuration file refuses such a URL (issue #10): an endpoint
+    must come from the ``AYASEE_LEDGER_URL`` variable, never from code a pull request can change.
+    """
+    u = urlparse(url)
+    return u.scheme == "s3" and "endpoint" in parse_qs(u.query, keep_blank_values=True)
+
+
 def _open_s3(bucket: str, path: str, q: dict[str, str]) -> S3Store:
     if not bucket or path.strip("/"):
         raise LedgerError(

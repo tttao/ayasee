@@ -66,10 +66,23 @@ released version into the GitHub release notes.
   S3-compatible stores. A small SigV4 client in `src/ayasee/s3.py` (standard
   library and `httpx`, no new dependency) reads credentials from `AWS_*` environment variables.
   The history entry is written with `If-None-Match: *` and `current.json` with `If-Match` on the
-  ETag it read, retried up to 5 times on a lost race. Not yet wired into the reusable workflows
-  (the guard and ledger steps get no AWS credentials) and not readable by the cockpit. Listing
+  ETag it read, retried up to 5 times on a lost race. Listing
   responses with a DTD are refused in any encoding, response bodies are capped on their
   decompressed size, and the endpoint host is normalised the way it is sent.
+- The `s3://` ledger store in the reusable workflows and the cockpit (#10, item 1; still
+  experimental, not yet run against a real S3 or R2 bucket). A dedicated ledger key, never the
+  state key: the new optional secrets `AYASEE_LEDGER_AWS_ACCESS_KEY_ID` and
+  `AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY` of `iac-staged`, `iac-nightly` and `iac-breakglass` reach
+  only the steps that read or write the ledger (guard, ledger, and the `ledger show` steps of the
+  drift and break-glass runs), as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. No session
+  token. `cockpit-collect` gets its own read-only pair, `AYASEE_COCKPIT_AWS_ACCESS_KEY_ID` and
+  `AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY`, for its collect step only; `repos.yaml` accepts `s3://`
+  ledgers (the region must be in the URL), and the collector reads every ledger through a
+  read-only view that cannot write. The snapshot schema is unchanged. `ledger.url` in
+  `.ayasee.yaml` refuses an `s3://` URL with `endpoint=` (even empty): the file is code a pull
+  request can change and the endpoint would receive signed requests, so such a URL belongs in the
+  `AYASEE_LEDGER_URL` variable. The IAM policies are in
+  docs/concepts/ledger.md and docs/cockpit/setup.md.
 - `plan_encryption.key_provider: aws_kms` (#10): the prod plan key is wrapped by the AWS KMS key
   whose ARN is in the `AYASEE_KMS_KEY_ID` variable (new `kms-key-id` input of the plan and apply
   actions; the region comes from the ARN), with the encryption context `ayasee = plan`. KMS is

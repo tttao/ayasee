@@ -356,8 +356,8 @@ remote_state {
 The workflows write it through the runner's checkout, so its URL holds the checkout path and goes in
 the `AYASEE_LEDGER_URL` variable of each environment, and the push needs the `ledger-token` secret
 (a fine-grained token with Contents read and write on the repository). The cockpit reads the same
-branch with `github-branch://`, which is read-only. An experimental `s3://` ledger store exists, but only from the CLI: it is not
-wired into the reusable workflows, so use `git-branch://` in CI (see
+branch with `github-branch://`, which is read-only. An experimental `s3://` ledger store also exists, with a key of
+its own for the guard and ledger steps; it has not run against a real bucket yet (see
 [the s3 store](../concepts/ledger.md#the-s3-store)).
 
 All of this, worked out for a Cloudflare and S3 estate with a tunnel shared by two stages, is the

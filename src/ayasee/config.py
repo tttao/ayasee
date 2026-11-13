@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ayasee import cli
+from ayasee.ledger import names_s3_endpoint
 from ayasee.providerenv import refusal as provider_env_refusal
 
 DEFAULT_PATH = Path(".ayasee.yaml")
@@ -176,6 +177,13 @@ def _parse(raw: Any) -> Config:
         section = _mapping(top["ledger"], "ledger", {"url"})
         if section.get("url") is not None:
             cfg.ledger.url = _str(section["url"], "ledger.url")
+            if names_s3_endpoint(cfg.ledger.url):
+                # issue #10: the file is code a pull request can change, and the endpoint
+                # receives the signed ledger requests of the job
+                raise ConfigError(
+                    "ledger.url: an s3:// URL with endpoint= must be set in the AYASEE_LEDGER_URL "
+                    "variable of the environment, never in the configuration file"
+                )
     if "gate" in top:
         cfg.gate = _literal(top["gate"], "gate", GATES)
     if "solo_mode" in top:

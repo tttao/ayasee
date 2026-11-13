@@ -207,6 +207,7 @@ the scanners look only at `iac_root`, and Checkov skips the `github_actions` fra
 - The tunnel itself and its credentials are created once outside ayasee (`cloudflared tunnel
   create`); the `tunnel` unit manages only its ingress configuration.
 - Deploying the applications behind the tunnel, and configuring the host, are out of scope.
-- The ledger is the `git-branch://` store above. An experimental `s3://` ledger store exists, but
-  only from the CLI: it is not wired into the reusable workflows and the cockpit cannot read it
+- The ledger is the `git-branch://` store above. An experimental `s3://` ledger store exists,
+  with a dedicated ledger key in the workflows and a read-only one for the cockpit, but it has not
+  run against a real bucket yet, so this example keeps the branch
   (see [the s3 store](../../docs/concepts/ledger.md#the-s3-store)).

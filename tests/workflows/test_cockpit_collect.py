@@ -43,7 +43,12 @@ def test_triggers_and_secrets(wf):
     }
     assert call["inputs"]["repos-file"]["default"] == "repos.yaml"
     assert call["inputs"]["data-repository"]["required"] is True
-    assert set(call["secrets"]) == {"app-id", "app-private-key"}
+    assert set(call["secrets"]) == {
+        "app-id",
+        "app-private-key",
+        "AYASEE_COCKPIT_AWS_ACCESS_KEY_ID",  # s3:// ledgers, see test_ledger_keys.py
+        "AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY",
+    }
     assert "secrets: inherit" not in TEXT
     assert wf["permissions"] == {}
 

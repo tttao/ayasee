@@ -44,7 +44,7 @@ store. The variable on a GitHub environment wins over the file; the run fails if
 |---|---|---|---|
 | `azure-blob://<account>.blob.core.windows.net/<container>?prefix=<prefix>` | Blob container | Read and write; `DefaultAzureCredential` (OIDC in CI); needs the `ayasee[azure]` extra | The default for Azure adopters. Blobs carry the index tag `ayasee-sha`. |
 | `git-branch:///abs/path/to/repo?branch=ayasee-ledger&remote=origin` | Orphan branch of a git repository | Read and write | Adopters without a storage account. A CI run that writes it needs a token with `contents: write` (the optional `ledger-token` secret, R32); the staged and nightly runs warn unless `main` is behind a ruleset that token cannot bypass ([details](staged-run.md#the-ledger-token-and-main)). |
-| `s3://<bucket>?region=<region>&prefix=<prefix>&endpoint=https://<host>` | S3 bucket, or an S3-compatible store with `endpoint` | Read and write; credentials from `AWS_*` environment variables; no extra needed. **Experimental**, and **not wired into the reusable workflows yet**, see [the s3 store](#the-s3-store) | Adopters on AWS or an S3-compatible store, from the CLI for now. |
+| `s3://<bucket>?region=<region>&prefix=<prefix>&endpoint=https://<host>` | S3 bucket, or an S3-compatible store with `endpoint` | Read and write; credentials from `AWS_*` environment variables (in the workflows, the dedicated `AYASEE_LEDGER_AWS_*` key); no extra needed. **Experimental**: not yet run against a real S3 or R2 bucket, see [the s3 store](#the-s3-store) | Adopters on AWS or an S3-compatible store. An `endpoint=` comes only from the `AYASEE_LEDGER_URL` variable. |
 | `github-branch://<owner>/<repo>?branch=ayasee-ledger` | The same branch, read through the contents API | **Read only** | The cockpit. `append` always raises. |
 | `file:///abs/path` | A directory | Read and write | Tests and local trials. |
 
@@ -60,8 +60,9 @@ Commits are authored by `ayasee <ayasee@users.noreply.github.com>`.
 
 ### The s3 store
 
-**Experimental.** The URL format and parameters may change before the store is wired into the
-reusable workflows.
+**Experimental.** The URL format and parameters may change. The store is tested against an
+in-process fake S3 that checks every signature and the conditional headers
+(`tests/test_ledger_s3.py`); it has not yet run against a real Amazon S3 or Cloudflare R2 bucket.
 
 `s3://<bucket>` writes the same layout as the other stores into an S3 bucket. The client is
 `src/ayasee/s3.py`: AWS Signature Version 4 with the standard library and `httpx`, which ayasee
@@ -82,8 +83,9 @@ shared config file, no instance metadata, no SSO. Missing credentials, or a valu
 printable ASCII, fail the command (the message names the variable, never its value). Errors name
 the HTTP status and the S3 error code only, never a response body or a header. Response bodies are
 capped on their decompressed size (1 MiB for an object, 16 MiB for a listing page), so a compressed
-bomb is stopped too, and a listing that carries a DTD is refused before it is parsed. The identity
-needs `s3:GetObject` and `s3:PutObject` on `<prefix>/*` and `s3:ListBucket` on the bucket for that prefix.
+bomb is stopped too, and a listing that carries a DTD is refused before it is parsed. The key
+needs `s3:GetObject` and `s3:PutObject` on `<prefix>/*` and `s3:ListBucket` on the bucket for that
+prefix, see [the ledger key](#the-ledger-key).
 
 **Writes are conditional.** The history entry is created with `If-None-Match: *`: if it already
 exists, it is read back, and identical bytes (a retry) succeed while different bytes are an error.
@@ -102,19 +104,75 @@ reads still return the newest of `current.json` and the newest history entry
 stale. Check that your store implements `If-Match` and `If-None-Match` on PutObject before you rely
 on it.
 
-**Not wired into the reusable workflows yet.** In `iac-staged`, `iac-nightly` and
-`iac-breakglass`, only the plan and apply steps receive `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` (with `identity: secrets`, see
-[identity: secrets](staged-run.md#identity-secrets)); the guard and ledger steps do not, so an
-`s3://` URL there fails closed with "S3 needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY". Passing
-credentials to those steps is a separate decision (reuse the state-bucket keys, or a dedicated
-ledger key per environment). Until then use the store from the CLI, or keep a `git-branch://` ledger
-in CI. When it is wired, an `s3://` URL with `endpoint=` must come only from the `AYASEE_LEDGER_URL`
-variable of the environment, never from `.ayasee.yaml`: the file is code that a pull request can
-change, and an endpoint chosen there would receive the signed ledger requests of the job.
+**The endpoint comes only from the variable.** An `s3://` URL with `endpoint=` (even an empty
+one) in `ledger.url` of `.ayasee.yaml` is refused when the file is read (`ayasee config show` and
+every other `config` command, so the `resolve` job fails): the file is code that a pull request can
+change, and an endpoint chosen there would receive the signed ledger requests of the job. Put such a
+URL in the `AYASEE_LEDGER_URL` variable of each environment. An `s3://` URL without an endpoint
+(Amazon S3 itself) may stay in the file.
 
-**Not readable by the cockpit.** `cockpit-collect` has no cloud login and refuses every ledger URL
-that is not `github-branch://` ([cockpit setup](../cockpit/setup.md)).
+#### The ledger key
+
+The reusable workflows give the store **its own key**, never the state key of the plan and apply
+steps. Two optional secrets, `AYASEE_LEDGER_AWS_ACCESS_KEY_ID` and
+`AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY`, are declared by `iac-staged`, `iac-nightly` and
+`iac-breakglass` and reach only the steps that read or write the ledger, as `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` in step-level environment:
+
+| Workflow | Steps |
+|---|---|
+| `iac-staged` | `guard` and `ledger` of every stage job, `guard` of `prod-plan`, `guard` and `ledger` of `prod` and `prod-in-sync` |
+| `iac-nightly` | "Read what is live in this environment" of `drift-<stage>` |
+| `iac-breakglass` | the rollback check ("Refuse a rollback unless allow-rollback is true") and `ledger` |
+
+No other step sees them (`tests/workflows/test_ledger_keys.py`), and the guard and ledger steps get
+no state or provider credential. `iac-pr` does not read the ledger and declares neither secret.
+There is no session-token secret: a stored secret cannot hold temporary credentials, which expire.
+Put the region in the URL (`?region=`); these steps set no `AWS_REGION`.
+
+Create the pair as **environment secrets** of each environment that touches the ledger (the stage
+environments, `prod-plan`, `prod`, `prod-breakglass`, and `drift-<stage>`), never at repository
+or organisation level, and pass it by name:
+
+```yaml
+    secrets:
+      AYASEE_LEDGER_AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+      AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
+```
+
+The key needs nothing but the ledger prefix. For a writer (stage environments, `prod-plan`, which
+writes the prod record from `prod-in-sync`, `prod`, `prod-breakglass`), as an IAM policy, with
+`<bucket>` and `<prefix>` (default `ayasee-ledger`) of the URL:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::<bucket>/<prefix>/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<bucket>",
+      "Condition": { "StringLike": { "s3:prefix": "<prefix>/*" } }
+    }
+  ]
+}
+```
+
+The `drift-<stage>` environments only read: drop `s3:PutObject` there. The cockpit has its own
+read-only key, see below. On Cloudflare R2, use an R2 API token with "Object Read & Write" (or
+"Object Read only") on the ledger bucket alone; R2 tokens cannot be narrowed to a prefix, so give the
+ledger a bucket of its own. Narrower still, a key per environment can be limited to
+`<prefix>/<owner>/<repo>/<env>/*` for its writes, but the guard reads the predecessor stage's
+record, so each key must still read the records of the stages before it.
+
+**Readable by the cockpit, read-only.** `cockpit-collect` reads `s3://` ledgers with a key of its
+own that may only read (`AYASEE_COCKPIT_AWS_*`), and the collector never writes a ledger
+([cockpit setup](../cockpit/setup.md#s3-ledgers)).
 
 [s3-cond]: https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html
 

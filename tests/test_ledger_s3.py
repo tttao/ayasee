@@ -518,11 +518,15 @@ def test_cli_without_credentials_fails_closed(monkeypatch, capsys):
 # ---- cockpit ---------------------------------------------------------------------------
 
 
-def test_cockpit_collector_refuses_s3_ledgers():
-    """The collector has no cloud login; an s3:// ledger is refused before a token is minted."""
-    entry = RepoEntry("acme/infra", "s3://ledger-bkt?region=eu-west-1", [], [], None)
-    with pytest.raises(ReposFileError, match="github-branch"):
+def test_cockpit_collector_needs_the_region_in_an_s3_ledger_url(monkeypatch):
+    """Issue #10: the collector reads s3:// ledgers with its own key (tests/cockpit/
+    test_collect_s3.py); cockpit-collect sets no AWS_REGION, so the URL must carry it."""
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    entry = RepoEntry("acme/infra", "s3://ledger-bkt", [], [], None)
+    with pytest.raises(ReposFileError, match="region"):
         estate_repositories([entry], "acme")
+    ok = RepoEntry("acme/infra", "s3://ledger-bkt?region=eu-west-1", [], [], None)
+    assert estate_repositories([ok], "acme") == ["infra"]
 
 
 def test_fake_rejects_a_bad_signature(fake):

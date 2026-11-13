@@ -156,7 +156,7 @@ credential for `environment:<name>`:
 | Variable | Purpose |
 |---|---|
 | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | `azure/login` (OIDC), and `ARM_CLIENT_ID`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID` for the provider |
-| `AYASEE_LEDGER_URL` | Ledger store URL. Falls back to `ledger.url` in `.ayasee.yaml`; the run fails if neither is set. |
+| `AYASEE_LEDGER_URL` | Ledger store URL. Falls back to `ledger.url` in `.ayasee.yaml`; the run fails if neither is set. An `s3://` URL with `endpoint=` must be set here, never in the file. |
 | `AYASEE_KEY_VAULT_KEY_ID` | `plan_encryption.key_provider: azure_vault` (the default) only. Azure Key Vault key URL (`https://<vault>.vault.azure.net/keys/<name>`, no key version) protecting plan encryption. Set the same key on `prod-plan`, `prod` and `prod-breakglass`. `prod-plan` needs `wrapKey` and `unwrapKey` (it encrypts its plan, then decrypts it for `tofu show -json`), `prod` needs `unwrapKey`, `prod-breakglass` both. Full table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-assignments-not-created-here). |
 
 The `prod-plan` identity reads and plans prod; it must not be able to apply. It is also granted
@@ -175,7 +175,11 @@ environment secret of `prod-plan` and `prod` (see [key providers](plan-binding.m
 when `ledger-token` is set, only the guard and ledger steps receive it, as step-level environment
 (`GIT_CONFIG_*` with an inline credential helper that reads the token from an environment
 variable; no file, no global git configuration), plus the trunk-guard step of the `resolve` job,
-which uses it for read-only API calls only (next section).
+which uses it for read-only API calls only (next section). For an `s3://` ledger, the same
+guard and ledger steps, and no other, receive the dedicated ledger key
+(`AYASEE_LEDGER_AWS_ACCESS_KEY_ID` and `AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY`, environment secrets)
+as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, never the state key of the plan and apply
+steps (see [the ledger key](ledger.md#the-ledger-key)).
 
 ### The ledger token and `main`
 
