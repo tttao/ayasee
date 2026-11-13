@@ -3,6 +3,7 @@ tests/test_ledger_s3.py (which checks every signature)."""
 
 import json
 
+import httpx
 import jsonschema
 import pytest
 import respx
@@ -97,6 +98,18 @@ def test_collect_s3_error_names_status_and_code_only(fake):
     error = snap["repos"][0]["error"]
     assert "HTTP 403 AccessDenied" in error
     assert SECRET_SENTINEL not in json.dumps(snap)  # the response body never reaches it
+
+
+@respx.mock
+def test_an_unreachable_bucket_is_an_error_of_that_repo_only(fake):
+    """A bucket that does not answer fails its own repository; the next one is still read."""
+    respx.route(host=ENDPOINT_HOST).mock(side_effect=httpx.ConnectError("unreachable"))
+    _mock_basics()
+    snap = collect([RepoEntry(REPO, URL), RepoEntry(REPO, URL)], _gh())
+    assert [r["error"] for r in snap["repos"]] == [
+        "ledger read failed: S3 GET failed: ConnectError"
+    ] * 2
+    jsonschema.Draft202012Validator(SCHEMA).validate(snap)
 
 
 @respx.mock

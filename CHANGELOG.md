@@ -81,8 +81,9 @@ released version into the GitHub release notes.
   read-only view that cannot write. The snapshot schema is unchanged. `ledger.url` in
   `.ayasee.yaml` refuses an `s3://` URL with `endpoint=` (even empty): the file is code a pull
   request can change and the endpoint would receive signed requests, so such a URL belongs in the
-  `AYASEE_LEDGER_URL` variable. The IAM policies are in
-  docs/concepts/ledger.md and docs/cockpit/setup.md.
+  `AYASEE_LEDGER_URL` variable. `ayasee doctor` checks the ledger key as an environment secret of
+  every environment that reads it, as a pair, and passed when `ledger.url` is `s3://`. The IAM
+  policies are in docs/concepts/ledger.md and docs/cockpit/setup.md.
 - `plan_encryption.key_provider: aws_kms` (#10): the prod plan key is wrapped by the AWS KMS key
   whose ARN is in the `AYASEE_KMS_KEY_ID` variable (new `kms-key-id` input of the plan and apply
   actions; the region comes from the ARN), with the encryption context `ayasee = plan`. KMS is

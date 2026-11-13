@@ -140,6 +140,11 @@ or organisation level, and pass it by name:
       AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
 ```
 
+`ayasee doctor` checks that the pair is passed whole, that each environment above holds it as an
+environment secret, and, when `ledger.url` in the configuration is `s3://`, that the callers pass
+it. It cannot see an `s3://` URL that only the `AYASEE_LEDGER_URL` variable holds (it reads
+variable names, not values).
+
 The key needs nothing but the ledger prefix. For a writer (stage environments, `prod-plan`, which
 writes the prod record from `prod-in-sync`, `prod`, `prod-breakglass`), as an IAM policy, with
 `<bucket>` and `<prefix>` (default `ayasee-ledger`) of the URL:

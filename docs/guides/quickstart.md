@@ -209,8 +209,9 @@ It checks:
 - **GitHub**: every environment the callers use exists; `prod`, `prod-breakglass` and
   `prod-pr-plan` have required reviewers and prevent self-review (unless `solo_mode`); every
   environment except the pull-request plan ones deploys from `main` only; each secret a caller
-  passes exists where its jobs read it (provider and plan-key secrets as environment secrets, not
-  repository secrets); `AYASEE_LEDGER_URL`, the `AZURE_*` variables (`identity: oidc`) and the
+  passes exists where its jobs read it (provider, plan-key and `s3://` ledger-key secrets as
+  environment secrets, not repository secrets; the ledger key passed as a pair, and passed at all
+  when `ledger.url` is `s3://`); `AYASEE_LEDGER_URL`, the `AZURE_*` variables (`identity: oidc`) and the
   plan-key ID are set; and `main` has a pull-request ruleset when a `ledger-token` is passed;
 - **the state lock**, only when asked, once per state bucket:
   `--lock-check 's3://<bucket>?region=<region>&endpoint=https://<host>'` with `AWS_ACCESS_KEY_ID`

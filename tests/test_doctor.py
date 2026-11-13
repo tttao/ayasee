@@ -354,3 +354,68 @@ def test_lock_check_leftover_object_is_not_deleted(aws, capsys):
 def test_lock_check_bad_url(aws, capsys):
     _, out = _doctor(aws, capsys, "--lock-check", "gs://bucket")
     assert any("expected s3://" in f for f in _fails(out))
+
+
+LEDGER_KEY = ("AYASEE_LEDGER_AWS_ACCESS_KEY_ID", "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
+
+
+def _pass_ledger_key(estate, files=("main.yml", "nightly.yml", "breakglass.yml"), names=LEDGER_KEY):
+    for f in files:
+        wf = estate / ".github/workflows" / f
+        extra = "".join(f"      {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
+        wf.write_text(wf.read_text().rstrip("\n") + "\n" + extra)
+
+
+@respx.mock
+def test_the_s3_ledger_key_is_an_environment_secret_of_each_ledger_environment(estate, capsys):
+    """Issue #10: the guard and ledger steps of every stage, drift and break-glass environment
+    read the dedicated ledger key; the pull-request environments never do."""
+    _pass_ledger_key(estate)
+    state = _good_state()
+    for env in ("test", "prod-plan", "prod", "drift-test", "drift-prod", "prod-breakglass"):
+        state["secrets"][env] |= set(LEDGER_KEY)
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+
+    state["secrets"]["drift-prod"].discard(LEDGER_KEY[1])
+    state["secrets"]["prod-plan"].discard(LEDGER_KEY[0])
+    state["repo_secrets"].add(LEDGER_KEY[0])
+    respx.clear()
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    assert f"drift-prod: secret {LEDGER_KEY[1]} is missing (iac-nightly: {LEDGER_KEY[1]})" in fails
+    assert (
+        f"prod-plan: {LEDGER_KEY[0]} is a repository secret; make it an environment secret" in fails
+    )
+    assert not any(f.startswith(("test-plan:", "prod-pr-plan:")) for f in fails), fails
+
+
+@respx.mock
+def test_the_s3_ledger_key_goes_in_pairs(estate, capsys):
+    _pass_ledger_key(estate, files=("main.yml",), names=LEDGER_KEY[:1])
+    state = _good_state()
+    for env in ("test", "prod-plan", "prod"):
+        state["secrets"][env].add(LEDGER_KEY[0])
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    assert (
+        f".github/workflows/main.yml: {LEDGER_KEY[0]} is passed without {LEDGER_KEY[1]}"
+        in _fails(out)
+    )
+
+
+@respx.mock
+def test_an_s3_ledger_url_needs_the_ledger_key(estate, capsys):
+    cfg = estate / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text() + "ledger:\n  url: s3://acme-ledger?region=eu-west-3\n")
+    _mock(_good_state())
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    for f in ("main.yml", "nightly.yml", "breakglass.yml"):
+        assert any(
+            x.startswith(f".github/workflows/{f}: ledger.url is s3://, but the ledger key")
+            for x in fails
+        ), fails
+    assert not any("pr.yml: ledger.url" in x for x in fails)

@@ -11,8 +11,9 @@ instead of failed jobs found one at a time:
 - **GitHub** (with ``GITHUB_TOKEN``, read-only): every environment the callers use exists; prod,
   prod-breakglass and prod-pr-plan have required reviewers and prevent self-review (unless
   ``solo_mode``); the environments are restricted to ``main`` except the pull-request plan ones;
-  each secret a caller passes exists where its jobs read it (provider and plan-key secrets as
-  environment secrets of each stage environment, never at repository level); the variables the
+  each secret a caller passes exists where its jobs read it (provider, plan-key and ``s3://``
+  ledger-key secrets as environment secrets of each environment that reads them, never at
+  repository level); the variables the
   workflows read (``AYASEE_LEDGER_URL``, ``AZURE_*``, the plan key IDs) are set; and ``main`` has a
   pull-request ruleset when a ``ledger-token`` is passed;
 - **lock** (opt-in, ``--lock-check s3://<bucket>?region=..&endpoint=..``, AWS credentials in the
@@ -73,6 +74,10 @@ PLAN_KEY_SECRETS = {
     "pbkdf2": ("AYASEE_PLAN_PASSPHRASE",),
     "aws_kms": ("AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"),
 }
+# the dedicated key of an s3:// ledger (issue #10): environment secrets of every environment whose
+# guard and ledger steps read or write the ledger, never the state key; both or neither
+LEDGER_KEY_SECRETS = ("AYASEE_LEDGER_AWS_ACCESS_KEY_ID", "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
+LEDGER_KEY_KINDS = frozenset({"iac-staged", "iac-nightly", "iac-breakglass"})
 PLAN_KEY_VARIABLES = {"azure_vault": "AYASEE_KEY_VAULT_KEY_ID", "aws_kms": "AYASEE_KMS_KEY_ID"}
 OIDC_VARIABLES = ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID")
 GATED = ("prod", "prod-breakglass", "prod-pr-plan")
@@ -380,6 +385,8 @@ def _check_secrets_and_variables(
                 envs = environments_of(c.kind, cfg)
             elif name in key_secrets:
                 envs = _plan_key_envs(c.kind)
+            elif name in LEDGER_KEY_SECRETS and c.kind in LEDGER_KEY_KINDS:
+                envs = environments_of(c.kind, cfg)
             elif name in {s for v in PLAN_KEY_SECRETS.values() for s in v}:
                 continue  # another key provider's secret: unused
             else:
@@ -395,6 +402,18 @@ def _check_secrets_and_variables(
             for name in PLAN_KEY_SECRETS.get(cfg.plan_encryption.key_provider, ()):
                 if not c.secrets.get(name):
                     report.add(FAIL, sec, f"{c.file}: the plan key needs {name}; pass it")
+        if c.kind in LEDGER_KEY_KINDS and c.secrets is not None:
+            passed = [n for n in LEDGER_KEY_SECRETS if c.secrets.get(n)]
+            if len(passed) == 1:
+                other = next(n for n in LEDGER_KEY_SECRETS if n not in passed)
+                report.add(FAIL, sec, f"{c.file}: {passed[0]} is passed without {other}")
+            elif not passed and (cfg.ledger.url or "").startswith("s3://"):
+                report.add(
+                    FAIL,
+                    sec,
+                    f"{c.file}: ledger.url is s3://, but the ledger key is not passed "
+                    f"({' and '.join(LEDGER_KEY_SECRETS)})",
+                )
 
     repo_secrets = names(secrets, None, gh.secret_names) or set()
     missing = checked = 0
