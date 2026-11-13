@@ -425,6 +425,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
         with:
           env: ${{ env.STAGE }}
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -438,6 +440,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
         with:
           env: ${{ env.STAGE }}
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -551,6 +555,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
         with:
           env: ${{ env.STAGE }}
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -564,6 +570,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
         with:
           env: ${{ env.STAGE }}
           units-root: ${{ needs.resolve.outputs.units-root }}
