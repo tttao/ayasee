@@ -72,5 +72,6 @@ def entrypoint() -> None:
     import ayasee.notify  # noqa: F401  (registers its subcommand)
     import ayasee.prcomment  # noqa: F401  (registers its subcommand)
     import ayasee.sarif  # noqa: F401  (registers its subcommand)
+    import ayasee.trunkguard  # noqa: F401  (registers its subcommand)
 
     raise SystemExit(main())

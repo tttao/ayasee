@@ -544,6 +544,22 @@ class GitHub:
 
     # ---- cockpit collector (read-only) ----------------------------------------------------
 
+    def branch_rules(self, repo: str, branch: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/rules/branches/{branch}``: the active ruleset rules that apply to
+        ``branch``, repository and organization level (Metadata: read). Classic branch
+        protection is not included."""
+        return self._paginate(
+            f"/repos/{repo}/rules/branches/{branch}", {"per_page": 100}, "branch rules"
+        )
+
+    def ruleset(self, repo: str, ruleset_id: int) -> dict[str, Any]:
+        """``GET /repos/{repo}/rulesets/{id}`` (Metadata: read), parents included.
+        ``current_user_can_bypass`` describes the token making the call."""
+        data = self._get(f"/repos/{repo}/rulesets/{ruleset_id}", "ruleset")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected ruleset response")
+        return data
+
     def main_sha(self, repo: str) -> str:
         """Commit SHA at the tip of ``main``."""
         data = self._get(f"/repos/{repo}/commits/main", "commit")

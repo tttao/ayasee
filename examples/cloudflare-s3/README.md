@@ -109,7 +109,9 @@ workflows check out with `persist-credentials: false`: create a fine-grained tok
 repository with **Contents: read and write** and nothing else, and store it as the repository
 secret `AYASEE_LEDGER_TOKEN`; the callers pass it as `ledger-token`. Protect `main` so that this
 token cannot be used to change the code: it can still write any branch, so require pull requests on
-`main` (a ruleset with no bypass).
+`main` (a ruleset with no bypass). The staged and nightly runs check this with the ledger token and
+warn when it is missing ([the ledger token and `main`](../../docs/concepts/staged-run.md#the-ledger-token-and-main));
+classic branch protection is not visible to that check.
 
 The cockpit reads the same branch through the contents API. Its `repos.yaml` line:
 

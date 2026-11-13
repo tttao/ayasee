@@ -207,6 +207,8 @@ def test_identity_secrets_prints_the_deviation(tmp_path, capsys):
     assert cfg.identity == "secrets"
     assert capsys.readouterr().err == config.DEVIATION_SECRETS + "\n"
     assert config.DEVIATION_SECRETS.startswith("DEVIATION: identity: secrets")
+    # issue #11: say that a stage is isolated only as far as its tokens' scopes are
+    assert "stages are isolated only as far as the token scopes are" in config.DEVIATION_SECRETS
 
 
 def test_cli_show_has_identity(tmp_path, monkeypatch, capsys):

@@ -108,6 +108,21 @@ jobs:
             echo "::warning::$line"
             echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
           done <<<"$labels"
+      - name: Check that main is protected from the ledger token
+        env:
+          # read-only calls (Metadata: read) made with the ledger token itself, so that the
+          # answer is about that token; github.token cannot see who may bypass a ruleset
+          GITHUB_TOKEN: ${{ secrets.ledger-token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # issue #11: a contents-write token can push to main unless a ruleset stops it. A warning,
+          # not a refusal: classic branch protection is invisible to this check (see the docs)
+          [ -n "$GITHUB_TOKEN" ] || exit 0
+          problems="$(ayasee trunk-guard --repo "$REPO" 2>&1)" && exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$problems"
       - id: resolve
         name: Read the configuration
         env:

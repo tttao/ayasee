@@ -43,7 +43,7 @@ store. The variable on a GitHub environment wins over the file; the run fails if
 | URL | Store | Access | Use it for |
 |---|---|---|---|
 | `azure-blob://<account>.blob.core.windows.net/<container>?prefix=<prefix>` | Blob container | Read and write; `DefaultAzureCredential` (OIDC in CI); needs the `ayasee[azure]` extra | The default for Azure adopters. Blobs carry the index tag `ayasee-sha`. |
-| `git-branch:///abs/path/to/repo?branch=ayasee-ledger&remote=origin` | Orphan branch of a git repository | Read and write | Adopters without a storage account. A CI run that writes it needs a token with `contents: write` (the optional `ledger-token` secret, R32). |
+| `git-branch:///abs/path/to/repo?branch=ayasee-ledger&remote=origin` | Orphan branch of a git repository | Read and write | Adopters without a storage account. A CI run that writes it needs a token with `contents: write` (the optional `ledger-token` secret, R32); the staged and nightly runs warn unless `main` is behind a ruleset that token cannot bypass ([details](staged-run.md#the-ledger-token-and-main)). |
 | `github-branch://<owner>/<repo>?branch=ayasee-ledger` | The same branch, read through the contents API | **Read only** | The cockpit. `append` always raises. |
 | `file:///abs/path` | A directory | Read and write | Tests and local trials. |
 

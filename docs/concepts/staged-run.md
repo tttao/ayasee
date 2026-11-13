@@ -154,6 +154,25 @@ when `ledger-token` is set, only the guard and ledger steps receive it, as step-
 (`GIT_CONFIG_*` with an inline credential helper that reads the token from an environment
 variable; no file, no global git configuration).
 
+### The ledger token and `main`
+
+A token with contents write can push to any branch, `main` included. When `ledger-token` is passed,
+the `resolve` job of `iac-staged` and `iac-nightly` runs `ayasee trunk-guard` with that token (one
+step, read-only calls) and checks that an active ruleset with a `pull_request` rule applies to `main`
+and that the token can never bypass it. It reads `GET /repos/{owner}/{repo}/rules/branches/main` and
+`GET /repos/{owner}/{repo}/rulesets/{id}`, which need only the Metadata read permission that every
+fine-grained token carries; `current_user_can_bypass` then describes the ledger token itself. The
+workflow's `github.token` is not used: it can read the rules but not who may bypass them, and no job
+permission is added.
+
+Anything else is a `::warning::` and a line of the run summary, not a refusal: no pull-request rule,
+a ruleset that is not active, a bypass for the token (`always`, `pull_requests_only` or `exempt`),
+an unknown value or an API error ("cannot tell"). Not verified is never reported as protected. It
+warns rather than fails because classic branch protection cannot be read without the Administration
+permission, so a `main` protected that way reads as unprotected; a refusal would stop correctly
+protected repositories on every push. Use a ruleset and the warning goes away. `iac-breakglass` does
+not run the check: it is the incident path, and the staged run of every push already reports it.
+
 ## identity: secrets
 
 Some providers (Cloudflare, most VPS hosts, many S3-compatible stores) cannot federate with GitHub
@@ -184,7 +203,11 @@ the "no stored cloud secrets" default (D7):
   of the run summary. The cockpit does not show the label yet.
 
 What it costs: a stored token does not expire after the job like an OIDC token, so a leaked token
-stays usable until it is rotated. The `dev-plan` tokens are the most exposed, because `iac-pr` plans
+stays usable until it is rotated. And a stage is isolated only as far as its tokens' scopes are: a
+provider that scopes tokens to a zone or an account, not to objects, lets a pre-prod token that
+applies without approval change prod objects of the same zone, and the prod gate then protects the
+workflow, not those objects. The `DEVIATION` label says so; the cockpit tag stays
+`secrets identity · deviation`. The `dev-plan` tokens are the most exposed, because `iac-pr` plans
 pull-request code with them (same-repository pull requests only; forks get no secrets): give
 `dev-plan` read-only tokens. The prod tokens live only in `prod` and `prod-breakglass`, behind their
 reviewers; `prod-plan` should hold read-only ones.
