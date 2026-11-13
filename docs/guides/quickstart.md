@@ -212,8 +212,11 @@ profile is new and **has not run end to end on GitHub yet**: expect to adjust it
 **Provider tokens instead of OIDC.** Set `identity: secrets` in `.ayasee.yaml`, create
 `CLOUDFLARE_API_TOKEN` (and `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the state bucket) as
 environment secrets of each environment, scoped per environment, and pass them by name from the
-callers. Every run then carries a `DEVIATION:` warning. Read
-[identity: secrets](../concepts/staged-run.md#identity-secrets) for what this costs.
+callers. A provider other than those (OVH, Hetzner, Scaleway) declares its variable names in
+`provider_env` and puts the values in one more environment secret, `AYASEE_PROVIDER_ENV` (see
+[provider environment](../concepts/staged-run.md#provider-environment)). Every run then carries a
+`DEVIATION:` warning. Read [identity: secrets](../concepts/staged-run.md#identity-secrets) for what
+this costs.
 
 **Plan encryption with a passphrase.** Set the key provider in `.ayasee.yaml` and create one
 environment secret, `AYASEE_PLAN_PASSPHRASE`, on `prod-plan`, `prod` and `prod-breakglass` (never at

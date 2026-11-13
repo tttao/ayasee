@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ayasee import cli
+from ayasee.providerenv import refusal as provider_env_refusal
 
 DEFAULT_PATH = Path(".ayasee.yaml")
 NON_COMPLIANT = (
@@ -75,6 +76,7 @@ class Config:
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     identity: str = "oidc"
     plan_encryption: PlanEncryptionConfig = field(default_factory=PlanEncryptionConfig)
+    provider_env: list[str] = field(default_factory=list)
 
     @property
     def binding_mode(self) -> str:
@@ -207,6 +209,20 @@ def _parse(raw: Any) -> Config:
             cfg.plan_encryption.key_provider = _literal(
                 section["key_provider"], "plan_encryption.key_provider", KEY_PROVIDERS
             )
+    if "provider_env" in top:
+        names = _str_list(top["provider_env"], "provider_env")
+        for name in names:
+            reason = provider_env_refusal(name)
+            if reason:
+                raise ConfigError(f"provider_env: {name!r}: {reason}")
+        if len(set(names)) != len(names):
+            raise ConfigError("provider_env: names must be unique")
+        if names and cfg.identity != "secrets":
+            raise ConfigError(
+                "provider_env: only with identity: secrets (the oidc identity passes no "
+                "provider secret)"
+            )
+        cfg.provider_env = names
     return cfg
 
 

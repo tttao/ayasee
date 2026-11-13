@@ -65,7 +65,13 @@ def test_the_identity_is_read_from_the_configuration(name):
     assert "'.identity'" in text
 
 
-TOKENS = ("CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+# the three named tokens, and the declared provider variables of issue #11 in one JSON secret
+TOKENS = (
+    "CLOUDFLARE_API_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AYASEE_PROVIDER_ENV",
+)
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -99,6 +105,30 @@ def test_provider_tokens_reach_only_plan_and_apply_steps_for_the_secrets_identit
                 assert env[token] == expected, (name, token)
             found += 1
     assert found >= 1
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_provider_env_names_come_from_the_configuration(name):
+    """Every step that receives AYASEE_PROVIDER_ENV also gets the declared names, read from
+    .ayasee.yaml by the step or job that resolves the identity (issue #11)."""
+    wf = _wf(name)
+    text = (WORKFLOWS / name).read_text()
+    steps = 0
+    for job_name, job in wf["jobs"].items():
+        for step in job.get("steps", []):
+            env = step.get("env") or {}
+            if "AYASEE_PROVIDER_ENV" not in env:
+                assert "AYASEE_PROVIDER_ENV_NAMES" not in env, (name, job_name)
+                continue
+            source = _ident(name, job_name).rsplit(".", 1)[0]
+            assert env["AYASEE_PROVIDER_ENV_NAMES"] == f"${{{{ {source}.provider-env-names }}}}"
+            steps += 1
+            if source.startswith("needs."):
+                producer = source.split(".")[1]
+                outputs = wf["jobs"][producer]["outputs"]
+                assert outputs["provider-env-names"].endswith(".outputs.provider-env-names }}")
+    assert steps >= 1
+    assert """echo "provider-env-names=$(jq -r '.provider_env | join(",")' """ in text
 
 
 @pytest.mark.parametrize("name", sorted(CASES))

@@ -61,6 +61,17 @@ released version into the GitHub release notes.
   to `main`. The monorepo notes now also say why the `iac-staged` caller takes no `paths:` filter:
   with the superseded-commit refusal (R70) it can leave an IaC commit unpromoted.
 - `iac-staged` runs up to four pre-prod stages (#10), for example `[dev, sit, uat, preprod, prod]`.
+- More provider credentials for `identity: secrets` without a change in ayasee (#11): an optional
+  `AYASEE_PROVIDER_ENV` secret on every reusable workflow (an environment secret holding one JSON
+  object of name to string value) and a `provider_env` list in `.ayasee.yaml` that declares the
+  names it may hold. The plan and apply steps run `ayasee provider-env` first: it refuses
+  undeclared keys, non-string values, values shorter than 16 characters (their mask would drop
+  job outputs such as `has-changes`) and reserved names (`PATH`, `LD_*`, `BASH*` and bash's own
+  variables, `NODE_OPTIONS`, `GITHUB_*`, `TF_*` other than `TF_VAR_*`, `TERRAFORM_*`, `AWS_*`,
+  `CLOUDFLARE_*`, `AYASEE_*`, TLS and proxy variables, ...), masks every value whole and line by
+  line, and hands the pairs to the script through a private file that is deleted before anything
+  is exported, so the variables never reach `$GITHUB_ENV`, a command line or a later step. The
+  three named tokens are unchanged.
 
 ### Changed
 

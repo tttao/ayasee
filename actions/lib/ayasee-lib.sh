@@ -263,6 +263,50 @@ sg_setup_encryption() {
   export TF_ENCRYPTION
 }
 
+# sg_load_provider_env: export the provider variables of identity: secrets held in the
+# AYASEE_PROVIDER_ENV environment secret (a JSON object of name to string value), restricted to the
+# names declared in provider_env (AYASEE_PROVIDER_ENV_NAMES, comma-separated). `ayasee provider-env`
+# refuses undeclared and reserved names (LD_PRELOAD, BASH_ENV, GITHUB_*, TF_CLI_ARGS, ...), masks
+# every value (whole and line by line) and writes NUL-separated pairs to a private file that is
+# read here and deleted before anything is exported. The variables live only in this step's
+# process tree: never in $GITHUB_ENV, never on a command line. Both inputs are unset in the shell,
+# so the engine's environment does not carry the raw JSON (the script's own /proc environ still
+# does, as it does the named tokens).
+# An empty secret exports nothing. Call it in the main shell (not inside $(...)).
+sg_load_provider_env() {
+  local blob="${AYASEE_PROVIDER_ENV:-}" names="${AYASEE_PROVIDER_ENV_NAMES:-}" dir name value
+  unset AYASEE_PROVIDER_ENV AYASEE_PROVIDER_ENV_NAMES
+  [ -n "$blob" ] || return 0
+  [ -n "${RUNNER_TEMP:-}" ] || sg_die "RUNNER_TEMP is not set"
+  dir="$(umask 077 && mktemp -d "$RUNNER_TEMP/ayasee-provider-env.XXXXXX")" ||
+    sg_die "cannot create a private directory for the provider environment"
+  if ! AYASEE_PROVIDER_ENV="$blob" AYASEE_PROVIDER_ENV_NAMES="$names" \
+    ayasee provider-env --out "$dir/pairs"; then
+    rm -rf "$dir"
+    sg_die "refusing the provider environment (AYASEE_PROVIDER_ENV); see the message above"
+  fi
+  # read every pair, delete the file, and only then export: a failed export can never leave the
+  # values on disk
+  local -a pairs=()
+  [ -f "$dir/pairs" ] || {
+    rm -rf "$dir"
+    sg_die "ayasee provider-env wrote no pairs file"
+  }
+  while IFS= read -r -d '' name && IFS= read -r -d '' value; do
+    pairs+=("$name" "$value")
+  done <"$dir/pairs"
+  rm -rf "$dir"
+  local i
+  for ((i = 0; i < ${#pairs[@]}; i += 2)); do
+    name="${pairs[i]}"
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || sg_die "invalid provider variable name"
+    # a read-only variable (UID, EUID, PPID) makes `export` end a non-interactive shell outright:
+    # try it in a subshell first, with a dummy value
+    (export "$name=x") 2>/dev/null || sg_die "cannot export provider variable $name"
+    export "$name=${pairs[i + 1]}"
+  done
+}
+
 # sg_units BASE: print unit paths relative to BASE, dependencies first. Names must be unique
 # once / becomes __.
 sg_units() {

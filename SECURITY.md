@@ -79,7 +79,11 @@ with GitHub OIDC: the workflows skip `azure/login` and pass the provider tokens 
 environment secrets, one set per environment, never repository or organisation secrets. Every
 configuration load prints a `DEVIATION:` line and each run shows it as a warning and in its summary,
 in the same way `solo_mode` is labelled. Stored tokens are long-lived, and the `dev-plan` ones are
-reachable by same-repository pull-request code: keep them read-only. See
+reachable by same-repository pull-request code: keep them read-only. Other provider variables
+travel in one more environment secret, `AYASEE_PROVIDER_ENV` (JSON), limited to the names that
+`provider_env` in `.ayasee.yaml` declares; names that change how the job runs or where the named
+credentials go (`LD_*`, `BASH_ENV`, `GITHUB_*`, `TF_CLI_ARGS`, `AWS_*`, `CLOUDFLARE_*`, proxies,
+...) are refused and every value is masked. Protect `.ayasee.yaml` with `CODEOWNERS`. See
 [identity: secrets](docs/concepts/staged-run.md#identity-secrets).
 
 **Prod needs a human who is not the author (D2).**

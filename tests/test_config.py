@@ -530,3 +530,29 @@ def test_label_keys_and_quiet_parse(capsys):
     for bad in ("bogus: 1", "stages: [unclosed"):
         with pytest.raises(ConfigError):
             config.parse_config_text(bad)
+
+
+def test_provider_env_declares_names_for_the_secrets_identity(tmp_path):
+    cfg = load_config(
+        write(tmp_path, "identity: secrets\nprovider_env: [HCLOUD_TOKEN, TF_VAR_ovh_key]\n")
+    )
+    assert cfg.provider_env == ["HCLOUD_TOKEN", "TF_VAR_ovh_key"]
+    assert Config().provider_env == []
+    assert load_config(write(tmp_path, "provider_env: []\n")).provider_env == []
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("identity: secrets\nprovider_env: [LD_PRELOAD]\n", "'LD_PRELOAD': reserved"),
+        ("identity: secrets\nprovider_env: [GITHUB_TOKEN]\n", "'GITHUB_TOKEN': reserved"),
+        ("identity: secrets\nprovider_env: [TF_CLI_ARGS]\n", "'TF_CLI_ARGS': reserved"),
+        ("identity: secrets\nprovider_env: [lower]\n", "not an environment variable name"),
+        ("identity: secrets\nprovider_env: [A, A]\n", "names must be unique"),
+        ("identity: secrets\nprovider_env: A\n", "expected a list"),
+        ("provider_env: [HCLOUD_TOKEN]\n", "only with identity: secrets"),
+    ],
+)
+def test_provider_env_refusals(tmp_path, text, message):
+    with pytest.raises(ConfigError, match=message):
+        load_config(write(tmp_path, text))

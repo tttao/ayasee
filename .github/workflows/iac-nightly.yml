@@ -60,6 +60,17 @@ on:
           each drift-<stage> environment, never at repository or organisation level;
           only the plan and apply steps receive it.
         required: false
+      AYASEE_PROVIDER_ENV:
+        description: >-
+          identity: secrets only. More provider variables (OVH, Hetzner, Scaleway, a second
+          Cloudflare account through TF_VAR_*) as one JSON object of name to string value, for
+          example {"HCLOUD_TOKEN": "..."}. Every name must be declared in provider_env in
+          .ayasee.yaml; reserved names (PATH, LD_*, GITHUB_*, TF_* except TF_VAR_*, AWS_*,
+          CLOUDFLARE_*, ...) and values under 16 characters are refused. Pass it
+          by name and create it as an environment secret of each stage environment, never at
+          repository or organisation level; only the plan and apply steps receive it, and each
+          value is masked.
+        required: false
       extra-env-secret:
         description: >-
           Optional secret exported as AYASEE_EXTRA_SECRET to the plan and apply steps only (so
@@ -82,6 +93,7 @@ jobs:
       units-root: ${{ steps.resolve.outputs.units-root }}
       engine: ${{ steps.resolve.outputs.engine }}
       identity: ${{ steps.resolve.outputs.identity }}
+      provider-env-names: ${{ steps.resolve.outputs.provider-env-names }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -137,6 +149,7 @@ jobs:
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "identity=$(jq -r '.identity' "$cfg")"
+            echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
           } >>"$GITHUB_OUTPUT"
 
   drift:
@@ -240,6 +253,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
           SG_SHA: ${{ steps.ledger.outputs.sha }} # the plan describes the live SHA, not main
         with:
           env: ${{ matrix.env }}
