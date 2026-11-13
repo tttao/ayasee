@@ -11,6 +11,13 @@ from ayasee.github import GitHub, GitHubError
 
 API = "https://api.github.com"
 RULES = f"{API}/repos/acme/infra/rules/branches/main"
+BRANCH = f"{API}/repos/acme/infra/branches/main"
+
+
+def _branch(protected):
+    return respx.get(BRANCH).mock(
+        return_value=httpx.Response(200, json={"name": "main", "protected": protected})
+    )
 
 
 def _ruleset(rid, enforcement="active", bypass="never"):
@@ -46,16 +53,38 @@ def test_pull_request_rule_without_bypass_is_protected(gh):
 
 
 @respx.mock
-def test_no_pull_request_rule_is_a_problem(gh):
+def test_no_pull_request_rule_and_unprotected_branch_is_definite(gh):
     _rules({"type": "deletion", "ruleset_id": 3})
+    _branch(False)
     problems = trunkguard.check(gh, "acme/infra")
-    assert len(problems) == 1 and "no active pull_request rule" in problems[0]
+    assert len(problems) == 1 and problems[0].startswith("main is unprotected")
 
 
 @respx.mock
-def test_no_rules_at_all_is_a_problem(gh):
+def test_no_pull_request_rule_but_protected_branch_is_not_verifiable(gh):
+    # classic branch protection: its bypass settings need Administration read
     _rules()
-    assert trunkguard.check(gh, "acme/infra")
+    _branch(True)
+    problems = trunkguard.check(gh, "acme/infra")
+    assert len(problems) == 1 and "not verifiable" in problems[0]
+    assert "classic branch protection" in problems[0]
+
+
+@respx.mock
+@pytest.mark.parametrize("protected", [None, "true", 1])
+def test_unknown_protected_value_raises(gh, protected):
+    _rules()
+    _branch(protected)
+    with pytest.raises(GitHubError):
+        trunkguard.check(gh, "acme/infra")
+
+
+@respx.mock
+def test_branch_api_failure_raises(gh):
+    _rules()
+    respx.get(BRANCH).mock(return_value=httpx.Response(404, json={"message": "Not Found"}))
+    with pytest.raises(GitHubError):
+        trunkguard.check(gh, "acme/infra")
 
 
 @respx.mock
@@ -64,7 +93,17 @@ def test_a_bypass_for_the_token_is_a_problem(gh, bypass):
     _rules(_pr_rule(7))
     _ruleset(7, bypass=bypass)
     problems = trunkguard.check(gh, "acme/infra")
-    assert problems == [f"ruleset 7: the ledger token can bypass it ({bypass})"]
+    assert len(problems) == 1 and problems[0].startswith("ruleset 7: the ledger token can bypass")
+    assert f"({bypass})" in problems[0]
+
+
+@respx.mock
+def test_pull_requests_only_is_described_as_a_merge_bypass(gh):
+    _rules(_pr_rule(7))
+    _ruleset(7, bypass="pull_requests_only")
+    assert trunkguard.check(gh, "acme/infra") == [
+        "ruleset 7: the ledger token can bypass it when merging a pull request (pull_requests_only)"
+    ]
 
 
 @respx.mock
@@ -90,6 +129,22 @@ def test_one_ruleset_without_bypass_is_enough(gh):
     _ruleset(7, bypass="always")
     _ruleset(9)
     assert trunkguard.check(gh, "acme/infra") == []
+
+
+@respx.mock
+def test_an_inactive_ruleset_then_one_without_bypass_is_verified(gh):
+    _rules(_pr_rule(7), _pr_rule(9))
+    _ruleset(7, enforcement="evaluate")
+    _ruleset(9)
+    assert trunkguard.check(gh, "acme/infra") == []
+
+
+@respx.mock
+def test_ruleset_is_read_with_its_parents(gh):
+    _rules(_pr_rule(7))
+    route = _ruleset(7)
+    trunkguard.check(gh, "acme/infra")
+    assert route.calls.last.request.url.params["includes_parents"] == "true"
 
 
 @respx.mock
@@ -146,9 +201,10 @@ def test_command_exits_0_when_protected(_env, capsys):
 @respx.mock
 def test_command_exits_1_with_reasons_when_not_protected(_env, capsys):
     _rules()
+    _branch(False)
     assert cli.main(["trunk-guard", "--repo", "acme/infra"]) == 1
     err = capsys.readouterr().err
-    assert err.startswith("trunk-guard: ") and "no active pull_request rule" in err
+    assert err.startswith("trunk-guard: main is unprotected")
 
 
 @respx.mock

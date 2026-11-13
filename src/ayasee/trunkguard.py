@@ -7,10 +7,16 @@ token has, and ``current_user_can_bypass`` then describes the ledger token itsel
 own ``github.token`` could read the rules but not who may bypass them (``bypass_actors`` needs
 write on the ruleset), so it cannot answer the question.
 
-Exit 0 only when an active ruleset with a ``pull_request`` rule applies to ``main`` and the token
-can ``never`` bypass it. Everything else, an API error and an unknown value included, exits 1 with
-the reasons on stderr: not verified is never reported as protected. Classic branch protection is
-not visible here (it needs Administration read), so it reads as "no pull_request rule"."""
+Exit 0 only when an active ruleset with a ``pull_request`` rule applies to ``main`` and the
+token's ``current_user_can_bypass`` for it is ``never``. That means the token cannot push to
+``main`` directly; it does not mean the token cannot reach ``main`` at all: with zero required
+approvals (or without ``require_last_push_approval``) a contents-write token can push to the head
+branch of an open pull request and merge it. Zero approvals is accepted for the solo path.
+
+Without a pull_request rule, ``protected`` of ``GET /repos/{repo}/branches/main`` (Contents read)
+tells an unprotected ``main`` (definite) from classic branch protection, whose bypass settings
+need Administration read and so are not verifiable. Everything else, an API error and an unknown
+value included, exits 1 with the reasons on stderr: not verified is never reported as protected."""
 
 from __future__ import annotations
 
@@ -38,9 +44,15 @@ def check(gh: GitHub, repo: str) -> list[str]:
         if rid not in ids:
             ids.append(rid)
     if not ids:
+        if not gh.branch_protected(repo, TRUNK):
+            return [
+                f"{TRUNK} is unprotected: no ruleset or branch protection requires a pull "
+                "request, so the ledger token can push to it"
+            ]
         return [
-            f"no active pull_request rule on {TRUNK}: the ledger token can push to it "
-            "(classic branch protection is not visible to this check; use a ruleset)"
+            f"{TRUNK} has classic branch protection (or a ruleset with no pull_request rule): "
+            "whether the ledger token can bypass it is not verifiable without Administration "
+            "read; use a ruleset with a pull_request rule"
         ]
     problems: list[str] = []
     for rid in ids:
@@ -50,10 +62,15 @@ def check(gh: GitHub, repo: str) -> list[str]:
             problems.append(f"ruleset {rid}: enforcement is not active")
         elif bypass not in _BYPASS:
             problems.append(f"ruleset {rid}: cannot tell whether the ledger token can bypass it")
+        elif bypass == "pull_requests_only":
+            problems.append(
+                f"ruleset {rid}: the ledger token can bypass it when merging a pull request "
+                "(pull_requests_only)"
+            )
         elif bypass != "never":
             problems.append(f"ruleset {rid}: the ledger token can bypass it ({bypass})")
         else:
-            return []  # this ruleset alone already forces a pull request on the token
+            return []  # this ruleset alone already stops a direct push to main by the token
     return problems
 
 

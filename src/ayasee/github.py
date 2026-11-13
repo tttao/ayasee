@@ -553,12 +553,21 @@ class GitHub:
         )
 
     def ruleset(self, repo: str, ruleset_id: int) -> dict[str, Any]:
-        """``GET /repos/{repo}/rulesets/{id}`` (Metadata: read), parents included.
+        """``GET /repos/{repo}/rulesets/{id}`` (Metadata: read), organization rulesets included.
         ``current_user_can_bypass`` describes the token making the call."""
-        data = self._get(f"/repos/{repo}/rulesets/{ruleset_id}", "ruleset")
+        data = self._get(f"/repos/{repo}/rulesets/{ruleset_id}", "ruleset", includes_parents="true")
         if not isinstance(data, dict):
             raise GitHubError(0, "unexpected ruleset response")
         return data
+
+    def branch_protected(self, repo: str, branch: str) -> bool:
+        """``protected`` of ``GET /repos/{repo}/branches/{branch}`` (Contents: read). The
+        protection settings themselves need Administration read and are not read here."""
+        data = self._get(f"/repos/{repo}/branches/{branch}", "branch")
+        protected = data.get("protected") if isinstance(data, dict) else None
+        if not isinstance(protected, bool):
+            raise GitHubError(0, "unexpected branch response (protected)")
+        return protected
 
     def main_sha(self, repo: str) -> str:
         """Commit SHA at the tip of ``main``."""

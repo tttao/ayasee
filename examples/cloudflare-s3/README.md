@@ -111,7 +111,8 @@ secret `AYASEE_LEDGER_TOKEN`; the callers pass it as `ledger-token`. Protect `ma
 token cannot be used to change the code: it can still write any branch, so require pull requests on
 `main` (a ruleset with no bypass). The staged and nightly runs check this with the ledger token and
 warn when it is missing ([the ledger token and `main`](../../docs/concepts/staged-run.md#the-ledger-token-and-main));
-classic branch protection is not visible to that check.
+with classic branch protection the check cannot see whether the token can bypass it, so use a
+ruleset.
 
 The cockpit reads the same branch through the contents API. Its `repos.yaml` line:
 
