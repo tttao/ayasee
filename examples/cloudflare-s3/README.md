@@ -50,12 +50,14 @@ cd bootstrap
 export GITHUB_TOKEN=...      # a token that can administer the repository; run this locally
 tofu init
 tofu apply -var github_owner=my-org -var github_repository=my-estate \
-  -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}'
+  -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}' \
+  -var generate_plan_passphrase=true   # optional: step 3
 ```
 
 It creates `test-plan`, `test`, `prod-plan`, `prod`, `prod-breakglass`, `prod-pr-plan`, `drift-test`
 and `drift-prod` (the pull-request plan environment is named after the first stage,
-`<first stage>-plan`), and sets `AYASEE_LEDGER_URL` on every environment that touches the ledger (step 4).
+`<first stage>-plan`), sets `AYASEE_LEDGER_URL` on every environment that touches the ledger (step 4),
+and, with `generate_plan_passphrase=true`, sets `AYASEE_PLAN_PASSPHRASE` (step 3).
 
 Managing GitHub environments needs administration rights on the repository. Run this root from a
 maintainer's machine, or from a workflow with a GitHub App or fine-grained token that has the
@@ -79,6 +81,24 @@ does. Cloudflare API tokens are scoped to zones and accounts, not to records: th
 edit every DNS record of the zone, the prod ones included. Keep it in `test` only, give it no tunnel
 or Access permission, and use a separate zone for the test hostnames if that is not acceptable.
 
+The bootstrap prints every secret still to create, one `gh secret set` command per environment and
+secret, with the scope its value needs as a comment (never a value):
+
+```bash
+tofu output -raw secret_commands
+```
+
+```
+gh secret set AYASEE_LEDGER_TOKEN --repo my-org/my-estate   # fine-grained token, this repository only, ...
+gh secret set CLOUDFLARE_API_TOKEN --env test --repo my-org/my-estate   # Cloudflare token: Zone DNS Edit
+...
+```
+
+Run the lines one at a time: `gh secret set` without `--body` prompts for the value, so no value
+lands on a command line or in a shell history (pasting the whole block would feed the next line to
+the first prompt). The list is derived from the `stages` and `shared_units_pr_plan` locals of
+`bootstrap/main.tf`, and names the same secrets `ayasee doctor` checks (step 6). The scopes:
+
 | Environment | `CLOUDFLARE_API_TOKEN` | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `AYASEE_PLAN_PASSPHRASE` |
 |---|---|---|---|
 | `test-plan` (PR plan of `test`) | Zone DNS Read | read on `ayasee-state-test` | - |
@@ -88,13 +108,21 @@ or Access permission, and use a separate zone for the test hostnames if that is 
 | `prod`, `prod-breakglass` | Zone DNS Edit, Cloudflare Tunnel Edit, Access: Apps and Policies Edit | read and write on `ayasee-state-prod` | yes |
 | `drift-test`, `drift-prod` | the read permissions of that stage | read and write on that stage's bucket (the lock file) | - |
 
-```bash
-passphrase="$(openssl rand -base64 48 | tr -d '\n')"
-for env in prod-plan prod prod-breakglass; do
-  gh secret set AYASEE_PLAN_PASSPHRASE --env "$env" --body "$passphrase"
-done
-gh secret set CLOUDFLARE_API_TOKEN --env test   # paste the test token; repeat per environment
-```
+**The plan passphrase.** `-var generate_plan_passphrase=true` makes the bootstrap generate
+`AYASEE_PLAN_PASSPHRASE` (64 random characters of `[A-Za-z0-9]`) and set the same value on
+`prod-plan`, `prod` and `prod-breakglass`; `secret_commands` then no longer lists it. It is off by
+default because the github provider has no write-only secret argument: the passphrase is kept in
+plain text in the bootstrap's state (`terraform.tfstate` next to `main.tf`, unless you configure a
+backend), and whoever reads that state can decrypt the approved prod plans. Keep that state as
+private as the passphrase: never commit it, encrypt it with OpenTofu's `TF_ENCRYPTION`, or store it
+in a private backend. Without the option, set it from the printed commands with one value, for
+example from `openssl rand -base64 48`.
+
+Turning the option on replaces a passphrase already set by hand; turning it off, or destroying the
+bootstrap, deletes the secret. Do either only when no approved prod plan is waiting at the gate: a
+plan encrypted with the old passphrase can no longer be applied, and has to be planned again (re-run
+`main`). To rotate a generated passphrase, at the same kind of moment:
+`tofu apply -replace='module.environments.random_password.plan_passphrase[0]' ...`.
 
 The `test-plan` and `prod-pr-plan` tokens are used by pull-request code (same-repository pull
 requests only; forks get no secrets). Keep them read-only. `prod-pr-plan` carries the prod

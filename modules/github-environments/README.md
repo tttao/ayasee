@@ -1,7 +1,7 @@
 # github-environments
 
 Creates the GitHub environments the ayasee workflows expect, plus their environment variables.
-Provider: `integrations/github`.
+Providers: `integrations/github` (`~> 6.12`), `hashicorp/random`.
 
 | Environment | Branches | Reviewers |
 |---|---|---|
@@ -43,4 +43,31 @@ module "environments" {
 }
 ```
 
-Outputs: `environments`, the list of environment names, and `pr_plan_environment`. Test: `tofu init -backend=false && tofu test`.
+## Secrets
+
+The module creates no secret by default. It lists those it cannot create, for a person to set:
+`secret_commands` is one `gh secret set` command per secret, with the scope its value needs as a
+comment and never a value (print it with `tofu output -raw`; run the lines one at a time, since
+`gh` prompts for each value). The list is:
+
+- the repository secrets of `repository_secret_scopes` (name to scope: `AYASEE_LEDGER_TOKEN`,
+  `TEAMS_WEBHOOK`);
+- the environment secrets of `secret_scopes` (environment to name to scope: the provider tokens of
+  `identity: secrets`); an environment the module does not create fails the plan;
+- the plan-key secrets of `prod-plan`, `prod` and `prod-breakglass`, from `key_provider`
+  (`plan_encryption.key_provider`): `AYASEE_PLAN_PASSPHRASE` for `pbkdf2`, `AYASEE_KMS_ACCESS_KEY_ID`
+  and `AYASEE_KMS_SECRET_ACCESS_KEY` for `aws_kms`, none for `azure_vault` (the default).
+
+These are the names `ayasee doctor` checks. `owner` adds `--repo <owner>/<repository>` to each
+command. `pending_secrets` is the same list as data.
+
+`generate_plan_passphrase` (default `false`, `key_provider = "pbkdf2"` only) generates
+`AYASEE_PLAN_PASSPHRASE`, 64 random characters of `[A-Za-z0-9]`, and sets it on `prod-plan`, `prod`
+and `prod-breakglass`. The github provider has no write-only secret argument, so the value is
+kept in plain text in the state of the calling root: whoever reads that state can decrypt the
+approved prod plans, which is why it is opt-in. Turning it on replaces a passphrase set by hand, and
+turning it off deletes the secret; a plan encrypted with the old passphrase can then no longer be
+applied, so do either when no approved prod plan is waiting.
+
+Outputs: `environments`, the list of environment names, `pr_plan_environment`, `secret_commands`,
+`pending_secrets` and `plan_passphrase_environments`. Test: `tofu init -backend=false && tofu test`.
