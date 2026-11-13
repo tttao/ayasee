@@ -165,7 +165,7 @@ environment (`test-plan` for `stages/test/dns`, `prod-plan` for the prod units) 
 the state bucket:
 
 ```bash
-cd stages/prod/tunnel                     # then stages/prod/dns, stages/test/dns, stages/prod/access
+cd stages/test/dns                        # then stages/prod/dns, stages/prod/tunnel, stages/prod/access
 export CLOUDFLARE_API_TOKEN=...           # the read-only token of that plan environment
 terragrunt plan -out=adopt.tfplan && terragrunt show -json adopt.tfplan > adopt.json
 uvx --from "git+https://github.com/tttao/ayasee@<release SHA>" ayasee import-plan --plan-json adopt.json

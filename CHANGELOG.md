@@ -45,13 +45,13 @@ released version into the GitHub release notes.
   help): writes the `import` blocks of a unit's first adoption. For each planned create of a
   supported type it lists the live objects through the provider API (GET requests only, the
   provider's token variable, never printed) and writes one block per address with exactly one
-  match. Two live objects for one address, or one object for two addresses, writes nothing and
+  match; a DNS record other than a CNAME must match on content too. Two live objects for one address, or one object for two addresses, writes nothing and
   exits 1; so does any API error or an ID that is not a plain identifier. Unsupported types and
   values unknown at plan time are listed as `skip`. Lookups exist for the Cloudflare v5 resources of
   the `cloudflare-s3` example (`cloudflare_dns_record`,
   `cloudflare_zero_trust_tunnel_cloudflared_config`, `cloudflare_zero_trust_access_application`
   for account-scoped applications, `cloudflare_zero_trust_access_policy`), in
-  `src/ayasee/importplan/cloudflare.py`. Documented in step 6 of the example README and in the
+  `src/ayasee/importplan/cloudflare.py`. Documented in step 7 of the example README and in the
   brownfield onboarding guide.
 - Pre-commit hooks (`.pre-commit-config.yaml`, `uv run pre-commit install`; `pre-commit` joins the
   dev group): gitleaks on the staged changes and `detect-private-key`, the standard hygiene hooks of

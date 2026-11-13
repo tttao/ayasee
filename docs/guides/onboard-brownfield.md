@@ -121,7 +121,7 @@ ayasee import-plan --plan-json adopt.json        # writes imports.tf next to ter
 It never guesses: when two live objects match one address, or one object matches two addresses, it
 writes nothing and exits 1. A resource type without a lookup, or a value that is unknown at plan
 time, is listed as `skip`; write that block by hand. Any API error writes nothing. The lookups exist
-today for the Cloudflare resources of the [Cloudflare example](../../examples/cloudflare-s3/README.md#6-first-adoption)
+today for the Cloudflare resources of the [Cloudflare example](../../examples/cloudflare-s3/README.md#7-first-adoption)
 (DNS records, the tunnel configuration, Access applications and policies); none for Databricks,
 where the exporter above writes the import blocks. The plan file and `adopt.json` hold plan values:
 delete them. The pull-request plan must then show the result described in step 4.
