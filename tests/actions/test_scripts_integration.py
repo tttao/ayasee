@@ -808,10 +808,21 @@ def test_pbkdf2_plan_is_encrypted_bound_and_applied(fresh):
             {"SG_KEY_VAULT_KEY_ID": "https://v.vault.azure.net/keys/k"},
             "pbkdf2 with key-vault-key-id set is ambiguous",
         ),
-        ({"SG_KEY_PROVIDER": "gcp_kms"}, "key-provider must be azure_vault, pbkdf2 or aws_kms"),
+        (
+            {"SG_KEY_PROVIDER": "vault"},
+            "key-provider must be azure_vault, pbkdf2, aws_kms, gcp_kms or openbao",
+        ),
         (
             {"SG_KEY_PROVIDER": "aws_kms"},
             "AYASEE_PLAN_PASSPHRASE is set but key-provider is aws_kms",
+        ),
+        (
+            {"SG_KEY_PROVIDER": "gcp_kms"},
+            "AYASEE_PLAN_PASSPHRASE is set but key-provider is gcp_kms",
+        ),
+        (
+            {"SG_KEY_PROVIDER": "openbao"},
+            "AYASEE_PLAN_PASSPHRASE is set but key-provider is openbao",
         ),
         (
             {"SG_KEY_PROVIDER": "azure_vault"},

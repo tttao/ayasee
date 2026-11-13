@@ -252,8 +252,9 @@ only; forks get no secrets): give that environment read-only tokens. The prod to
 `prod` and `prod-breakglass`, behind their
 reviewers; `prod-plan` should hold read-only ones.
 
-These tokens never reach the plan key. With `plan_encryption.key_provider: aws_kms` the plan key is
-reached with its own key pair, `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY`,
+These tokens never reach the plan key. With `plan_encryption.key_provider: aws_kms`, `gcp_kms` or
+`openbao` the plan key is reached with its own credential (the `AYASEE_KMS_ACCESS_KEY_ID` and
+`AYASEE_KMS_SECRET_ACCESS_KEY` key pair, `AYASEE_GCP_KMS_CREDENTIALS` or `AYASEE_OPENBAO_TOKEN`),
 environment secrets of `prod-plan`, `prod` and `prod-breakglass` only (see
 [key providers](plan-binding.md#key-providers)).
 

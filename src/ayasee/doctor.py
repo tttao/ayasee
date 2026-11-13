@@ -73,12 +73,19 @@ PROVIDER_SECRETS = frozenset(
 PLAN_KEY_SECRETS = {
     "pbkdf2": ("AYASEE_PLAN_PASSPHRASE",),
     "aws_kms": ("AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"),
+    "gcp_kms": ("AYASEE_GCP_KMS_CREDENTIALS",),
+    "openbao": ("AYASEE_OPENBAO_TOKEN",),
+}
+PLAN_KEY_VARIABLES = {
+    "azure_vault": "AYASEE_KEY_VAULT_KEY_ID",
+    "aws_kms": "AYASEE_KMS_KEY_ID",
+    "gcp_kms": "AYASEE_GCP_KMS_KEY_NAME",
+    "openbao": "AYASEE_OPENBAO_KEY_URL",
 }
 # the dedicated key of an s3:// ledger (issue #10): environment secrets of every environment whose
 # guard and ledger steps read or write the ledger, never the state key; both or neither
 LEDGER_KEY_SECRETS = ("AYASEE_LEDGER_AWS_ACCESS_KEY_ID", "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
 LEDGER_KEY_KINDS = frozenset({"iac-staged", "iac-nightly", "iac-breakglass"})
-PLAN_KEY_VARIABLES = {"azure_vault": "AYASEE_KEY_VAULT_KEY_ID", "aws_kms": "AYASEE_KMS_KEY_ID"}
 OIDC_VARIABLES = ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID")
 GATED = ("prod", "prod-breakglass", "prod-pr-plan")
 LOCK_KEY = "ayasee-doctor-lock-check.tflock"

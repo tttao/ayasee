@@ -115,6 +115,8 @@ the key source changes. `sg_setup_encryption` in `actions/lib/ayasee-lib.sh` bui
 | `azure_vault` (default) | The Key Vault key in the `AYASEE_KEY_VAULT_KEY_ID` variable, `https://<vault>.vault.azure.net/keys/<name>` without a key version (so rotation does not break a pending approval). Managed HSM keys are not supported yet. | The identities with `unwrapKey` on that key: `prod-plan`, `prod`, `prod-breakglass` |
 | `pbkdf2` | The passphrase in the `AYASEE_PLAN_PASSPHRASE` secret, at least 32 characters of `[A-Za-z0-9+/=_.-]` (for example `openssl rand -base64 48`), turned into the key by OpenTofu's `pbkdf2` provider. | The environments that hold the secret. Create it as an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. |
 | `aws_kms` | The AWS KMS key in the `AYASEE_KMS_KEY_ID` variable: a key ARN `arn:aws:kms:<region>:<account>:key/<id>` (multi-Region `mrk-` keys included) or an alias ARN `arn:aws:kms:<region>:<account>:alias/<name>`; the region is taken from the ARN, a bare key id is refused. OpenTofu's `aws_kms` provider asks KMS for an `AES_256` data key with the encryption context `ayasee = plan`, using the IAM key pair in the `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY` secrets. Works with either `identity`. Needs OpenTofu 1.13 or later (the default pin of the setup action, 1.13.9): older versions reject `encryption_context`. | The environments that hold the key pair. Create both as environment secrets of `prod-plan`, `prod` and `prod-breakglass` only. |
+| `gcp_kms` | The Cloud KMS key in the `AYASEE_GCP_KMS_KEY_NAME` variable, `projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>` without a key version (so rotation does not break a pending approval). OpenTofu's `gcp_kms` provider has KMS encrypt a fresh 32-byte data key, using the service-account key file in the `AYASEE_GCP_KMS_CREDENTIALS` secret. Works with either `identity`. | The environments that hold the key file. Create it as an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. |
+| `openbao` | The OpenBao transit key in the `AYASEE_OPENBAO_KEY_URL` variable, `https://<host>[:<port>]/v1/<transit mount>/keys/<name>` (the key's own API URL; the mount may have several segments). OpenTofu's `openbao` provider asks the transit engine for a 32-byte data key, using the token in the `AYASEE_OPENBAO_TOKEN` secret. Works with either `identity`. HTTPS only, and the runner must trust the server certificate. | The environments that hold the token. Create it as an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. |
 
 With `pbkdf2`, the reusable workflows pass `AYASEE_PLAN_PASSPHRASE` to the plan step of `prod-plan`,
 the apply step of `prod` and the plan and apply steps of `iac-breakglass`, and to no other step.
@@ -159,21 +161,55 @@ port, with no AWS configuration of the developer in reach). A plan encrypted and
 a real KMS key has not been run: the pbkdf2 integration test covers the rest of the path, which is
 the same for every provider.
 
-Any second key source is refused as ambiguous: a key URL with `pbkdf2` or `aws_kms`, a passphrase
-with `azure_vault` or `aws_kms`, a KMS key (`AYASEE_KMS_KEY_ID`) or KMS key pair with `azure_vault`
-or `pbkdf2`, or the test-only `AYASEE_TEST_PASSPHRASE` next to any of them.
+With `gcp_kms` and `openbao` (issue #10), the key service is reached the same way: with a
+dedicated prod-only credential, never with the credentials of the stage. The reusable workflows pass
+`AYASEE_GCP_KMS_CREDENTIALS` or `AYASEE_OPENBAO_TOKEN` to the same four steps as the other plan-key
+secrets and to no other step; pass them by name and create them as environment secrets of
+`prod-plan`, `prod` and `prod-breakglass` only, with the same caveat about repository-level secrets.
+`ayasee doctor` checks that the secret is passed, that it is an environment secret of those three
+environments and that the key variable is set on them.
 
-`gcp_kms` and `openbao`, which OpenTofu also supports, are not wired; the configuration refuses
-them. Rendering their blocks is easy; giving the prod jobs, and only them, a credential that reaches
-the key is not. The reusable workflows pass no Google Cloud credential at all, so `gcp_kms` needs
-either a Workload Identity Federation login (`google-github-actions/auth`, a new pinned action and
-per-environment variables) or a stored service-account key as a prod-only secret like the
-`aws_kms` key pair. Organisation policies often block service-account keys, and a key file is
-multi-line JSON that cannot be checked against a safe character set before it goes into
-`TF_ENCRYPTION`. `openbao` needs a server the runners can
-reach and a token: a stored token expires, and a JWT login with the GitHub OIDC token needs a login
-step that the hash-pinned setup does not install. Both are choices about the identity model (D7)
-for the maintainers to make first.
+- **`gcp_kms`.** `AYASEE_GCP_KMS_CREDENTIALS` holds the JSON key file of a service account, as
+  downloaded. `sg_setup_encryption` accepts only a service-account key (`"type": "service_account"`,
+  a private key, a `...iam.gserviceaccount.com` client email, the default token URI): an
+  `external_account` or `authorized_user` file is refused, since the first fetches a token from a
+  URL or command of its own. A multi-line key file cannot be checked against a safe character set,
+  so it never goes into `TF_ENCRYPTION`: it is written to a new file readable only by the runner
+  user under `RUNNER_TEMP`, `TF_ENCRYPTION` names that file in `credentials`, the secret is removed
+  from the environment, and the file is deleted when the plan or apply script exits (a runner killed
+  mid-step leaves it to the end-of-job cleanup of `RUNNER_TEMP`). Give the service account only
+  the Cloud KMS CryptoKey Encrypter/Decrypter role (`roles/cloudkms.cryptoKeyEncrypterDecrypter`),
+  granted on the one key, not on the key ring or the project. OpenTofu would prefer
+  `GOOGLE_OAUTH_ACCESS_TOKEN` (and possibly an impersonation variable) of the step to that file, so
+  `sg_setup_encryption` refuses `gcp_kms` while `GOOGLE_OAUTH_ACCESS_TOKEN`,
+  `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` or `GOOGLE_BACKEND_IMPERSONATE_SERVICE_ACCOUNT` is set in the
+  plan or apply step. Organisation policies often forbid
+  service-account keys (`iam.disableServiceAccountKeyCreation`); Workload Identity Federation with
+  the GitHub OIDC token is not wired yet.
+- **`openbao`.** `AYASEE_OPENBAO_TOKEN` is rendered into the `key_provider` block (`token`) like the
+  `aws_kms` key pair and removed from the environment, so a `BAO_TOKEN` or `VAULT_TOKEN` of the
+  stage plays no part; it must be 16 to 1024 characters of `[A-Za-z0-9._-]`. Give the token a
+  policy with only `update` on `<transit mount>/datakey/plaintext/<key>` and
+  `<transit mount>/decrypt/<key>`. OpenTofu does not renew the token, so a stored token has to
+  outlive the time a plan waits for approval: use a token with an explicit long TTL (or a periodic
+  token renewed elsewhere) and rotate the secret before it expires; an expired token fails the apply,
+  and the run has to be planned again. A JWT login with the GitHub OIDC token is not wired yet.
+  OpenBao namespaces are not supported, and `BAO_SKIP_VERIFY` or `VAULT_SKIP_VERIFY` in the plan or
+  apply step is refused.
+
+What has been tested for `gcp_kms` and `openbao`: the rendered blocks, the key-name, key-URL,
+key-file and token checks, the refusals and the clean-up of the key file
+(`tests/actions/test_lib_encryption.py`), and that OpenTofu 1.13 accepts each block and makes its
+first call to the key service: for `gcp_kms` after loading the throwaway service-account key from
+the file (stopped by a proxy on a closed local port), for `openbao` to
+`<address>/v1/<transit mount>/datakey/plaintext/<key>` (a closed local port). No plan has been
+encrypted and decrypted through a real Cloud KMS key or OpenBao server.
+
+Any second key source is refused as ambiguous: a key reference (`AYASEE_KEY_VAULT_KEY_ID`,
+`AYASEE_KMS_KEY_ID`, `AYASEE_GCP_KMS_KEY_NAME`, `AYASEE_OPENBAO_KEY_URL`) or key credential
+(`AYASEE_PLAN_PASSPHRASE`, the `AYASEE_KMS_*` key pair, `AYASEE_GCP_KMS_CREDENTIALS`,
+`AYASEE_OPENBAO_TOKEN`) of a provider other than the chosen one, or the test-only
+`AYASEE_TEST_PASSPHRASE` next to any of them.
 
 ## What each mode allows (R29)
 

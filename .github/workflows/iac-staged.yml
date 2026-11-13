@@ -69,6 +69,22 @@ on:
           Only for plan_encryption.key_provider aws_kms. The secret access key that goes with
           AYASEE_KMS_ACCESS_KEY_ID; same rules.
         required: false
+      AYASEE_GCP_KMS_CREDENTIALS:
+        description: >-
+          Only for plan_encryption.key_provider gcp_kms. JSON key file of a Google service account
+          whose only role is Cloud KMS CryptoKey Encrypter/Decrypter on the AYASEE_GCP_KMS_KEY_NAME
+          key. Pass it by name and create it as an environment secret of prod-plan, prod and
+          prod-breakglass only, never at repository or organisation level. Only the prod plan and
+          apply steps receive it.
+        required: false
+      AYASEE_OPENBAO_TOKEN:
+        description: >-
+          Only for plan_encryption.key_provider openbao. OpenBao token whose only policy allows
+          update on <transit mount>/datakey/plaintext/<key> and <transit mount>/decrypt/<key> of
+          the AYASEE_OPENBAO_KEY_URL key. Pass it by name and create it as an environment secret of
+          prod-plan, prod and prod-breakglass only, never at repository or organisation level. Only
+          the prod plan and apply steps receive it.
+        required: false
       CLOUDFLARE_API_TOKEN:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
@@ -856,6 +872,8 @@ jobs:
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
           AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
+          AYASEE_GCP_KMS_CREDENTIALS: ${{ secrets.AYASEE_GCP_KMS_CREDENTIALS }} # gcp_kms only
+          AYASEE_OPENBAO_TOKEN: ${{ secrets.AYASEE_OPENBAO_TOKEN }} # openbao only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -865,6 +883,8 @@ jobs:
           key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
           kms-key-id: ${{ vars.AYASEE_KMS_KEY_ID }}
+          gcp-kms-key-name: ${{ vars.AYASEE_GCP_KMS_KEY_NAME }}
+          openbao-key-url: ${{ vars.AYASEE_OPENBAO_KEY_URL }}
           allow-cascade: ${{ needs.resolve.outputs.allow-cascade }} # UNSAFE when true (R52)
           shared-units: ${{ needs.resolve.outputs.shared-units }} # flagged in the gate summary
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
@@ -1016,6 +1036,8 @@ jobs:
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
           AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
+          AYASEE_GCP_KMS_CREDENTIALS: ${{ secrets.AYASEE_GCP_KMS_CREDENTIALS }} # gcp_kms only
+          AYASEE_OPENBAO_TOKEN: ${{ secrets.AYASEE_OPENBAO_TOKEN }} # openbao only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -1027,6 +1049,8 @@ jobs:
           key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
           kms-key-id: ${{ vars.AYASEE_KMS_KEY_ID }}
+          gcp-kms-key-name: ${{ vars.AYASEE_GCP_KMS_KEY_NAME }}
+          openbao-key-url: ${{ vars.AYASEE_OPENBAO_KEY_URL }}
       - id: units
         name: Locate the units record
         if: ${{ always() }}

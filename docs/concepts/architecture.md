@@ -237,8 +237,8 @@ flowchart LR
   environment secret, the quickstart has a [reference S3 `root.hcl`](../guides/quickstart.md#without-azure),
   and `github-branch://` is the ledger store that needs no cloud. The experimental `s3://` ledger store is
   wired into the reusable workflows with a dedicated ledger key and readable by the cockpit with
-  a read-only key of its own, but has not run against a real S3 or R2 bucket. The `aws_kms` key provider has not run against a real KMS
-  key, and the `openbao` and `gcp_kms` key providers are not wired.
+  a read-only key of its own, but has not run against a real S3 or R2 bucket. The `aws_kms`, `gcp_kms` and
+  `openbao` key providers have not run against a real KMS key or OpenBao server.
 - **Up to five stages.** `iac-staged` has four fixed pre-prod job slots, so it runs one to four
   pre-prod stages and then `prod`; longer lists are refused in `resolve`. A matrix over the stages
   would not keep their order (see [the staged run](staged-run.md#stages)). No two-, four- or

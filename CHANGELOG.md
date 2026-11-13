@@ -117,8 +117,21 @@ released version into the GitHub release notes.
   `iac-breakglass`, passed only to the prod plan and apply steps, so it works with either
   `identity`. A KMS key or key pair next to another key source is refused as ambiguous. Tested:
   the rendered block, the ARN and key-pair checks, and OpenTofu 1.13.9 accepting the block offline;
-  not yet run against a real KMS key. `gcp_kms` and `openbao` stay
-  refused: neither has a credential path into the prod jobs yet.
+  not yet run against a real KMS key.
+- `plan_encryption.key_provider: gcp_kms` and `openbao` (#10). `gcp_kms` wraps the prod plan key
+  with the Cloud KMS key in the `AYASEE_GCP_KMS_KEY_NAME` variable (no key version), reached with
+  the service-account key file in the new optional secret `AYASEE_GCP_KMS_CREDENTIALS`; the file is
+  checked to be a service-account key, written to a private file under `RUNNER_TEMP` that the plan
+  or apply script deletes on exit, and only its path goes into `TF_ENCRYPTION`. `openbao` wraps it
+  with the OpenBao transit key in the `AYASEE_OPENBAO_KEY_URL` variable
+  (`https://<host>[:<port>]/v1/<mount>/keys/<name>`), reached with the token in the new optional
+  secret `AYASEE_OPENBAO_TOKEN`. New `gcp-kms-key-name` and `openbao-key-url` inputs of the plan
+  and apply actions; `iac-staged` and `iac-breakglass` pass the secrets only to the prod plan and
+  apply steps, and `ayasee doctor` checks them and the variables in `prod-plan`, `prod` and
+  `prod-breakglass`. Any key reference or credential of another provider is refused as ambiguous.
+  Tested: the rendered blocks, the checks and refusals, and OpenTofu 1.13.9 accepting each block
+  offline up to its first call to the key service; not yet run against a real Cloud KMS key or
+  OpenBao server. Workload Identity Federation (GCP) and JWT login (OpenBao) are not wired.
 - The cockpit shows the opt-ins that weaken a compliant default (#1): the collector reads each
   repository's `.ayasee.yaml` at `main` (`config` in `repos.yaml`) and the snapshot carries an
   optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,

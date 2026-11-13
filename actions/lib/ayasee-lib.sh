@@ -173,6 +173,67 @@ sg_aws_kms_encryption() {
   sg_encryption_tail aws_kms
 }
 
+# sg_gcp_kms_encryption KEY_NAME CREDENTIALS_FILE: print a TF_ENCRYPTION body (gcp_kms, aes_gcm,
+# plan enforced). The service-account key is read from CREDENTIALS_FILE, a private file the
+# caller wrote, so the multi-line key itself never goes into TF_ENCRYPTION and the step's own
+# Google credentials (GOOGLE_CREDENTIALS, application default credentials) are never used for
+# KMS. The caller validates both values against patterns that cannot break out of an HCL string.
+sg_gcp_kms_encryption() {
+  printf '%s' "key_provider \"gcp_kms\" \"ayasee\" {
+  kms_encryption_key = \"$1\"
+  key_length         = 32
+  credentials        = \"$2\"
+}"
+  sg_encryption_tail gcp_kms
+}
+
+# sg_openbao_encryption ADDRESS TRANSIT_PATH KEY_NAME TOKEN: print a TF_ENCRYPTION body (openbao
+# transit, aes_gcm, plan enforced). The token is the dedicated prod-only OpenBao token, so a
+# BAO_TOKEN or VAULT_TOKEN of the step is never used for the plan key. The caller validates every
+# value against a pattern that cannot break out of an HCL string.
+sg_openbao_encryption() {
+  printf '%s' "key_provider \"openbao\" \"ayasee\" {
+  address             = \"$1\"
+  transit_engine_path = \"$2\"
+  key_name            = \"$3\"
+  key_length          = 32
+  token               = \"$4\"
+}"
+  sg_encryption_tail openbao
+}
+
+# sg_gcp_credentials_file: validate the service-account key in AYASEE_GCP_KMS_CREDENTIALS, write
+# it to a new private file under RUNNER_TEMP (removed when the calling script exits) and set
+# SG_GCP_CREDENTIALS_FILE to its path. Runs in the calling shell, not in a subshell, so the EXIT
+# trap belongs to the plan or apply script; neither sets a trap of its own.
+sg_gcp_credentials_file() {
+  # one JSON object, a service-account key with its private key (the PEM label is split so the
+  # detect-private-key hook does not flag this line): no other credential type (an
+  # external_account file runs a command or fetches a URL of its own choosing)
+  printf '%s' "$AYASEE_GCP_KMS_CREDENTIALS" | jq -e '
+      type == "object" and .type == "service_account"
+      and (.private_key | type == "string" and startswith("-----BEGIN " + "PRIVATE KEY-----"))
+      and (.client_email | type == "string" and test("^[a-z0-9-]+@[a-z0-9.-]+\\.iam\\.gserviceaccount\\.com$"))
+      and ((.token_uri // "https://oauth2.googleapis.com/token") == "https://oauth2.googleapis.com/token")
+    ' >/dev/null 2>&1 ||
+    sg_die "AYASEE_GCP_KMS_CREDENTIALS must be a Google service-account key file (JSON, type service_account, token_uri https://oauth2.googleapis.com/token)"
+  local dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}" file
+  # the path goes into an HCL string and into the EXIT trap below
+  [[ "$dir" =~ ^/[A-Za-z0-9/._-]*$ ]] ||
+    sg_die "the gcp_kms credentials file needs RUNNER_TEMP to be an absolute path of [A-Za-z0-9/._-]"
+  file="$(umask 077 && mktemp "$dir/ayasee-gcp-kms.XXXXXXXX")" ||
+    sg_die "cannot create the gcp_kms credentials file in $dir"
+  [[ "$file" =~ ^/[A-Za-z0-9/._-]+$ ]] || {
+    rm -f -- "$file"
+    sg_die "the gcp_kms credentials file path has characters other than [A-Za-z0-9/._-]"
+  }
+  # shellcheck disable=SC2064 # the path is fixed now, on purpose
+  trap "rm -f -- '$file'" EXIT
+  printf '%s' "$AYASEE_GCP_KMS_CREDENTIALS" >"$file" ||
+    sg_die "cannot write the gcp_kms credentials file"
+  SG_GCP_CREDENTIALS_FILE="$file"
+}
+
 # sg_setup_encryption TEMPLATE: export TF_ENCRYPTION when SG_ENCRYPT=true, or fail closed.
 # SG_KEY_PROVIDER (plan_encryption.key_provider) picks the key source:
 #   azure_vault (default)  the Azure Key Vault key SG_KEY_VAULT_KEY_ID. The key URL must not carry a
@@ -187,15 +248,26 @@ sg_aws_kms_encryption() {
 #                          secrets of prod-plan, prod and prod-breakglass only. The pair is
 #                          rendered into TF_ENCRYPTION; no message prints it, and GitHub masks it
 #                          because the workflows take it from the secrets context.
+#   gcp_kms                the Cloud KMS key SG_GCP_KMS_KEY_NAME
+#                          (projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>, no version),
+#                          reached with the service-account key file in AYASEE_GCP_KMS_CREDENTIALS,
+#                          an environment secret of prod-plan, prod and prod-breakglass only. The
+#                          key goes to a private file under RUNNER_TEMP that is removed when the
+#                          script exits; TF_ENCRYPTION holds only its path.
+#   openbao                the OpenBao transit key SG_OPENBAO_KEY_URL
+#                          (https://<host>[:<port>]/v1/<transit mount>/keys/<name>), reached with
+#                          the token in AYASEE_OPENBAO_TOKEN, an environment secret of prod-plan,
+#                          prod and prod-breakglass only. The token is rendered into TF_ENCRYPTION,
+#                          like the aws_kms key pair.
 # AYASEE_TEST_PASSPHRASE (tests only) replaces any of them. Any second key source next to the
-# chosen one (a key URL, KMS key or KMS key pair with another provider, a passphrase with
-# azure_vault or aws_kms, the test passphrase with any) is ambiguous and an error.
+# chosen one (a key reference or key credential of another provider, a passphrase with any other
+# provider, the test passphrase with any) is ambiguous and an error.
 sg_setup_encryption() {
   local tmpl="$1" provider="${SG_KEY_PROVIDER:-azure_vault}"
   unset TF_ENCRYPTION
   [ "${SG_ENCRYPT:-true}" = true ] || return 0
-  case "$provider" in azure_vault | pbkdf2 | aws_kms) ;; *)
-    sg_die "key-provider must be azure_vault, pbkdf2 or aws_kms, got: $provider" ;;
+  case "$provider" in azure_vault | pbkdf2 | aws_kms | gcp_kms | openbao) ;; *)
+    sg_die "key-provider must be azure_vault, pbkdf2, aws_kms, gcp_kms or openbao, got: $provider" ;;
   esac
   if [ -n "${AYASEE_TEST_PASSPHRASE:-}" ]; then
     [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
@@ -204,6 +276,14 @@ sg_setup_encryption() {
       sg_die "both AYASEE_TEST_PASSPHRASE and kms-key-id are set; use exactly one"
     [ -z "${AYASEE_KMS_ACCESS_KEY_ID:-}${AYASEE_KMS_SECRET_ACCESS_KEY:-}" ] ||
       sg_die "both AYASEE_TEST_PASSPHRASE and the AYASEE_KMS_* key pair are set; use exactly one"
+    [ -z "${SG_GCP_KMS_KEY_NAME:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and gcp-kms-key-name are set; use exactly one"
+    [ -z "${AYASEE_GCP_KMS_CREDENTIALS:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and AYASEE_GCP_KMS_CREDENTIALS are set; use exactly one"
+    [ -z "${SG_OPENBAO_KEY_URL:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and openbao-key-url are set; use exactly one"
+    [ -z "${AYASEE_OPENBAO_TOKEN:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and AYASEE_OPENBAO_TOKEN are set; use exactly one"
     [ -z "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
       sg_die "both AYASEE_TEST_PASSPHRASE and AYASEE_PLAN_PASSPHRASE are set; use exactly one"
     [[ "$AYASEE_TEST_PASSPHRASE" =~ ^[A-Za-z0-9_.-]{16,}$ ]] ||
@@ -216,6 +296,14 @@ sg_setup_encryption() {
     sg_die "kms-key-id is set but key-provider is $provider; set plan_encryption.key_provider: aws_kms or unset AYASEE_KMS_KEY_ID"
   [ "$provider" = aws_kms ] || [ -z "${AYASEE_KMS_ACCESS_KEY_ID:-}${AYASEE_KMS_SECRET_ACCESS_KEY:-}" ] ||
     sg_die "AYASEE_KMS_ACCESS_KEY_ID or AYASEE_KMS_SECRET_ACCESS_KEY is set but key-provider is $provider; set plan_encryption.key_provider: aws_kms or remove the secrets"
+  [ "$provider" = gcp_kms ] || [ -z "${SG_GCP_KMS_KEY_NAME:-}" ] ||
+    sg_die "gcp-kms-key-name is set but key-provider is $provider; set plan_encryption.key_provider: gcp_kms or unset AYASEE_GCP_KMS_KEY_NAME"
+  [ "$provider" = gcp_kms ] || [ -z "${AYASEE_GCP_KMS_CREDENTIALS:-}" ] ||
+    sg_die "AYASEE_GCP_KMS_CREDENTIALS is set but key-provider is $provider; set plan_encryption.key_provider: gcp_kms or remove the secret"
+  [ "$provider" = openbao ] || [ -z "${SG_OPENBAO_KEY_URL:-}" ] ||
+    sg_die "openbao-key-url is set but key-provider is $provider; set plan_encryption.key_provider: openbao or unset AYASEE_OPENBAO_KEY_URL"
+  [ "$provider" = openbao ] || [ -z "${AYASEE_OPENBAO_TOKEN:-}" ] ||
+    sg_die "AYASEE_OPENBAO_TOKEN is set but key-provider is $provider; set plan_encryption.key_provider: openbao or remove the secret"
   [ "$provider" = pbkdf2 ] || [ -z "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
     sg_die "AYASEE_PLAN_PASSPHRASE is set but key-provider is $provider; set plan_encryption.key_provider: pbkdf2 or remove the secret"
   [ "$provider" = azure_vault ] || [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
@@ -249,6 +337,52 @@ sg_setup_encryption() {
       # the pair now lives only in TF_ENCRYPTION: keep it out of the environment of every
       # later child process (terragrunt, tofu providers, hooks)
       unset AYASEE_KMS_ACCESS_KEY_ID AYASEE_KMS_SECRET_ACCESS_KEY
+      ;;
+    gcp_kms)
+      local LC_ALL=C
+      [ -n "${SG_GCP_KMS_KEY_NAME:-}" ] ||
+        sg_die "key-provider gcp_kms needs the gcp-kms-key-name input (the AYASEE_GCP_KMS_KEY_NAME variable)"
+      [ -n "${AYASEE_GCP_KMS_CREDENTIALS:-}" ] ||
+        sg_die "key-provider gcp_kms needs AYASEE_GCP_KMS_CREDENTIALS (an environment secret of prod-plan, prod and prod-breakglass)"
+      # project id or domain-scoped project; a key, never a key version (rotation would break a
+      # pending approval) and never a key ring
+      local re='^projects/([a-z][a-z0-9.:-]{4,61}[a-z0-9])/locations/([a-z0-9-]{1,63})/keyRings/([A-Za-z0-9_-]{1,63})/cryptoKeys/([A-Za-z0-9_-]{1,63})$'
+      [[ "$SG_GCP_KMS_KEY_NAME" =~ $re ]] ||
+        sg_die "gcp-kms-key-name must look like projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key> (no key version)"
+      # OpenTofu's gcp_kms provider prefers these to the credentials file: refuse rather than
+      # reach the key with the step's own Google identity
+      local v
+      for v in GOOGLE_OAUTH_ACCESS_TOKEN GOOGLE_IMPERSONATE_SERVICE_ACCOUNT GOOGLE_BACKEND_IMPERSONATE_SERVICE_ACCOUNT; do
+        [ -z "${!v:-}" ] ||
+          sg_die "$v is set in this step; key-provider gcp_kms reaches the key with AYASEE_GCP_KMS_CREDENTIALS only, so remove $v from the plan and apply steps"
+      done
+      sg_gcp_credentials_file
+      TF_ENCRYPTION="$(sg_gcp_kms_encryption "$SG_GCP_KMS_KEY_NAME" "$SG_GCP_CREDENTIALS_FILE")"
+      # the key now lives only in the private file: keep it out of the environment of every
+      # later child process (terragrunt, tofu providers, hooks)
+      unset AYASEE_GCP_KMS_CREDENTIALS
+      ;;
+    openbao)
+      local LC_ALL=C
+      local v
+      for v in BAO_SKIP_VERIFY VAULT_SKIP_VERIFY; do
+        [ -z "${!v:-}" ] ||
+          sg_die "$v is set in this step; key-provider openbao always verifies the server certificate, so remove $v"
+      done
+      [ -n "${SG_OPENBAO_KEY_URL:-}" ] ||
+        sg_die "key-provider openbao needs the openbao-key-url input (the AYASEE_OPENBAO_KEY_URL variable)"
+      [ -n "${AYASEE_OPENBAO_TOKEN:-}" ] ||
+        sg_die "key-provider openbao needs AYASEE_OPENBAO_TOKEN (an environment secret of prod-plan, prod and prod-breakglass)"
+      [[ "$AYASEE_OPENBAO_TOKEN" =~ ^[A-Za-z0-9._-]{16,1024}$ ]] ||
+        sg_die "AYASEE_OPENBAO_TOKEN must be 16 to 1024 chars of [A-Za-z0-9._-]"
+      local re='^(https://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?)/v1/([A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*)/keys/([A-Za-z0-9_-]{1,128})$'
+      [[ "$SG_OPENBAO_KEY_URL" =~ $re ]] ||
+        sg_die "openbao-key-url must look like https://<host>[:<port>]/v1/<transit mount>/keys/<name>"
+      TF_ENCRYPTION="$(sg_openbao_encryption "${BASH_REMATCH[1]}" "/${BASH_REMATCH[4]}" \
+        "${BASH_REMATCH[6]}" "$AYASEE_OPENBAO_TOKEN")"
+      # the token now lives only in TF_ENCRYPTION: keep it out of the environment of every later
+      # child process
+      unset AYASEE_OPENBAO_TOKEN
       ;;
     azure_vault)
       [ -n "${SG_KEY_VAULT_KEY_ID:-}" ] ||
