@@ -152,10 +152,19 @@ def _parse(raw: Any) -> Config:
     if "units_root" in top:
         cfg.units_root = _rel_dir(top["units_root"], "units_root")
     if cfg.units_root == cfg.iac_root or not _inside(cfg.units_root, cfg.iac_root):
-        raise ConfigError(
+        message = (
             f"units_root: must be a directory inside iac_root ({cfg.iac_root!r}), "
             f"got {cfg.units_root!r}"
         )
+        joined = posixpath.join(cfg.iac_root, cfg.units_root)
+        top_dir = cfg.units_root.split("/")[0]
+        if cfg.iac_root != "." and cfg.units_root != "." and top_dir != cfg.iac_root.split("/")[0]:
+            # the usual mistake: units_root written relative to iac_root (or left at its default)
+            message += (
+                "; units_root is relative to the repository root, not to iac_root: "
+                f"write units_root: {joined}"
+            )
+        raise ConfigError(message)
     if "ledger" in top:
         section = _mapping(top["ledger"], "ledger", {"url"})
         if section.get("url") is not None:
