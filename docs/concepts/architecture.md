@@ -235,8 +235,9 @@ flowchart LR
   the cockpit),
   `plan_encryption.key_provider: pbkdf2` encrypts the prod plan with a passphrase held as an
   environment secret, the quickstart has a [reference S3 `root.hcl`](../guides/quickstart.md#without-azure),
-  and `github-branch://` is the ledger store that needs no cloud. There is no `s3://` ledger store,
-  and the `openbao`, `aws_kms` and `gcp_kms` key providers are not wired.
+  and `github-branch://` is the ledger store that needs no cloud. The `s3://` ledger store works from
+  the CLI but its guard and ledger steps do not receive AWS credentials in the reusable workflows
+  yet, and the cockpit cannot read it. The `openbao`, `aws_kms` and `gcp_kms` key providers are not wired.
 - **Up to five stages.** `iac-staged` has four fixed pre-prod job slots, so it runs one to four
   pre-prod stages and then `prod`; longer lists are refused in `resolve`. A matrix over the stages
   would not keep their order (see [the staged run](staged-run.md#stages)). No two-, four- or

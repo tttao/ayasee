@@ -18,6 +18,15 @@ released version into the GitHub release notes.
 - The `identity: secrets` DEVIATION label now says that stages are isolated only as far as the
   provider token scopes are (#11): a pre-prod token whose scope covers prod objects (a shared DNS
   zone, for example) can change them without the prod gate.
+- An **experimental** `s3://` ledger store (#10, item 1; the URL format may change):
+  `s3://<bucket>?region=<region>&prefix=<prefix>&endpoint=<https>` for Amazon S3 and
+  S3-compatible stores. A small SigV4 client in `src/ayasee/s3.py` (standard
+  library and `httpx`, no new dependency) reads credentials from `AWS_*` environment variables.
+  The history entry is written with `If-None-Match: *` and `current.json` with `If-Match` on the
+  ETag it read, retried up to 5 times on a lost race. Not yet wired into the reusable workflows
+  (the guard and ledger steps get no AWS credentials) and not readable by the cockpit. Listing
+  responses with a DTD are refused in any encoding, response bodies are capped on their
+  decompressed size, and the endpoint host is normalised the way it is sent.
 - The cockpit shows the opt-ins that weaken a compliant default (#1): the collector reads each
   repository's `.ayasee.yaml` at `main` (`config` in `repos.yaml`) and the snapshot carries an
   optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,

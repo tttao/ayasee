@@ -2,7 +2,7 @@ name: ayasee guard
 description: Refuse to deploy a commit to a stage unless it is live in the preceding stage (fails closed).
 inputs:
   store:
-    description: Ledger store URL (file://, git-branch:// or azure-blob://).
+    description: Ledger store URL (file://, git-branch://, azure-blob:// or s3://).
     required: true
   repo:
     description: Repository as owner/name.

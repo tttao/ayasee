@@ -307,7 +307,8 @@ def estate_repositories(entries: list[RepoEntry], owner: str) -> list[str]:
     repositories of ``github-branch://`` ledgers. All must belong to ``owner``; at most 500.
 
     The cockpit-collect workflow reads ledgers only through the GitHub App token, so any other
-    store URL (file://, git-branch://, azure-blob://) is refused here, before a token is minted."""
+    store URL (file://, git-branch://, azure-blob://, s3://) is refused here, before a token is
+    minted."""
     full: set[str] = set()
     for e in entries:
         full.add(e.repo)

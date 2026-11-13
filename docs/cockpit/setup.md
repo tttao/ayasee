@@ -58,7 +58,7 @@ A snapshot is committed only when it changed apart from `generated_at`; an uncha
 
 A YAML list of `{repo, ledger, stages?, workflows?, config?}`. `config` (default `.ayasee.yaml`) is the repository's ayasee configuration, read at `main` for the cockpit's [labels](../concepts/cockpit.md#the-snapshot-contract-v1).
 
-**`cockpit-collect` reads only `github-branch://` ledgers.** It reads each ledger through the read token (the contents API), and it has no cloud login. A repository whose ayasee ledger is a `git-branch://` store is listed with the matching `github-branch://owner/repo?branch=<branch>` URL. A ledger in Azure Blob storage (`azure-blob://`), or any other store URL, is refused by `ayasee cockpit repos` and the run fails before any token is minted. Keep the ledger of a repository on a branch if it should appear in the cockpit.
+**`cockpit-collect` reads only `github-branch://` ledgers.** It reads each ledger through the read token (the contents API), and it has no cloud login. A repository whose ayasee ledger is a `git-branch://` store is listed with the matching `github-branch://owner/repo?branch=<branch>` URL. A ledger in Azure Blob storage (`azure-blob://`) or in S3 (`s3://`), or any other store URL, is refused by `ayasee cockpit repos` and the run fails before any token is minted. Keep the ledger of a repository on a branch if it should appear in the cockpit.
 
 ```yaml
 - repo: acme/payments

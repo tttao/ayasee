@@ -44,6 +44,7 @@ store. The variable on a GitHub environment wins over the file; the run fails if
 |---|---|---|---|
 | `azure-blob://<account>.blob.core.windows.net/<container>?prefix=<prefix>` | Blob container | Read and write; `DefaultAzureCredential` (OIDC in CI); needs the `ayasee[azure]` extra | The default for Azure adopters. Blobs carry the index tag `ayasee-sha`. |
 | `git-branch:///abs/path/to/repo?branch=ayasee-ledger&remote=origin` | Orphan branch of a git repository | Read and write | Adopters without a storage account. A CI run that writes it needs a token with `contents: write` (the optional `ledger-token` secret, R32); the staged and nightly runs warn unless `main` is behind a ruleset that token cannot bypass ([details](staged-run.md#the-ledger-token-and-main)). |
+| `s3://<bucket>?region=<region>&prefix=<prefix>&endpoint=https://<host>` | S3 bucket, or an S3-compatible store with `endpoint` | Read and write; credentials from `AWS_*` environment variables; no extra needed. **Experimental**, and **not wired into the reusable workflows yet**, see [the s3 store](#the-s3-store) | Adopters on AWS or an S3-compatible store, from the CLI for now. |
 | `github-branch://<owner>/<repo>?branch=ayasee-ledger` | The same branch, read through the contents API | **Read only** | The cockpit. `append` always raises. |
 | `file:///abs/path` | A directory | Read and write | Tests and local trials. |
 
@@ -57,6 +58,66 @@ to 5 times when the push is rejected because someone else wrote first. It create
 `refs/heads/<branch>` and `refs/ayasee/remote/*` and refuses to run if the branch is checked out.
 Commits are authored by `ayasee <ayasee@users.noreply.github.com>`.
 
+### The s3 store
+
+**Experimental.** The URL format and parameters may change before the store is wired into the
+reusable workflows.
+
+`s3://<bucket>` writes the same layout as the other stores into an S3 bucket. The client is
+`src/ayasee/s3.py`: AWS Signature Version 4 with the standard library and `httpx`, which ayasee
+already depends on, and only three calls (GetObject, PutObject, ListObjectsV2). It adds no package
+to the hash-pinned install of the setup action. boto3 was rejected: it brings `botocore` (about
+26 MB installed), `s3transfer`, `jmespath`, `python-dateutil`, `six` and `urllib3`, all
+permissively licensed but a large surface for three requests.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `region` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | Signing region. Required one way or the other; `auto` for Cloudflare R2. |
+| `prefix` | `ayasee-ledger` | Key prefix, `/`-separated path segments. |
+| `endpoint` | none | `https://host[:port]` of an S3-compatible store. With it, requests are path-style (`<endpoint>/<bucket>/<key>`); without it, virtual-hosted on AWS (`https://<bucket>.s3.<region>.amazonaws.com`), so a bucket name with dots needs an endpoint. Plain `http` is refused. |
+
+Any other parameter is refused. Credentials are `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and,
+for temporary credentials, `AWS_SESSION_TOKEN`, read from the environment and nowhere else: no
+shared config file, no instance metadata, no SSO. Missing credentials, or a value that is not
+printable ASCII, fail the command (the message names the variable, never its value). Errors name
+the HTTP status and the S3 error code only, never a response body or a header. Response bodies are
+capped on their decompressed size (1 MiB for an object, 16 MiB for a listing page), so a compressed
+bomb is stopped too, and a listing that carries a DTD is refused before it is parsed. The identity
+needs `s3:GetObject` and `s3:PutObject` on `<prefix>/*` and `s3:ListBucket` on the bucket for that prefix.
+
+**Writes are conditional.** The history entry is created with `If-None-Match: *`: if it already
+exists, it is read back, and identical bytes (a retry) succeed while different bytes are an error.
+`current.json` is read with its ETag and then replaced with `If-Match: <etag>`, or created with
+`If-None-Match: *` when there is none. If another writer got there first (`412 Precondition Failed`,
+or `409 ConditionalRequestConflict`, which S3 asks clients to retry), the store re-reads and decides
+again under the monotonic rule below, up to 5 times, then fails. Amazon S3 supports both headers on
+PutObject since 2024 ([conditional writes][s3-cond]).
+
+S3-compatible stores differ. A store that answers a conditional PUT with an error (for example
+`501 NotImplemented`) makes every ledger write fail, which is the safe outcome. A store that
+**silently ignores** the headers turns `current.json` into last-writer-wins: two concurrent writers
+could leave the older record in it. History entries have unique names and are not affected, and
+reads still return the newest of `current.json` and the newest history entry
+([R19](#r19-the-newest-of-rule)), so `current()` stays correct; only the stored `current.json` can be
+stale. Check that your store implements `If-Match` and `If-None-Match` on PutObject before you rely
+on it.
+
+**Not wired into the reusable workflows yet.** In `iac-staged`, `iac-nightly` and
+`iac-breakglass`, only the plan and apply steps receive `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` (with `identity: secrets`, see
+[identity: secrets](staged-run.md#identity-secrets)); the guard and ledger steps do not, so an
+`s3://` URL there fails closed with "S3 needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY". Passing
+credentials to those steps is a separate decision (reuse the state-bucket keys, or a dedicated
+ledger key per environment). Until then use the store from the CLI, or keep a `git-branch://` ledger
+in CI. When it is wired, an `s3://` URL with `endpoint=` must come only from the `AYASEE_LEDGER_URL`
+variable of the environment, never from `.ayasee.yaml`: the file is code that a pull request can
+change, and an endpoint chosen there would receive the signed ledger requests of the job.
+
+**Not readable by the cockpit.** `cockpit-collect` has no cloud login and refuses every ledger URL
+that is not `github-branch://` ([cockpit setup](../cockpit/setup.md)).
+
+[s3-cond]: https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html
+
 ### The github-branch store (read-only)
 
 `github-branch://` exists so the collector can read the ledgers of many repositories without cloning
@@ -67,7 +128,7 @@ read the contents of every repository named in such a URL, see [cockpit setup](.
 
 ## Layout
 
-All stores use the same layout (`{prefix}` is `ayasee-ledger` unless an Azure URL overrides it):
+All stores use the same layout (`{prefix}` is `ayasee-ledger` unless an Azure or S3 URL overrides it):
 
 ```
 {prefix}/{owner}/{name}/{env}/current.json
