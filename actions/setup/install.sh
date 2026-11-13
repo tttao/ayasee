@@ -45,7 +45,7 @@ venv="$tools/venv"
 (cd "$src" && uv export --frozen --no-dev --extra azure --no-emit-project -o "$tmp/constraints.txt" >/dev/null)
 uv venv --quiet --clear "$venv"
 VIRTUAL_ENV="$venv" uv pip install --quiet --require-hashes -r "$tmp/constraints.txt"
-VIRTUAL_ENV="$venv" uv pip install --quiet --no-deps "$src[azure]"
+VIRTUAL_ENV="$venv" uv pip install --quiet --no-deps "${src}[azure]"
 ln -sf "$venv/bin/ayasee" "$bin/ayasee"
 
 if [ -n "${GITHUB_PATH:-}" ]; then

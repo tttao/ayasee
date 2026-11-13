@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install pinned dev tools (linux amd64) into .tools/bin, verifying SHA-256 checksums.
 # zizmor is not installed here: run it with `uvx zizmor`.
-# Usage: install-dev-tools.sh [--mirror URL] [opa|conftest|terragrunt|actionlint ...]
+# Usage: install-dev-tools.sh [--mirror URL] [opa|conftest|terragrunt|actionlint|gitleaks ...]
 #   (no tool installs all). --mirror URL (or AYASEE_TOOL_MIRROR) is an https base without a
 #   trailing slash that replaces https://github.com in the download URLs; checksums still apply.
 set -euo pipefail
@@ -14,6 +14,8 @@ TERRAGRUNT_VERSION=1.2.1
 TERRAGRUNT_SHA256=f2f6238ad2348855a4e876b90fd31f3f5d106bb234794202a00b2bcc139fa753 # terragrunt_linux_amd64
 ACTIONLINT_VERSION=1.7.12
 ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 # actionlint_1.7.12_linux_amd64.tar.gz
+GITLEAKS_VERSION=8.30.1
+GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb # gitleaks_8.30.1_linux_x64.tar.gz
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bin="$root/.tools/bin"
@@ -41,8 +43,8 @@ sg_check_mirror "$mirror"
 requested=("$@")
 for t in "${requested[@]}"; do
   case "$t" in
-    opa|conftest|terragrunt|actionlint) ;;
-    *) echo "unknown tool: $t (expected opa, conftest, terragrunt or actionlint)" >&2; exit 2 ;;
+    opa|conftest|terragrunt|actionlint|gitleaks) ;;
+    *) echo "unknown tool: $t (expected opa, conftest, terragrunt, actionlint or gitleaks)" >&2; exit 2 ;;
   esac
 done
 
@@ -76,6 +78,13 @@ if want actionlint; then
     "$ACTIONLINT_SHA256" actionlint.tgz
   tar -xzf "$tmp/actionlint.tgz" -C "$tmp" actionlint
   install -m 0755 "$tmp/actionlint" "$bin/actionlint"
+fi
+
+if want gitleaks; then
+  fetch "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+    "$GITLEAKS_SHA256" gitleaks.tgz
+  tar -xzf "$tmp/gitleaks.tgz" -C "$tmp" gitleaks
+  install -m 0755 "$tmp/gitleaks" "$bin/gitleaks"
 fi
 
 echo "installed into $bin"

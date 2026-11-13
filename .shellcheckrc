@@ -1,0 +1,4 @@
+# Follow `. "$here/../lib/ayasee-lib.sh"` relative to the script that sources it, so the library is
+# checked where it is used (the pre-commit shellcheck hook).
+source-path=SCRIPTDIR
+external-sources=true

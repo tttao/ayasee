@@ -58,6 +58,7 @@ sg_init_engine() {
 sg_init_lock_timeout() {
   local t="${SG_LOCK_TIMEOUT:-10m}"
   [[ "$t" =~ ^[0-9]+[sm]$ ]] || sg_die "lock-timeout must look like 30s or 10m, got: $t"
+  # shellcheck disable=SC2034 # read by plan.sh and apply.sh, which source this library
   SG_LOCK_TIMEOUT_FLAG="-lock-timeout=$t"
 }
 

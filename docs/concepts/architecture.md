@@ -259,4 +259,3 @@ let a change reach an environment that a failing check would have stopped.
 | Nightly re-scan (T14) | Trivy runs with `exit-code: 0` and Checkov with `--soft-fail` in `rescan`. | Findings on `main` become code-scanning alerts; new high or critical ones are counted (`ayasee findings new`, which does fail on error) and notified. The prod plan scan and the PR checks still fail on findings. |
 | Drift while an apply failure is open (R41) | A drift job skips its environment with a notice when an open `ayasee:apply-failed` issue exists for it. | The state may be half-applied; the open issue already holds the stage (stop-the-line), and a drift issue would duplicate it. |
 | Break-glass without a prod ledger record | The rollback check is skipped with a notice ("first deploy, no rollback check"). | There is no live commit to compare with. The ancestry check (the sha is on `main`), the reviewers and the policy pack still apply. |
-

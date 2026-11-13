@@ -9,6 +9,18 @@ released version into the GitHub release notes.
 
 ### Added
 
+- Pre-commit hooks (`.pre-commit-config.yaml`, `uv run pre-commit install`; `pre-commit` joins the
+  dev group): gitleaks on the staged changes and `detect-private-key`, the standard hygiene hooks of
+  `pre-commit-hooks`, ruff check and format, shellcheck, zizmor, actionlint, `tofu fmt`, `opa fmt`
+  and `opa check`, the doc-link check, and the unit tests as an opt-in pre-push hook. Remote hook
+  repositories are pinned by commit SHA (`# frozen:` tag) and Renovate's `pre-commit` manager is
+  enabled. See CONTRIBUTING.md "Pre-commit hooks".
+- A `secret scan` CI job: gitleaks over every commit of a pull request (the whole history on a push
+  to `main`), through `scripts/check-secrets.sh` with values redacted, and the allowlist tests
+  against the real binary. `scripts/install-dev-tools.sh gitleaks` installs gitleaks 8.30.1,
+  checksum-verified. `.gitleaks.toml` allowlists only a single-token value marked `ayasee-test` /
+  `ayasee-fixture` under `tests/` or `e2e/`; inline `gitleaks:allow` comments are ignored, and a
+  rotated finding is recorded by fingerprint in `.gitleaksignore` (CONTRIBUTING.md).
 - `ayasee trunk-guard` and a step in the `resolve` job of `iac-staged` and `iac-nightly` (#11): when
   `ledger-token` is passed, the run checks with that token that an active ruleset with a
   `pull_request` rule applies to `main` with no bypass for the token (so it cannot push to `main`
@@ -115,6 +127,9 @@ released version into the GitHub release notes.
 
 ### Fixed
 
+- `actions/setup/install.sh` writes the azure extra as `"${src}[azure]"` (shellcheck SC1087; same
+  string as before). A final newline, a trailing space and a blank last line in three files, and a
+  `tofu fmt` alignment in a test fixture, found by the new hooks.
 - The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that
   store is read-only. It now describes the `git-branch://` store, `AYASEE_LEDGER_URL` and
   `ledger-token`.

@@ -1,0 +1,23 @@
+# gitleaks configuration: the default rules, plus one narrow exception for the fake credentials the
+# tests use. Read by scripts/check-secrets.sh (the pre-commit hook and the CI `secrets` job).
+#
+# Never add a global allowlist (paths alone, or regexes alone). An exception names both the files
+# and the value, so a real secret pasted next to a fixture is still caught.
+
+title = "ayasee"
+
+[extend]
+useDefault = true
+
+# Test sentinels. A fake credential in a test or fixture carries "ayasee" followed by "test" or
+# "fixture" in its value (for example an AKIAAYASEETEST... key id, ayasee-fixture-secret-marker-drift),
+# which no real key does. Both conditions must hold: the file is under tests/ or e2e/ AND the
+# detected secret is ONE token (no space or newline) holding that marker. The anchors matter: a
+# private key's secret is the whole PEM block, and a marker comment inside it or in its label must
+# not allowlist a real key.
+[[allowlists]]
+description = "fake credentials in tests and fixtures, marked ayasee-test / ayasee-fixture"
+condition = "AND"
+paths = ['''^(tests|e2e)/''']
+regexTarget = "secret"
+regexes = ['''(?i)^[A-Za-z0-9_./+=-]*ayasee[-_]?(test|fixture)[A-Za-z0-9_./+=-]*$''']
