@@ -10,8 +10,8 @@ inputs:
     default: stages
   encrypt:
     description: >-
-      Encrypt plan files (OpenTofu aes_gcm, enforced). With true, key-vault-key-id (azure_vault)
-      or AYASEE_PLAN_PASSPHRASE (pbkdf2) is required.
+      Encrypt plan files (OpenTofu aes_gcm, enforced). With true, key-vault-key-id (azure_vault),
+      AYASEE_PLAN_PASSPHRASE (pbkdf2) or kms-key-id (aws_kms) is required.
       false is allowed only with binding-mode replan, or same-job for a pre-prod stage. With false and
       a mode other than same-job the plan files are deleted after planning and no plan-dir is output.
     required: false
@@ -31,11 +31,19 @@ inputs:
     description: Azure Key Vault key URL (https://<vault>.vault.azure.net/keys/<name>) that protects the plan encryption key.
     required: false
     default: ""
+  kms-key-id:
+    description: >-
+      AWS KMS key ARN or alias ARN (arn:aws:kms:<region>:<account>:key/<id> or :alias/<name>)
+      that protects the plan encryption key, for key-provider aws_kms. The region comes from the ARN.
+    required: false
+    default: ""
   key-provider:
     description: >-
-      Plan-encryption key provider (plan_encryption.key_provider) - azure_vault (key-vault-key-id)
-      or pbkdf2 (passphrase in the AYASEE_PLAN_PASSPHRASE environment variable, from an
-      environment secret). Only used with encrypt true.
+      Plan-encryption key provider (plan_encryption.key_provider) - azure_vault (key-vault-key-id),
+      pbkdf2 (passphrase in the AYASEE_PLAN_PASSPHRASE environment variable, from an
+      environment secret) or aws_kms (kms-key-id, reached with the key pair in the AYASEE_KMS_ACCESS_KEY_ID and
+      AYASEE_KMS_SECRET_ACCESS_KEY environment variables, from environment secrets).
+      Only used with encrypt true.
     required: false
     default: azure_vault
   engine:
@@ -111,6 +119,7 @@ runs:
         SG_UNITS_ROOT: ${{ inputs.units-root }}
         SG_ENCRYPT: ${{ inputs.encrypt }}
         SG_KEY_VAULT_KEY_ID: ${{ inputs.key-vault-key-id }}
+        SG_KMS_KEY_ID: ${{ inputs.kms-key-id }}
         SG_KEY_PROVIDER: ${{ inputs.key-provider }}
         SG_BINDING_MODE: ${{ inputs.binding-mode }}
         SG_BREAKGLASS_INCIDENT: ${{ inputs.breakglass-incident }}

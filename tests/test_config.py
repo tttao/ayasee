@@ -328,7 +328,7 @@ def test_key_provider_defaults_to_azure_vault():
     assert Config().plan_encryption.key_provider == "azure_vault"
 
 
-@pytest.mark.parametrize("provider", ["azure_vault", "pbkdf2"])
+@pytest.mark.parametrize("provider", ["azure_vault", "pbkdf2", "aws_kms"])
 def test_key_provider_accepts_the_wired_providers(tmp_path, provider):
     cfg = load_config(write(tmp_path, f"plan_encryption:\n  key_provider: {provider}\n"))
     assert cfg.plan_encryption.key_provider == provider
@@ -359,7 +359,8 @@ def test_iac_root_is_normalised(tmp_path, iac_root, units_root, want):
     [
         "plan_encryption: pbkdf2",
         "plan_encryption: {key_provider: openbao}",
-        "plan_encryption: {key_provider: aws_kms}",
+        "plan_encryption: {key_provider: gcp_kms}",
+        "plan_encryption: {key_provider: AWS_KMS}",
         "plan_encryption: {key_provider: 3}",
         "plan_encryption: {passphrase: x}",
     ],
@@ -367,6 +368,13 @@ def test_iac_root_is_normalised(tmp_path, iac_root, units_root, want):
 def test_key_provider_rejects_anything_else(tmp_path, text):
     with pytest.raises(ConfigError, match="plan_encryption"):
         load_config(write(tmp_path, text + "\n"))
+
+
+@pytest.mark.parametrize("identity", ["oidc", "secrets"])
+def test_aws_kms_is_supported_with_either_identity(tmp_path, identity):
+    """issue #10: aws_kms uses its own prod-only key pair, not the identity's credentials."""
+    text = f"identity: {identity}\nplan_encryption: {{key_provider: aws_kms}}\n"
+    assert config.unsupported(load_config(write(tmp_path, text))) == []
 
 
 def test_cli_show_has_the_key_provider(tmp_path, monkeypatch, capsys):

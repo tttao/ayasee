@@ -44,6 +44,19 @@ on:
           organisation level: the environment secret takes precedence in those jobs. Only the
           prod plan and apply steps receive it.
         required: false
+      AYASEE_KMS_ACCESS_KEY_ID:
+        description: >-
+          Only for plan_encryption.key_provider aws_kms. Access key id (AKIA...) of an IAM user
+          whose only permission is kms:GenerateDataKey and kms:Decrypt on the AYASEE_KMS_KEY_ID
+          key. Pass it by name and create it as an environment secret of prod-plan, prod and
+          prod-breakglass only, never at repository or organisation level. Only the prod plan and
+          apply steps receive it.
+        required: false
+      AYASEE_KMS_SECRET_ACCESS_KEY:
+        description: >-
+          Only for plan_encryption.key_provider aws_kms. The secret access key that goes with
+          AYASEE_KMS_ACCESS_KEY_ID; same rules.
+        required: false
       CLOUDFLARE_API_TOKEN:
         description: >-
           identity: secrets only. Pass it by name and create it as an environment secret of
@@ -775,6 +788,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
+          AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
+          AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -783,6 +798,7 @@ jobs:
           binding-mode: encrypted_plan
           key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
+          kms-key-id: ${{ vars.AYASEE_KMS_KEY_ID }}
           allow-cascade: ${{ needs.resolve.outputs.allow-cascade }} # UNSAFE when true (R52)
           shared-units: ${{ needs.resolve.outputs.shared-units }} # flagged in the gate summary
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
@@ -928,6 +944,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
+          AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
+          AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
         with:
           env: prod
           units-root: ${{ needs.resolve.outputs.units-root }}
@@ -938,6 +956,7 @@ jobs:
           encrypt: "true"
           key-provider: ${{ needs.resolve.outputs.key-provider }}
           key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
+          kms-key-id: ${{ vars.AYASEE_KMS_KEY_ID }}
       - id: units
         name: Locate the units record
         if: ${{ always() }}

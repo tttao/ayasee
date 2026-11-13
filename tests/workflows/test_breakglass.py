@@ -106,6 +106,7 @@ def test_prod_vars_come_from_the_breakglass_environment(wf):
     oidc = "steps.cfg.outputs.identity == 'oidc'"
     assert plan["env"]["ARM_CLIENT_ID"] == f"${{{{ {oidc} && vars.AZURE_CLIENT_ID || '' }}}}"
     assert plan["with"]["key-vault-key-id"] == "${{ vars.AYASEE_KEY_VAULT_KEY_ID }}"
+    assert plan["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
 
 
 def test_opens_post_approval_issue_step(wf):
@@ -363,7 +364,16 @@ def test_breakglass_key_provider_and_passphrase_reach_plan_and_apply_only(wf):
     for step in with_pass:
         assert step["env"]["AYASEE_PLAN_PASSPHRASE"] == "${{ secrets.AYASEE_PLAN_PASSPHRASE }}"
         assert step["with"]["key-provider"] == "${{ steps.cfg.outputs.key-provider }}"
+        assert step["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
     assert "AYASEE_PLAN_PASSPHRASE" not in str(wf["jobs"][JOB].get("env", {}))
+    # issue #10: the aws_kms key pair goes to the same two steps and nowhere else
+    for secret in ("AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"):
+        with_pair = [s for s in steps if secret in str(s)]
+        assert [s.get("id") for s in with_pair] == ["plan", "apply"]
+        for step in with_pair:
+            assert step["env"][secret] == f"${{{{ secrets.{secret} }}}}"
+        assert secret not in str(wf["jobs"][JOB].get("env", {}))
+        assert wf[True]["workflow_call"]["secrets"][secret]["required"] is False
     assert "'.plan_encryption.key_provider'" in TEXT
 
 

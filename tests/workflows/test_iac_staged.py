@@ -84,6 +84,8 @@ def test_no_secrets_inherit(wf):
         "ledger-token",
         "extra-env-secret",
         "AYASEE_PLAN_PASSPHRASE",
+        "AYASEE_KMS_ACCESS_KEY_ID",
+        "AYASEE_KMS_SECRET_ACCESS_KEY",
         "CLOUDFLARE_API_TOKEN",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -667,6 +669,8 @@ def test_key_provider_reaches_the_prod_plan_and_apply_only(wf):
         step = next(s for s in _steps(wf, job) if f"/actions/{kind}@" in s.get("uses", ""))
         assert step["with"]["key-provider"] == "${{ needs.resolve.outputs.key-provider }}"
         assert step["with"]["encrypt"] == "true"
+        # issue #10: the aws_kms key, next to the Key Vault key; the action refuses both set
+        assert step["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
 
 
 def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
@@ -682,6 +686,23 @@ def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
     assert seen == [("prod-plan", "plan"), ("prod", "apply")]
     secret = wf[True]["workflow_call"]["secrets"]["AYASEE_PLAN_PASSPHRASE"]
     assert secret["required"] is False and "environment secret" in secret["description"]
+
+
+@pytest.mark.parametrize("secret", ["AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"])
+def test_the_kms_key_pair_reaches_only_the_prod_plan_and_apply_steps(wf, secret):
+    """issue #10: the aws_kms credential is prod-only, like the pbkdf2 passphrase."""
+    seen = []
+    for name, job in wf["jobs"].items():
+        assert secret not in str(job.get("env", {})), name
+        for step in job["steps"]:
+            if secret in str(step):
+                assert step["env"][secret] == f"${{{{ secrets.{secret} }}}}"
+                seen.append((name, step["uses"].split("/actions/")[1].split("@")[0]))
+    assert seen == [("prod-plan", "plan"), ("prod", "apply")]
+    declared = wf[True]["workflow_call"]["secrets"][secret]
+    assert declared["required"] is False
+    text = wf[True]["workflow_call"]["secrets"]["AYASEE_KMS_ACCESS_KEY_ID"]["description"]
+    assert "environment secret of prod-plan, prod and" in text and "aws_kms" in text
 
 
 def test_prod_plan_flags_shared_units_and_resolve_checks_their_layout():
