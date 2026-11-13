@@ -376,9 +376,10 @@ def test_resolve_refuses_a_superseded_commit(wf):
     assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
     assert step["env"]["REPO"] == "${{ github.repository }}"
     assert step["env"]["SHA"] == "${{ github.sha }}"
+    assert step["env"]["CONFIG_PATH"] == "${{ inputs.config-path }}"
     run = step["run"]
-    assert 'tip="$(ayasee main-tip --repo "$REPO")"' in run
-    assert '[ "$tip" = "$SHA" ]' in run and "::error::superseded" in run and "exit 1" in run
+    assert 'ayasee main-tip --repo "$REPO" --check "$SHA" --config-path "$CONFIG_PATH"' in run
+    assert "::error::" in run and "exit 1" in run
     assert "if" not in step and "continue-on-error" not in step
     setup = _index(steps, lambda s: "/actions/setup@" in s.get("uses", ""))
     assert setup < i < _index(steps, lambda s: s.get("id") == "resolve")
@@ -561,20 +562,42 @@ def _run_step(tmp_path, step, ayasee_body, **env):
     )
 
 
-@pytest.mark.parametrize(("tip", "rc"), [("a" * 40, 0), ("b" * 40, 1)], ids=["tip", "superseded"])
-def test_superseded_step_behaviour(wf, tmp_path, tip, rc):
+@pytest.mark.parametrize(
+    ("body", "rc", "out"),
+    [
+        ("exit 0\n", 0, None),
+        ('echo "a is not the tip, but no later commit changes the IaC"\n', 0, "::notice::a is"),
+        (
+            'echo "main-tip: superseded: later commits change the IaC" >&2; exit 1\n',
+            1,
+            "::error::superseded: later commits",
+        ),
+        (
+            'echo "NON-COMPLIANT: x" >&2; echo "main-tip: error: bad" >&2; exit 1\n',
+            1,
+            "::error::error: bad",
+        ),
+    ],
+    ids=["tip", "unaffected", "superseded", "error"],
+)
+def test_superseded_step_behaviour(wf, tmp_path, body, rc, out):
     steps = _steps(wf, "resolve")
     step = steps[_index(steps, lambda s: "main-tip" in s.get("run", ""))]
-    proc = _run_step(tmp_path, step, f"echo {tip}\n", REPO="o/r", SHA="a" * 40)
+    proc = _run_step(
+        tmp_path,
+        step,
+        body,
+        REPO="o/r",
+        SHA="a" * 40,
+        CONFIG_PATH=".ayasee.yaml",
+        RUNNER_TEMP=str(tmp_path),
+    )
     assert proc.returncode == rc
-    assert ("::error::superseded" in proc.stdout) is (rc == 1)
-
-
-def test_superseded_step_fails_when_the_tip_cannot_be_read(wf, tmp_path):
-    steps = _steps(wf, "resolve")
-    step = steps[_index(steps, lambda s: "main-tip" in s.get("run", ""))]
-    proc = _run_step(tmp_path, step, "exit 1\n", REPO="o/r", SHA="a" * 40)
-    assert proc.returncode != 0
+    if out is None:
+        assert "::" not in proc.stdout
+    else:
+        assert out in proc.stdout
+    assert "::error::NON-COMPLIANT" not in proc.stdout
 
 
 def test_check_supported_step_prints_one_error_per_line(wf, tmp_path):

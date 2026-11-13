@@ -134,13 +134,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          CONFIG_PATH: ${{ inputs.config-path }}
         run: |
-          # a newer push to main carries this change and promotes it; an older run never does
-          tip="$(ayasee main-tip --repo "$REPO")"
-          [ "$tip" = "$SHA" ] || {
-            echo "::error::superseded: $SHA is not the tip of main ($tip); the run of the newer commit promotes the change"
+          # a newer push to main that changes the IaC carries this change and promotes it, so
+          # this run stops; one that leaves the IaC alone (issue #15) lets this run go on
+          err="$RUNNER_TEMP/ayasee-main-tip.err"
+          if ! notice="$(ayasee main-tip --repo "$REPO" --check "$SHA" --config-path "$CONFIG_PATH" 2>"$err")"; then
+            while IFS= read -r line; do
+              case "$line" in main-tip:*) echo "::error::${line#main-tip: }" ;; *) echo "$line" ;; esac
+            done <"$err"
             exit 1
-          }
+          fi
+          [ -z "$notice" ] || echo "::notice::$notice"
       - name: Refuse settings that are not supported yet (R35, R73)
         env:
           CONFIG_PATH: ${{ inputs.config-path }}

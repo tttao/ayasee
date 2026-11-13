@@ -177,8 +177,9 @@ also a unit that reads its outputs, `prod-plan` refuses it
 applied it and the commits are on `main`, so the way out is a revert of the dependent change on
 `main`, a run that takes the upstream change to prod, and then the dependent change again in its own
 pull request. Let pull requests that only touch `iac_root` target `main`, and split a pull request
-that changes both application and IaC code into two. Leave the callers without a `paths:` filter and
-with no `branches:` filter on `pull_request`: `iac-pr` stays green with "No IaC changes" on
+that changes both application and IaC code into two. Give the `push` caller of `iac-staged` a
+`paths:` filter on the IaC ([monorepos](../concepts/pr-checks.md#monorepos)), and leave the
+`pull_request` caller with no `paths:` and no `branches:` filter: `iac-pr` stays green with "No IaC changes" on
 application pull requests, so it can be a required check on both branches, and it still plans an IaC
 change that was opened against `develop` ([monorepos](../concepts/pr-checks.md#monorepos)).
 

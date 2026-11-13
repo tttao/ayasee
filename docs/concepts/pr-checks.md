@@ -172,19 +172,34 @@ Then:
   request that only touches application code gets the "No IaC changes" comment and no cloud login,
   and stays green, so `iac-pr` can be a required check. Do not add a `paths:` filter to the caller:
   a skipped workflow cannot satisfy a required check.
-- leave the `push` caller of `iac-staged` without a `paths:` filter too. A push to `main` that
-  touches only application code still runs every stage: each pre-prod stage logs in, plans, applies
-  nothing (unless an earlier IaC commit has not reached that stage yet) and writes its ledger record, and `prod-plan` logs in and plans. When prod is in sync,
-  every unit plans clean and `prod-in-sync` records the SHA without asking for an approval
+- give the `push` caller of `iac-staged` a `paths:` filter on the IaC, the configuration file and
+  the workflows:
+
+  ```yaml
+  on:
+    push:
+      branches: [main]
+      paths: ["<iac_root>/**", ".ayasee.yaml", ".github/**"]
+  ```
+
+  A push that touches only application code then starts no staged run. `resolve` refuses a commit
+  that is no longer the tip of `main` only when a later commit changes the IaC (R70, issue #15):
+  a change inside `iac_root` (documentation excepted), to the configuration file or under
+  `.github/`. An IaC commit followed quickly by an application commit is therefore still promoted
+  by its own run, which records its own SHA in the ledger (the commit it checked out, planned and
+  applied; the cockpit counts the application commits after it as pending). The check compares
+  the commit with the tip through the GitHub compare API and refuses on any doubt: an API error, a
+  tip that does not descend from the commit, or a comparison of 300 files or more.
+
+  Without the filter, every application push runs every stage: each pre-prod stage logs in, plans,
+  applies nothing (unless an earlier IaC commit has not reached that stage yet) and writes its
+  ledger record, and `prod-plan` logs in and plans. When prod is in sync, every unit plans clean
+  and `prod-in-sync` records the SHA without asking for an approval
   ([the empty-plan path](staged-run.md#the-empty-plan-path)). When an IaC change is waiting at the
   prod gate, the application push supersedes it: its pre-prod stage records the newer SHA, the
   guard of the waiting run then refuses the approved apply as `superseded`
   ([the supersession guard](staged-run.md#the-supersession-guard)), and reviewers approve the same
-  change again in the newer run. The filter would save these runs but can lose a promotion:
-  `resolve` refuses a commit that is no longer the tip of `main` (R70), so an IaC commit followed
-  quickly by an application commit gets a `superseded` run, and the filtered application commit,
-  which would have promoted it, gets no run at all. The change then waits for the next push that
-  touches `iac_root`.
+  change again in the newer run. The filter avoids both.
 
 `units_root` is relative to the repository root, not to `iac_root`, and must be inside it. Setting
 `iac_root` alone fails every load of `.ayasee.yaml`, because the default `units_root`, `stages`, is
