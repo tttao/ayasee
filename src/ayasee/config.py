@@ -28,8 +28,9 @@ DEVIATION_SECRETS = (
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")
 IDENTITIES = ("oidc", "secrets")
-# Wired plan-encryption key providers (D1); openbao, aws_kms and gcp_kms are not yet.
-KEY_PROVIDERS = ("azure_vault", "pbkdf2")
+# Wired plan-encryption key providers (D1); gcp_kms and openbao are not yet (issue #10: neither
+# has a credential path into the prod jobs).
+KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
 STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # Environments with a fixed role that a pre-prod stage of iac-staged must never run in.

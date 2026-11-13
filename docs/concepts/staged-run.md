@@ -244,6 +244,11 @@ pull-request code with them (same-repository pull requests only; forks get no se
 `dev-plan` read-only tokens. The prod tokens live only in `prod` and `prod-breakglass`, behind their
 reviewers; `prod-plan` should hold read-only ones.
 
+These tokens never reach the plan key. With `plan_encryption.key_provider: aws_kms` the plan key is
+reached with its own key pair, `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY`,
+environment secrets of `prod-plan`, `prod` and `prod-breakglass` only (see
+[key providers](plan-binding.md#key-providers)).
+
 ## Units that serve every stage
 
 Every stage plans and applies the units under `<units_root>/<stage>/`. A unit does not have to exist

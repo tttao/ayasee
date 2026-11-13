@@ -125,21 +125,50 @@ sg_check_mode() {
   fi
 }
 
-# sg_pbkdf2_encryption PASSPHRASE: print a TF_ENCRYPTION body (pbkdf2, aes_gcm, plan enforced).
-# The caller validates PASSPHRASE against a character set that cannot break out of the HCL string.
-sg_pbkdf2_encryption() {
-  printf '%s' "key_provider \"pbkdf2\" \"ayasee\" {
-  passphrase = \"$1\"
-}
+# sg_encryption_tail PROVIDER: print the method and plan blocks shared by every key provider
+# (aes_gcm keyed by key_provider.PROVIDER.ayasee, plan encryption enforced).
+sg_encryption_tail() {
+  printf '%s' "
 
 method \"aes_gcm\" \"ayasee\" {
-  keys = key_provider.pbkdf2.ayasee
+  keys = key_provider.$1.ayasee
 }
 
 plan {
   method   = method.aes_gcm.ayasee
   enforced = true
 }"
+}
+
+# sg_pbkdf2_encryption PASSPHRASE: print a TF_ENCRYPTION body (pbkdf2, aes_gcm, plan enforced).
+# The caller validates PASSPHRASE against a character set that cannot break out of the HCL string.
+sg_pbkdf2_encryption() {
+  printf '%s' "key_provider \"pbkdf2\" \"ayasee\" {
+  passphrase = \"$1\"
+}"
+  sg_encryption_tail pbkdf2
+}
+
+# sg_aws_kms_encryption ARN REGION ACCESS_KEY SECRET_KEY: print a TF_ENCRYPTION body (aws_kms,
+# aes_gcm, plan enforced). key_spec AES_256 gives the 32-byte key aes_gcm needs. The static key
+# pair is the dedicated prod-only KMS credential, so the step's own AWS credentials (for example
+# the R2 keys of an S3-compatible backend) are never used for KMS. The fixed encryption context
+# lets the key policy require kms:EncryptionContext:ayasee = plan (OpenTofu 1.13 or later; 1.12
+# rejects the argument). The caller validates every value against a pattern that cannot break out
+# of an HCL string.
+sg_aws_kms_encryption() {
+  printf '%s' "key_provider \"aws_kms\" \"ayasee\" {
+  kms_key_id = \"$1\"
+  region     = \"$2\"
+  key_spec   = \"AES_256\"
+  access_key = \"$3\"
+  secret_key = \"$4\"
+
+  encryption_context = {
+    ayasee = \"plan\"
+  }
+}"
+  sg_encryption_tail aws_kms
 }
 
 # sg_setup_encryption TEMPLATE: export TF_ENCRYPTION when SG_ENCRYPT=true, or fail closed.
@@ -150,45 +179,87 @@ plan {
 #   pbkdf2                 the passphrase in AYASEE_PLAN_PASSPHRASE, an environment secret of
 #                          prod-plan, prod and prod-breakglass only: at least 32 characters of
 #                          [A-Za-z0-9+/=_.-] (for example base64 from a random generator).
-# AYASEE_TEST_PASSPHRASE (tests only) replaces either. Any second key source next to the chosen
-# one (a key URL with pbkdf2, a passphrase with azure_vault, the test passphrase with either) is
-# ambiguous and an error.
+#   aws_kms                the AWS KMS key SG_KMS_KEY_ID, a key ARN or alias ARN (the region is
+#                          taken from it), reached with the long-term IAM key pair in
+#                          AYASEE_KMS_ACCESS_KEY_ID / AYASEE_KMS_SECRET_ACCESS_KEY, environment
+#                          secrets of prod-plan, prod and prod-breakglass only. The pair is
+#                          rendered into TF_ENCRYPTION; no message prints it, and GitHub masks it
+#                          because the workflows take it from the secrets context.
+# AYASEE_TEST_PASSPHRASE (tests only) replaces any of them. Any second key source next to the
+# chosen one (a key URL, KMS key or KMS key pair with another provider, a passphrase with
+# azure_vault or aws_kms, the test passphrase with any) is ambiguous and an error.
 sg_setup_encryption() {
   local tmpl="$1" provider="${SG_KEY_PROVIDER:-azure_vault}"
   unset TF_ENCRYPTION
   [ "${SG_ENCRYPT:-true}" = true ] || return 0
-  case "$provider" in azure_vault | pbkdf2) ;; *)
-    sg_die "key-provider must be azure_vault or pbkdf2, got: $provider" ;;
+  case "$provider" in azure_vault | pbkdf2 | aws_kms) ;; *)
+    sg_die "key-provider must be azure_vault, pbkdf2 or aws_kms, got: $provider" ;;
   esac
   if [ -n "${AYASEE_TEST_PASSPHRASE:-}" ]; then
     [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
       sg_die "both AYASEE_TEST_PASSPHRASE and key-vault-key-id are set; use exactly one"
+    [ -z "${SG_KMS_KEY_ID:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and kms-key-id are set; use exactly one"
+    [ -z "${AYASEE_KMS_ACCESS_KEY_ID:-}${AYASEE_KMS_SECRET_ACCESS_KEY:-}" ] ||
+      sg_die "both AYASEE_TEST_PASSPHRASE and the AYASEE_KMS_* key pair are set; use exactly one"
     [ -z "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
       sg_die "both AYASEE_TEST_PASSPHRASE and AYASEE_PLAN_PASSPHRASE are set; use exactly one"
     [[ "$AYASEE_TEST_PASSPHRASE" =~ ^[A-Za-z0-9_.-]{16,}$ ]] ||
       sg_die "AYASEE_TEST_PASSPHRASE must be at least 16 chars of [A-Za-z0-9_.-]"
     TF_ENCRYPTION="$(sg_pbkdf2_encryption "$AYASEE_TEST_PASSPHRASE")"
-  elif [ "$provider" = pbkdf2 ]; then
-    [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
-      sg_die "key-provider pbkdf2 with key-vault-key-id set is ambiguous; unset AYASEE_KEY_VAULT_KEY_ID"
-    [ -n "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
-      sg_die "key-provider pbkdf2 needs AYASEE_PLAN_PASSPHRASE (an environment secret of prod-plan, prod and prod-breakglass)"
-    [[ "$AYASEE_PLAN_PASSPHRASE" =~ ^[A-Za-z0-9+/=_.-]{32,}$ ]] ||
-      sg_die "AYASEE_PLAN_PASSPHRASE must be at least 32 chars of [A-Za-z0-9+/=_.-]"
-    TF_ENCRYPTION="$(sg_pbkdf2_encryption "$AYASEE_PLAN_PASSPHRASE")"
-  elif [ -n "${AYASEE_PLAN_PASSPHRASE:-}" ]; then
-    sg_die "AYASEE_PLAN_PASSPHRASE is set but key-provider is azure_vault; set plan_encryption.key_provider: pbkdf2 or remove the secret"
-  elif [ -n "${SG_KEY_VAULT_KEY_ID:-}" ]; then
-    local re='^(https://[A-Za-z0-9-]+\.vault\.azure\.net)/keys/([A-Za-z0-9-]+)/?$'
-    [[ "$SG_KEY_VAULT_KEY_ID" =~ $re ]] ||
-      sg_die "key-vault-key-id must look like https://<vault>.vault.azure.net/keys/<name> (no key version, no managed HSM)"
-    local body
-    body="$(cat "$tmpl")" || sg_die "cannot read encryption template: $tmpl"
-    body="${body//@VAULT_URI@/${BASH_REMATCH[1]}}"
-    TF_ENCRYPTION="${body//@KEY_NAME@/${BASH_REMATCH[2]}}"
-  else
-    sg_die "encrypt=true needs the key-vault-key-id input (or AYASEE_TEST_PASSPHRASE in tests)"
+    export TF_ENCRYPTION
+    return 0
   fi
+  [ "$provider" = aws_kms ] || [ -z "${SG_KMS_KEY_ID:-}" ] ||
+    sg_die "kms-key-id is set but key-provider is $provider; set plan_encryption.key_provider: aws_kms or unset AYASEE_KMS_KEY_ID"
+  [ "$provider" = aws_kms ] || [ -z "${AYASEE_KMS_ACCESS_KEY_ID:-}${AYASEE_KMS_SECRET_ACCESS_KEY:-}" ] ||
+    sg_die "AYASEE_KMS_ACCESS_KEY_ID or AYASEE_KMS_SECRET_ACCESS_KEY is set but key-provider is $provider; set plan_encryption.key_provider: aws_kms or remove the secrets"
+  [ "$provider" = pbkdf2 ] || [ -z "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
+    sg_die "AYASEE_PLAN_PASSPHRASE is set but key-provider is $provider; set plan_encryption.key_provider: pbkdf2 or remove the secret"
+  [ "$provider" = azure_vault ] || [ -z "${SG_KEY_VAULT_KEY_ID:-}" ] ||
+    sg_die "key-provider $provider with key-vault-key-id set is ambiguous; unset AYASEE_KEY_VAULT_KEY_ID"
+  case "$provider" in
+    pbkdf2)
+      [ -n "${AYASEE_PLAN_PASSPHRASE:-}" ] ||
+        sg_die "key-provider pbkdf2 needs AYASEE_PLAN_PASSPHRASE (an environment secret of prod-plan, prod and prod-breakglass)"
+      [[ "$AYASEE_PLAN_PASSPHRASE" =~ ^[A-Za-z0-9+/=_.-]{32,}$ ]] ||
+        sg_die "AYASEE_PLAN_PASSPHRASE must be at least 32 chars of [A-Za-z0-9+/=_.-]"
+      TF_ENCRYPTION="$(sg_pbkdf2_encryption "$AYASEE_PLAN_PASSPHRASE")"
+      ;;
+    aws_kms)
+      # bracket ranges below must mean ASCII, whatever the runner locale
+      local LC_ALL=C
+      [ -n "${SG_KMS_KEY_ID:-}" ] ||
+        sg_die "key-provider aws_kms needs the kms-key-id input (the AYASEE_KMS_KEY_ID variable)"
+      [ -n "${AYASEE_KMS_ACCESS_KEY_ID:-}" ] && [ -n "${AYASEE_KMS_SECRET_ACCESS_KEY:-}" ] ||
+        sg_die "key-provider aws_kms needs AYASEE_KMS_ACCESS_KEY_ID and AYASEE_KMS_SECRET_ACCESS_KEY (environment secrets of prod-plan, prod and prod-breakglass)"
+      # a long-term IAM user key only: a temporary ASIA key needs a session token and expires,
+      # which a stored secret cannot follow
+      [[ "$AYASEE_KMS_ACCESS_KEY_ID" =~ ^AKIA[A-Z0-9]{16}$ ]] ||
+        sg_die "AYASEE_KMS_ACCESS_KEY_ID must be a long-term IAM access key id (AKIA and 16 of [A-Z0-9])"
+      [[ "$AYASEE_KMS_SECRET_ACCESS_KEY" =~ ^[A-Za-z0-9/+]{40}$ ]] ||
+        sg_die "AYASEE_KMS_SECRET_ACCESS_KEY must be 40 chars of [A-Za-z0-9/+]"
+      local re='^arn:aws(-cn|-us-gov)?:kms:([a-z]{2}(-[a-z]+)+-[0-9]+):[0-9]{12}:(key/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|key/mrk-[0-9a-f]{32}|alias/[A-Za-z0-9/_-]{1,250})$'
+      [[ "$SG_KMS_KEY_ID" =~ $re ]] ||
+        sg_die "kms-key-id must be a KMS key or alias ARN (arn:aws:kms:<region>:<account>:key/<id> or :alias/<name>)"
+      TF_ENCRYPTION="$(sg_aws_kms_encryption "$SG_KMS_KEY_ID" "${BASH_REMATCH[2]}" \
+        "$AYASEE_KMS_ACCESS_KEY_ID" "$AYASEE_KMS_SECRET_ACCESS_KEY")"
+      # the pair now lives only in TF_ENCRYPTION: keep it out of the environment of every
+      # later child process (terragrunt, tofu providers, hooks)
+      unset AYASEE_KMS_ACCESS_KEY_ID AYASEE_KMS_SECRET_ACCESS_KEY
+      ;;
+    azure_vault)
+      [ -n "${SG_KEY_VAULT_KEY_ID:-}" ] ||
+        sg_die "encrypt=true needs the key-vault-key-id input (or AYASEE_TEST_PASSPHRASE in tests)"
+      local re='^(https://[A-Za-z0-9-]+\.vault\.azure\.net)/keys/([A-Za-z0-9-]+)/?$'
+      [[ "$SG_KEY_VAULT_KEY_ID" =~ $re ]] ||
+        sg_die "key-vault-key-id must look like https://<vault>.vault.azure.net/keys/<name> (no key version, no managed HSM)"
+      local body
+      body="$(cat "$tmpl")" || sg_die "cannot read encryption template: $tmpl"
+      body="${body//@VAULT_URI@/${BASH_REMATCH[1]}}"
+      TF_ENCRYPTION="${body//@KEY_NAME@/${BASH_REMATCH[2]}}"
+      ;;
+  esac
   export TF_ENCRYPTION
 }
 

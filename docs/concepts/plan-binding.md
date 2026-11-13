@@ -114,6 +114,7 @@ the key source changes. `sg_setup_encryption` in `actions/lib/ayasee-lib.sh` bui
 |---|---|---|
 | `azure_vault` (default) | The Key Vault key in the `AYASEE_KEY_VAULT_KEY_ID` variable, `https://<vault>.vault.azure.net/keys/<name>` without a key version (so rotation does not break a pending approval). Managed HSM keys are not supported yet. | The identities with `unwrapKey` on that key: `prod-plan`, `prod`, `prod-breakglass` |
 | `pbkdf2` | The passphrase in the `AYASEE_PLAN_PASSPHRASE` secret, at least 32 characters of `[A-Za-z0-9+/=_.-]` (for example `openssl rand -base64 48`), turned into the key by OpenTofu's `pbkdf2` provider. | The environments that hold the secret. Create it as an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. |
+| `aws_kms` | The AWS KMS key in the `AYASEE_KMS_KEY_ID` variable: a key ARN `arn:aws:kms:<region>:<account>:key/<id>` (multi-Region `mrk-` keys included) or an alias ARN `arn:aws:kms:<region>:<account>:alias/<name>`; the region is taken from the ARN, a bare key id is refused. OpenTofu's `aws_kms` provider asks KMS for an `AES_256` data key with the encryption context `ayasee = plan`, using the IAM key pair in the `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY` secrets. Works with either `identity`. Needs OpenTofu 1.13 or later (the default pin of the setup action, 1.13.9): older versions reject `encryption_context`. | The environments that hold the key pair. Create both as environment secrets of `prod-plan`, `prod` and `prod-breakglass` only. |
 
 With `pbkdf2`, the reusable workflows pass `AYASEE_PLAN_PASSPHRASE` to the plan step of `prod-plan`,
 the apply step of `prod` and the plan and apply steps of `iac-breakglass`, and to no other step.
@@ -125,9 +126,54 @@ passed it, so do not create one; the workflows cannot detect it. The passphrase 
 unlike the Key Vault key, which no job ever holds: anyone who can read it can decrypt an uploaded
 plan artifact during its 7 days.
 
-Any second key source is refused as ambiguous: a key URL with `pbkdf2`, a passphrase with
-`azure_vault`, or the test-only `AYASEE_TEST_PASSPHRASE` next to either. `openbao`, `aws_kms` and
-`gcp_kms` (which OpenTofu supports) are not wired yet; the configuration refuses them.
+With `aws_kms` (issue #10), KMS is reached with a dedicated key pair, never with the AWS
+credentials of the stage (with `identity: secrets` those are often the R2 or other S3-compatible
+keys of the state backend, which cannot call KMS). The reusable workflows pass
+`AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY` to the same four steps as the pbkdf2
+passphrase (the plan step of `prod-plan`, the apply step of `prod`, the plan and apply steps of
+`iac-breakglass`) and to no other step; pass them by name and create them as environment secrets
+of `prod-plan`, `prod` and `prod-breakglass` only, with the same caveat about repository-level
+secrets as above. `sg_setup_encryption` accepts only a long-term IAM user key (`AKIA` and 16 of
+`[A-Z0-9]`, with a secret of 40 characters of `[A-Za-z0-9/+]`): a temporary `ASIA` key needs a
+session token and expires, which a stored secret cannot follow. The pair is written into the
+`key_provider` block (`access_key`, `secret_key`) of `TF_ENCRYPTION`, so the stage's own AWS
+variables play no part. No ayasee message prints it, OpenTofu shows `(source code not available)`
+instead of a `TF_ENCRYPTION` line, and GitHub masks it in logs because the workflows take it from
+the `secrets` context.
+
+Give that IAM user nothing but `kms:GenerateDataKey` and `kms:Decrypt` on the one key, and let the
+key policy allow those two actions to that user only, with the condition
+`"StringEquals": {"kms:EncryptionContext:ayasee": "plan"}` so the key serves nothing but ayasee
+plans. Grant both actions: `prod-plan` encrypts and then decrypts its own plan for
+`tofu show -json`, and whether an apply alone gets by with `kms:Decrypt` has not been checked. As
+with `pbkdf2`, the key pair is a stored secret: anyone who can read it can decrypt an uploaded plan
+artifact during its 7 days, until the key is deactivated or the IAM key is deleted, and each use
+is logged in CloudTrail. Use a key ARN rather than an alias ARN if you can: pointing the alias at
+another key while a plan waits for approval makes the apply fail to decrypt it, and the run has to
+be planned again.
+
+What has been tested for `aws_kms`: the rendered `TF_ENCRYPTION` block, the ARN and key-pair
+checks and the refusals (`tests/actions/test_lib_encryption.py`), and that OpenTofu 1.13 accepts
+the block and makes its first AWS call (STS `GetCallerIdentity`, sent in the test to a closed local
+port, with no AWS configuration of the developer in reach). A plan encrypted and decrypted through
+a real KMS key has not been run: the pbkdf2 integration test covers the rest of the path, which is
+the same for every provider.
+
+Any second key source is refused as ambiguous: a key URL with `pbkdf2` or `aws_kms`, a passphrase
+with `azure_vault` or `aws_kms`, a KMS key (`AYASEE_KMS_KEY_ID`) or KMS key pair with `azure_vault`
+or `pbkdf2`, or the test-only `AYASEE_TEST_PASSPHRASE` next to any of them.
+
+`gcp_kms` and `openbao`, which OpenTofu also supports, are not wired; the configuration refuses
+them. Rendering their blocks is easy; giving the prod jobs, and only them, a credential that reaches
+the key is not. The reusable workflows pass no Google Cloud credential at all, so `gcp_kms` needs
+either a Workload Identity Federation login (`google-github-actions/auth`, a new pinned action and
+per-environment variables) or a stored service-account key as a prod-only secret like the
+`aws_kms` key pair. Organisation policies often block service-account keys, and a key file is
+multi-line JSON that cannot be checked against a safe character set before it goes into
+`TF_ENCRYPTION`. `openbao` needs a server the runners can
+reach and a token: a stored token expires, and a JWT login with the GitHub OIDC token needs a login
+step that the hash-pinned setup does not install. Both are choices about the identity model (D7)
+for the maintainers to make first.
 
 ## What each mode allows (R29)
 

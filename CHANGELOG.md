@@ -27,6 +27,16 @@ released version into the GitHub release notes.
   (the guard and ledger steps get no AWS credentials) and not readable by the cockpit. Listing
   responses with a DTD are refused in any encoding, response bodies are capped on their
   decompressed size, and the endpoint host is normalised the way it is sent.
+- `plan_encryption.key_provider: aws_kms` (#10): the prod plan key is wrapped by the AWS KMS key
+  whose ARN is in the `AYASEE_KMS_KEY_ID` variable (new `kms-key-id` input of the plan and apply
+  actions; the region comes from the ARN), with the encryption context `ayasee = plan`. KMS is
+  reached with a dedicated long-term IAM key pair, the new optional secrets
+  `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY` of `iac-staged` and
+  `iac-breakglass`, passed only to the prod plan and apply steps, so it works with either
+  `identity`. A KMS key or key pair next to another key source is refused as ambiguous. Tested:
+  the rendered block, the ARN and key-pair checks, and OpenTofu 1.13.9 accepting the block offline;
+  not yet run against a real KMS key. `gcp_kms` and `openbao` stay
+  refused: neither has a credential path into the prod jobs yet.
 - The cockpit shows the opt-ins that weaken a compliant default (#1): the collector reads each
   repository's `.ayasee.yaml` at `main` (`config` in `repos.yaml`) and the snapshot carries an
   optional `repos[].labels` list (`{kind: non-compliant, setting: solo_mode}`,
