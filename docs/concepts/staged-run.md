@@ -152,26 +152,37 @@ write on the repository, needed only for a `git-branch://` ledger store. A third
 environment secret of `prod-plan` and `prod` (see [key providers](plan-binding.md#key-providers)). Jobs keep `contents: read`;
 when `ledger-token` is set, only the guard and ledger steps receive it, as step-level environment
 (`GIT_CONFIG_*` with an inline credential helper that reads the token from an environment
-variable; no file, no global git configuration).
+variable; no file, no global git configuration), plus the trunk-guard step of the `resolve` job,
+which uses it for read-only API calls only (next section).
 
 ### The ledger token and `main`
 
 A token with contents write can push to any branch, `main` included. When `ledger-token` is passed,
 the `resolve` job of `iac-staged` and `iac-nightly` runs `ayasee trunk-guard` with that token (one
-step, read-only calls) and checks that an active ruleset with a `pull_request` rule applies to `main`
-and that the token can never bypass it. It reads `GET /repos/{owner}/{repo}/rules/branches/main` and
-`GET /repos/{owner}/{repo}/rulesets/{id}`, which need only the Metadata read permission that every
-fine-grained token carries; `current_user_can_bypass` then describes the ledger token itself. The
-workflow's `github.token` is not used: it can read the rules but not who may bypass them, and no job
-permission is added.
+step, read-only calls). It passes when an active ruleset with a `pull_request` rule applies to
+`main` and the token has no bypass for it, which means the token cannot push to `main` directly.
+It reads `GET /repos/{owner}/{repo}/rules/branches/main` and
+`GET /repos/{owner}/{repo}/rulesets/{id}?includes_parents=true`, which need only the Metadata read
+permission that every fine-grained token carries; `current_user_can_bypass` then describes the
+ledger token itself. Without a pull-request rule it reads `protected` from
+`GET /repos/{owner}/{repo}/branches/main` (Contents read) to tell an unprotected `main` from
+classic branch protection, whose bypass settings need the Administration permission and so cannot
+be verified. The workflow's `github.token` is not used: it can read the rules but not who may
+bypass them, and no job permission is added.
 
-Anything else is a `::warning::` and a line of the run summary, not a refusal: no pull-request rule,
-a ruleset that is not active, a bypass for the token (`always`, `pull_requests_only` or `exempt`),
-an unknown value or an API error ("cannot tell"). Not verified is never reported as protected. It
-warns rather than fails because classic branch protection cannot be read without the Administration
-permission, so a `main` protected that way reads as unprotected; a refusal would stop correctly
-protected repositories on every push. Use a ruleset and the warning goes away. `iac-breakglass` does
-not run the check: it is the incident path, and the staged run of every push already reports it.
+What a pass does not cover: with zero required approvals, or without "require approval of the most
+recent push", the token can still push to the head branch of an open pull request and merge it
+through the API. Zero approvals is accepted because the solo-maintainer path needs it; require an
+approval and the most-recent-push approval where you have a second reviewer.
+
+Anything else is a `::warning::` and a line of the run summary, not a refusal: `main` unprotected,
+classic branch protection (not verifiable), a ruleset that is not active, a bypass for the token
+(`always`, `exempt`, or `pull_requests_only` when merging a pull request), an unknown value or an
+API error ("cannot tell"). Not verified is never reported as protected. This warning is a
+deliberate exception to the fail-closed rule of [CONTRIBUTING](../../CONTRIBUTING.md#ground-rules):
+the check reads repository settings, not an input of the run, and a refusal would stop repositories
+protected by classic branch protection on every push. `iac-breakglass` does not run the check: it
+is the incident path, and the staged run of every push already reports it.
 
 ## identity: secrets
 
