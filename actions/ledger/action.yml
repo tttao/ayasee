@@ -2,7 +2,7 @@ name: ayasee ledger
 description: Record the outcome of a deployment (per-unit status and convergence) in the ledger.
 inputs:
   store:
-    description: Ledger store URL (file://, git-branch:// or azure-blob://).
+    description: Ledger store URL (file://, git-branch://, azure-blob:// or s3://).
     required: true
   repo:
     description: Repository as owner/name.

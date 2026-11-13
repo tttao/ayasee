@@ -1,7 +1,7 @@
 """Ledger (D5): the backend's record of what is live per repo x environment.
 
 Every store uses the same layout (``{prefix}`` is always ``ayasee-ledger`` unless an
-Azure URL overrides it)::
+Azure or S3 URL overrides it)::
 
     {prefix}/{owner}/{name}/{env}/history/{YYYYMMDDTHHMMSSffffffZ}-{sha[:12]}.json
     {prefix}/{owner}/{name}/{env}/current.json
@@ -15,6 +15,7 @@ Stores are chosen by URL (:func:`open_store`)::
     file:///abs/path
     git-branch:///abs/repo?branch=ayasee-ledger&remote=origin
     azure-blob://<account>.blob.core.windows.net/<container>?prefix=ayasee-ledger
+    s3://<bucket>?region=<region>&prefix=ayasee-ledger&endpoint=https://<host>
     github-branch://<owner>/<repo>?branch=ayasee-ledger     (read-only, contents API)
 """
 
@@ -37,6 +38,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from ayasee import cli
 from ayasee.github import GitHub, GitHubError
+from ayasee.s3 import PreconditionFailed, S3Client, S3Error
 
 DEFAULT_PREFIX = "ayasee-ledger"
 DEFAULT_BRANCH = "ayasee-ledger"
@@ -543,6 +545,95 @@ class AzureBlobStore:
         return out
 
 
+# ---- s3 store ---------------------------------------------------------------------------
+
+
+class S3Store:
+    """Ledger in an S3 bucket (or an S3-compatible store), through :mod:`ayasee.s3`.
+
+    Both writes are conditional. The history entry is created with ``If-None-Match: *`` (a
+    retry that finds identical bytes succeeds, different bytes is an error). ``current.json`` is
+    replaced with ``If-Match: <etag>`` of the copy that was read, or created with
+    ``If-None-Match: *``; a lost race re-reads and decides again, up to 5 times. A store that
+    ignores these headers silently loses the race protection, see docs/concepts/ledger.md."""
+
+    def __init__(self, client: S3Client, prefix: str = DEFAULT_PREFIX) -> None:
+        if not all(_SEGMENT.match(p) for p in prefix.split("/")) or ".." in prefix:
+            raise LedgerError("invalid S3 ledger prefix")
+        self.client = client
+        self.prefix = prefix
+
+    def _get(self, key: str) -> tuple[bytes, str] | None:
+        try:
+            return self.client.get(key)
+        except S3Error as exc:
+            raise LedgerError(f"ledger read failed: {exc}") from None
+
+    def append(self, rec: LedgerRecord) -> None:
+        hist, cur = _paths(self.prefix, rec)
+        data = _encode(rec)
+        try:
+            self._create_history(hist, data)
+            for _ in range(PUSH_ATTEMPTS):
+                got = self._get(cur)
+                if got is not None and (got[0] == data or not _supersedes(rec, _decode(got[0]))):
+                    return  # already current, or a newer record is: current stays monotonic
+                try:
+                    if got is None:
+                        self.client.put(cur, data, if_none_match=True)
+                    else:
+                        self.client.put(cur, data, if_match=got[1])
+                    return
+                except PreconditionFailed:
+                    continue  # someone wrote current.json in between: re-read
+        except S3Error as exc:
+            raise LedgerError(f"ledger write failed: {exc}") from None
+        raise LedgerError(
+            f"ledger append failed after {PUSH_ATTEMPTS} attempts (concurrent current.json writes)"
+        )
+
+    def _create_history(self, key: str, data: bytes) -> None:
+        for _ in range(PUSH_ATTEMPTS):
+            try:
+                self.client.put(key, data, if_none_match=True)
+                return
+            except PreconditionFailed as exc:
+                if exc.status == 409:  # a concurrent conditional write: S3 says retry
+                    continue
+            existing = self._get(key)
+            if existing is None:
+                continue  # deleted in between; try to create it again
+            if existing[0] != data:  # a retry re-sends identical bytes; anything else conflicts
+                raise LedgerError("history entry already exists with different content")
+            return
+        raise LedgerError(f"ledger history write failed after {PUSH_ATTEMPTS} attempts")
+
+    def _current_obj(self, repo: str, env: str) -> LedgerRecord | None:
+        got = self._get(f"{_env_dir(self.prefix, repo, env)}/current.json")
+        return None if got is None else _decode(got[0])
+
+    def current(self, repo: str, env: str) -> LedgerRecord | None:
+        # Newest of current.json and history[0]: heals a crash between the two writes.
+        hist = self.history(repo, env, 1)
+        return _newest(self._current_obj(repo, env), hist[0] if hist else None)
+
+    def history(self, repo: str, env: str, limit: int = 50) -> list[LedgerRecord]:
+        d = f"{_env_dir(self.prefix, repo, env)}/history/"
+        try:
+            keys = self.client.list_keys(d)
+        except S3Error as exc:
+            raise LedgerError(f"ledger read failed: {exc}") from None
+        names = sorted(
+            (k for k in keys if k.endswith(".json") and "/" not in k[len(d) :]), reverse=True
+        )
+        out = []
+        for n in names[:limit]:
+            got = self._get(n)
+            if got is not None:
+                out.append(_decode(got[0]))
+        return out
+
+
 # ---- github branch store (read-only) ----------------------------------------------------
 
 
@@ -613,6 +704,8 @@ def open_store(url: str, gh: GitHub | None = None) -> LedgerStore:
         return AzureBlobStore(
             f"https://{u.netloc}", container, prefix=q.get("prefix") or DEFAULT_PREFIX
         )
+    if u.scheme == "s3":
+        return _open_s3(u.netloc, u.path, q)
     if u.scheme == "github-branch":
         repo = f"{u.netloc}/{u.path.strip('/')}"
         if not u.netloc or u.path.strip("/").count("/") or not u.path.strip("/"):
@@ -623,8 +716,26 @@ def open_store(url: str, gh: GitHub | None = None) -> LedgerStore:
             raise LedgerError(str(exc)) from None
         return GitHubBranchStore(client, repo, branch=q.get("branch") or DEFAULT_BRANCH)
     raise LedgerError(
-        "unknown ledger store URL scheme (file, git-branch, azure-blob, github-branch)"
+        "unknown ledger store URL scheme (file, git-branch, azure-blob, s3, github-branch)"
     )
+
+
+def _open_s3(bucket: str, path: str, q: dict[str, str]) -> S3Store:
+    if not bucket or path.strip("/"):
+        raise LedgerError(
+            "s3 URL must be s3://<bucket>?region=<region> (the key prefix is ?prefix=)"
+        )
+    unknown = set(q) - {"region", "prefix", "endpoint"}
+    if unknown:
+        raise LedgerError(f"s3 URL: unknown parameter(s) {', '.join(sorted(unknown))}")
+    region = q.get("region") or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if not region:
+        raise LedgerError("s3 URL needs ?region=<region> (or AWS_REGION in the environment)")
+    try:
+        client = S3Client(bucket, region, q.get("endpoint") or None)
+    except S3Error as exc:
+        raise LedgerError(str(exc)) from None
+    return S3Store(client, prefix=q.get("prefix") or DEFAULT_PREFIX)
 
 
 # ---- CLI ------------------------------------------------------------------------------
@@ -716,7 +827,7 @@ def _setup(parser: argparse.ArgumentParser) -> None:
 
     p = sub.add_parser("write", help="record a run in the ledger")
     p.add_argument(
-        "--store", required=True, help="store URL (file://, git-branch://, azure-blob://)"
+        "--store", required=True, help="store URL (file://, git-branch://, azure-blob://, s3://)"
     )
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--env", required=True)
