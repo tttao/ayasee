@@ -37,6 +37,9 @@ committed as unit inputs. Everything uses placeholders: `OWNER`, the all-zero ID
 
 ## Adoption steps
 
+[Adopt in an existing repository](../../docs/guides/adopt.md) runs these steps in one order on one
+page; this section holds their details.
+
 `ayasee init --profile cloudflare-s3` writes the configuration, the callers, `root.hcl` and the
 bootstrap root of this example into your repository, with your stages and `iac_root`, pinned to one
 release (step 5 is then done); it writes no unit. See

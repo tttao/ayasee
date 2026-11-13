@@ -19,6 +19,9 @@ released version into the GitHub release notes.
 
 ### Added
 
+- `docs/guides/adopt.md` (#11): adopting ayasee in an existing repository on one page, in one
+  order: `init`, bootstrap, the printed secret commands, `doctor`, `import-plan`, the first pull
+  request and one merge per unit, with the steps only a person can do marked.
 - `ayasee init --profile cloudflare-s3|databricks-azure [--stages] [--iac-root] [--source] [--ref]`
   (#11): writes the configuration, the callers, `root.hcl`, the bootstrap root and an empty
   directory per stage, pinned to one release commit: the callers' `uses:` and the bootstrap's

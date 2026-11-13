@@ -103,6 +103,7 @@ nav:
   - Home: index.md
   - Get started:
       - Quickstart: docs/guides/quickstart.md
+      - Adopt in an existing repository: docs/guides/adopt.md
       - Reference example (Databricks on Azure):
           - examples/databricks-azure/README.md
           - Ownership contract: examples/databricks-azure/OWNERSHIP.md

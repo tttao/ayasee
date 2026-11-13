@@ -14,6 +14,7 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
 |---|---|
 | Understand the design in ten minutes | [Architecture](concepts/architecture.md) |
 | Get from zero to a first green run | [Quickstart](guides/quickstart.md) |
+| Adopt ayasee where the infrastructure already runs | [Adopt in an existing repository](guides/adopt.md) |
 | See a complete adopter repository | [Databricks on Azure example](../examples/databricks-azure/README.md), or without Azure, the [Cloudflare and S3 example](../examples/cloudflare-s3/README.md) |
 | Decide whether to use ayasee at all | [Comparison](comparison.md) |
 
@@ -35,6 +36,7 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
 | Guide | Use it to |
 |---|---|
 | [Quickstart](guides/quickstart.md) | Reach a first green run with the bootstrap modules and the example |
+| [Adopt in an existing repository](guides/adopt.md) | `init`, bootstrap, secrets, `doctor`, `import-plan`, first pull request: one page, one order |
 | [Migrate from environment branches](guides/migrate-from-env-branches.md) | Retire long-lived `uat` and `prod` branches, one repository at a time |
 | [Onboard a brownfield Databricks estate](guides/onboard-brownfield.md) | Bring existing Unity Catalog objects under Terraform with the exporter and import blocks |
 | [Releasing ayasee](guides/releasing.md) | Maintainer runbook: provenance gate, version bump, tag, approval, attestation check |

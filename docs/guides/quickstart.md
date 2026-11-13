@@ -5,6 +5,9 @@ Databricks-on-Azure repository, using the bootstrap modules and the
 [reference example](../../examples/databricks-azure/README.md). Expect an afternoon, most of it
 spent on Azure role assignments.
 
+Adopting ayasee in a repository whose infrastructure already runs? Follow the one-page order in
+[adopt in an existing repository](adopt.md) and come back here for the details.
+
 ayasee is **pre-alpha**. Read the [known limitations](../concepts/architecture.md#known-limitations)
 first. If you are not on GitHub Actions, OpenTofu with Terragrunt, and Azure for state, identities
 and plan encryption, the wired path will not fit yet: see [the comparison](../comparison.md).
