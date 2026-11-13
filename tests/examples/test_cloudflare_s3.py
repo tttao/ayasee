@@ -52,7 +52,7 @@ def test_configuration_declares_the_profile(capsys):
     assert cfg.ledger.url is None  # set per environment (AYASEE_LEDGER_URL), see the README
     assert unsupported(cfg) == []
     layout = staged_layout(cfg.stages, "")
-    assert (layout["run-dev"], layout["pre-prod-stage"]) == ("false", "test")
+    assert (layout["run-stage-3"], layout["stage-4"]) == ("false", "test")
     assert "DEVIATION: identity: secrets" in capsys.readouterr().err
     assert config.label_keys(cfg) == [{"kind": "deviation", "setting": "identity"}]
 

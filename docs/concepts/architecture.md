@@ -13,7 +13,7 @@ execution plane writes the ledger, issues and workflow runs. The observation pla
 - One trunk. Environments are folders (`stages/<env>/<unit>`), not branches.
 - A push to `main` starts one `iac-staged` run pinned to the merge SHA. It goes
   dev, uat, prod-plan, then a gated prod apply (see [the staged run](staged-run.md)); the pre-prod
-  stages are configurable (two or three stages in all).
+  stages are configurable (one to four, then prod).
 - Prod applies the exact approved plan: an encrypted saved plan checked against a SHA-256 manifest
   ([plan binding](plan-binding.md)). A stale or mismatched plan stops the run and asks for a re-plan
   and a new approval. It is never re-planned silently.
@@ -78,7 +78,7 @@ flowchart LR
 | Component | Type | Role |
 |---|---|---|
 | `iac-pr` (`.github/workflows/iac-pr.yml`) | Reusable workflow | On `pull_request`: fmt and validate, Trivy and Checkov (scrubbed SARIF), a read-only plan of the changed dev units, the Rego pack on that plan, one sticky comment. Never applies. No job that evaluates PR code holds `pull-requests: write` or `security-events: write` (R39). See [pull-request checks](pr-checks.md). |
-| `iac-staged` | Reusable workflow | On push to `main`: `resolve`, `dev`, `uat`, `prod-plan`, then `prod` (gated) or `prod-in-sync`, plus `prod-result` for a rejected gate. See [the staged run](staged-run.md). |
+| `iac-staged` | Reusable workflow | On push to `main`: `resolve`, the pre-prod slots `stage-1` to `stage-4` (one per configured pre-prod stage, unused ones skipped), `prod-plan`, then `prod` (gated) or `prod-in-sync`, plus `prod-result` for a rejected gate. See [the staged run](staged-run.md). |
 | `iac-nightly` | Reusable workflow | Per environment: drift plan at the ledger's live SHA, one issue per environment, prod drift raises stop-the-line. Re-scan of `main`. See [drift](drift.md). |
 | `iac-breakglass` | Reusable workflow | The one emergency path into prod: incident reference, separate `prod-breakglass` environment and reviewers, post-approval issue. See [DORA mapping](../compliance/dora-art17.md). |
 | `actions/setup` | Composite action | Installs pinned OpenTofu, Terragrunt, uv and the `ayasee` CLI, verifying SHA-256 checksums. Never uses a dependency cache (R40). It does not install Terraform. |
@@ -110,7 +110,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 | Environment | Used by | Branches | Reviewers | Can |
 |---|---|---|---|---|
 | `dev-plan` | `iac-pr` | all | none | Read dev, plan with `-lock=false` |
-| `dev`, `uat` | `iac-staged` | `main` | none | Apply its own stage, its state, write the ledger |
+| each pre-prod stage (default `dev`, `uat`) | `iac-staged` | `main` | none | Apply its own stage, its state, write the ledger |
 | `prod-plan` | `iac-staged` | `main` | none | Read and plan prod (state read, lock lease), wrap and unwrap the plan key (`tofu show -json` decrypts its own plan), write the prod ledger record. Cannot apply. |
 | `prod` | `iac-staged` | `main` | required, no self-review, no admin bypass | Apply prod, its state, unwrap the plan key, read and write the ledger |
 | `prod-breakglass` | `iac-breakglass` | `main` | a separate required set | Its own identity: plan and apply prod in one job, wrap and unwrap, read and write the ledger |
@@ -119,9 +119,10 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 ### Data flow of a change
 
 1. A pull request runs `iac-pr`. The change set and risk tiers appear in a comment. Nothing is applied.
-2. The merge starts one `iac-staged` run. The `dev` job runs the guard, plans and applies the units
-   one at a time in dependency order, runs a converge re-plan that must be empty, and writes the
-   ledger record for `dev`. `uat` repeats this.
+2. The merge starts one `iac-staged` run. The job of the first stage (`dev` by default) runs the
+   guard, plans and applies the units one at a time in dependency order, runs a converge re-plan
+   that must be empty, and writes the ledger record for `dev`. Each later pre-prod stage (`uat`)
+   repeats this.
 3. `prod-plan` runs the guard, plans every prod unit, refuses a cascading change, runs the Rego pack
    and Trivy on the plan JSON inside the job, writes the manifest, and uploads only the encrypted
    plan files and `manifest.json`.
@@ -236,9 +237,10 @@ flowchart LR
   environment secret, the quickstart has a [reference S3 `root.hcl`](../guides/quickstart.md#without-azure),
   and `github-branch://` is the ledger store that needs no cloud. There is no `s3://` ledger store,
   and the `openbao`, `aws_kms` and `gcp_kms` key providers are not wired.
-- **Two or three stages only.** `iac-staged` runs `[<pre-prod>, prod]` or
-  `[<first>, <pre-prod>, prod]`; longer lists are refused in `resolve`. No two-stage run has been
-  executed on GitHub yet.
+- **Up to five stages.** `iac-staged` has four fixed pre-prod job slots, so it runs one to four
+  pre-prod stages and then `prod`; longer lists are refused in `resolve`. A matrix over the stages
+  would not keep their order (see [the staged run](staged-run.md#stages)). No two-, four- or
+  five-stage run has been executed on GitHub yet.
 - **`extra_rules` is not forwarded by the workflows.** Adopter risk rule files work in the `risk`
   action and the CLI (`--rules`), but `iac-staged` does not pass the `extra_rules` key through yet.
 - **Not a write UI.** The cockpit is read-only. It never approves, syncs or re-drives.
