@@ -53,6 +53,17 @@ on:
           dev-plan (read-only tokens: a pull request runs untrusted code), never at repository
           or organisation level; only the plan step receives it.
         required: false
+      AYASEE_PROVIDER_ENV:
+        description: >-
+          identity: secrets only. More provider variables (OVH, Hetzner, Scaleway, a second
+          Cloudflare account through TF_VAR_*) as one JSON object of name to string value, for
+          example {"HCLOUD_TOKEN": "..."}. Every name must be declared in provider_env in
+          .ayasee.yaml; reserved names (PATH, LD_*, GITHUB_*, TF_* except TF_VAR_*, AWS_*,
+          CLOUDFLARE_*, ...) and values under 16 characters are refused. Pass it
+          by name and create it as an environment secret of each stage environment, never at
+          repository or organisation level; only the plan and apply steps receive it, and each
+          value is masked.
+        required: false
 
 permissions: {}
 
@@ -271,6 +282,7 @@ jobs:
             echo "units-root=$units_root"
             echo "stage=$stage"
             echo "identity=$identity"
+            echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$RUNNER_TEMP/ayasee-config.json")"
             echo "engine=$(jq -r '.engine' "$RUNNER_TEMP/ayasee-config.json")"
             if [ -z "$units" ]; then
               echo "any=false"
@@ -293,6 +305,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ steps.changed.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ steps.changed.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ steps.changed.outputs.provider-env-names }}
           # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
           ARM_USE_OIDC: ${{ steps.changed.outputs.identity == 'oidc' && 'true' || '' }}
           ARM_CLIENT_ID: ${{ steps.changed.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
@@ -368,6 +382,7 @@ jobs:
       units-root: ${{ steps.shared.outputs.units-root }}
       engine: ${{ steps.shared.outputs.engine }}
       identity: ${{ steps.shared.outputs.identity }}
+      provider-env-names: ${{ steps.shared.outputs.provider-env-names }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -399,6 +414,7 @@ jobs:
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "identity=$(jq -er '.identity' "$cfg")"
+            echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
           } >>"$GITHUB_OUTPUT"
 
   plan-shared:
@@ -446,6 +462,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.shared-changes.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.shared-changes.outputs.provider-env-names }}
           # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
           ARM_USE_OIDC: ${{ needs.shared-changes.outputs.identity == 'oidc' && 'true' || '' }}
           ARM_CLIENT_ID: ${{ needs.shared-changes.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}

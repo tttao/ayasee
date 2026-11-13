@@ -99,6 +99,17 @@ on:
           prod-breakglass, never at repository or organisation level;
           only the plan and apply steps receive it.
         required: false
+      AYASEE_PROVIDER_ENV:
+        description: >-
+          identity: secrets only. More provider variables (OVH, Hetzner, Scaleway, a second
+          Cloudflare account through TF_VAR_*) as one JSON object of name to string value, for
+          example {"HCLOUD_TOKEN": "..."}. Every name must be declared in provider_env in
+          .ayasee.yaml; reserved names (PATH, LD_*, GITHUB_*, TF_* except TF_VAR_*, AWS_*,
+          CLOUDFLARE_*, ...) and values under 16 characters are refused. Pass it
+          by name and create it as an environment secret of each stage environment, never at
+          repository or organisation level; only the plan and apply steps receive it, and each
+          value is masked.
+        required: false
       extra-env-secret:
         description: >-
           Optional secret exported as AYASEE_EXTRA_SECRET to the plan and apply steps only (so
@@ -254,6 +265,7 @@ jobs:
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "identity=$(jq -r '.identity' "$cfg")"
+            echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
             echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
             echo "shared-units=$(jq -r '.shared_units | join(",")' "$cfg")"
           } >>"$GITHUB_OUTPUT"
@@ -335,6 +347,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ steps.cfg.outputs.provider-env-names }}
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
           AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
@@ -357,6 +371,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
           AWS_ACCESS_KEY_ID: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ steps.cfg.outputs.provider-env-names }}
           AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
           AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
           AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only

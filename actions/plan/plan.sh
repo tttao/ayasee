@@ -14,6 +14,8 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ayasee-lib.sh
 . "$here/../lib/ayasee-lib.sh"
+# identity: secrets: the declared provider variables of AYASEE_PROVIDER_ENV (issue #11)
+sg_load_provider_env
 
 env="${SG_ENV:?SG_ENV is required}"
 root="${SG_UNITS_ROOT:?SG_UNITS_ROOT is required}"

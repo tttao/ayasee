@@ -230,6 +230,8 @@ the "no stored cloud secrets" default (D7):
 
   GitHub's documentation says a job that runs in an environment receives that environment's secret
   when the caller passes a secret of the same name; this has not been verified by a run yet.
+- Other providers (OVH, Hetzner, Scaleway, a second Cloudflare account) use the
+  [provider environment](#provider-environment) below, without a change in ayasee.
 - The first job of each reusable workflow runs `ayasee config labels` and turns
   `DEVIATION: identity: secrets ...` (and `NON-COMPLIANT: solo_mode ...`) into a warning and a line
   of the run summary. The cockpit does not show the label yet.
@@ -248,6 +250,98 @@ These tokens never reach the plan key. With `plan_encryption.key_provider: aws_k
 reached with its own key pair, `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY`,
 environment secrets of `prod-plan`, `prod` and `prod-breakglass` only (see
 [key providers](plan-binding.md#key-providers)).
+
+### Provider environment
+
+`workflow_call` secrets are declared statically and the callers never use `secrets: inherit`, so
+the reusable workflows cannot name a secret for every provider. One more optional secret,
+`AYASEE_PROVIDER_ENV`, carries the other provider variables as one JSON object of name to string
+value, and `.ayasee.yaml` declares the names it may hold:
+
+```yaml
+identity: secrets
+provider_env: [HCLOUD_TOKEN, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET, OVH_CONSUMER_KEY]
+```
+
+```bash
+# one secret per environment, scoped like the named tokens; the JSON never goes on a command line
+gh secret set AYASEE_PROVIDER_ENV --env test < provider-env.test.json
+```
+
+```yaml
+    secrets:
+      AYASEE_PROVIDER_ENV: ${{ secrets.AYASEE_PROVIDER_ENV }}
+```
+
+- **Same scope as the named tokens.** Only the plan and apply steps receive it, and only with
+  `identity: secrets`. Create it as an environment secret of each environment that needs it, never
+  at repository or organisation level. An environment without it gets none of the variables.
+- **Declared names only.** The plan and apply scripts run `ayasee provider-env` first. It refuses
+  the run when the secret holds a key that `provider_env` does not declare (it counts such keys,
+  it never prints them), when a value is not a JSON string, when a key repeats or when the JSON
+  is malformed (the error gives a line and column, never the text). Whoever can write the secret
+  cannot add a variable that the configuration, reviewed in a pull request, does not name.
+- **Reserved names are refused**, both in `provider_env` (the configuration does not load) and at
+  run time: names that change what the job runs, where its traffic goes or what it logs. That is
+  `PATH`, `HOME`, `ENV`, `IFS`, `TMPDIR`; the loader and interpreter variables (`LD_*`, `DYLD_*`,
+  `PYTHON*`, `NODE_*`, `PERL5OPT`, `RUBYOPT`, `JAVA_TOOL_OPTIONS`, `GODEBUG`, `OPENSSL_CONF`,
+  ...); bash's own variables, because the scripts export into their own shell (`BASH*`, `UID`,
+  `EUID`, `PPID`, `POSIXLY_CORRECT`, `FUNCNEST`, `TMOUT`, `EXECIGNORE`, `OPTIND`, `SECONDS`,
+  `RANDOM`, `HIST*`, `PS0` to `PS4`, `PROMPT_*`, `COMP_*`, `READLINE_*`, ...); the runner's
+  (`GITHUB_*`, `RUNNER_*`, `ACTIONS_*`, `INPUT_*`, `CI`); the engine's and Terragrunt's (`TF_*`,
+  `TG_*`, `TERRAGRUNT_*`, `TERRAFORM_*`: `TF_CLI_ARGS`, `TF_LOG`, `TF_ENCRYPTION`,
+  `TERRAFORM_CONFIG`, ...); ayasee's own (`SG_*`, `AYASEE_*`); git and SSH (`GIT_*`, `SSH_*`);
+  TLS trust, key logs and proxies (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `SSLKEYLOGFILE`,
+  `HTTPS_PROXY`, `NO_PROXY`, ...); libc and the resolver (`GLIBC_TUNABLES`, `HOSTALIASES`,
+  `RES_OPTIONS`, `LOCALDOMAIN`); stored passwords and other shells' start-up files (`NETRC`,
+  `CURL_HOME`, `KSH_ENV`, `ZDOTDIR`); `XDG_*`, `LANG` and `LC_*`; and the whole `AWS_*` and `CLOUDFLARE_*` families, which belong to
+  the named tokens and the state backend (`AWS_ENDPOINT_URL*`, `AWS_PROFILE`, `AWS_CONFIG_FILE`
+  or `CLOUDFLARE_BASE_URL` would send those credentials elsewhere or run a command). A second
+  Cloudflare account goes through a `TF_VAR_<variable>` that the unit passes to its provider
+  block. A name is `[A-Z][A-Z0-9_]*` or `TF_VAR_` and a variable name. The full list is
+  `RESERVED` and `RESERVED_PREFIXES` in [`src/ayasee/providerenv.py`](../../src/ayasee/providerenv.py).
+- **Values of at least 16 characters.** A mask hides every occurrence of the string in the job
+  log, and the runner also drops any job output that contains a masked string ("Skip output ...
+  may contain secret"). A value such as `true` would empty the `has-changes` output of
+  `prod-plan`, and prod would be skipped without an error. So a value shorter than 16 characters
+  (after trimming spaces) is refused. Most provider credentials are longer (an
+  `OVH_APPLICATION_KEY` is exactly 16), but a short real secret, such as a short password passed
+  as a `TF_VAR_*`, is refused too: lengthen it, or keep it out of this secret. Non-secret
+  identifiers (an endpoint name, an account or zone ID) belong in the unit inputs.
+- **Masked before use.** Each value is registered with `::add-mask::` before anything else the
+  step prints. The runner matches masks against one log line at a time, so a mask that contains a
+  newline never matches: a multi-line value (a PEM key, written with `\n` in the JSON) is hidden
+  by its lines alone, each line of 8 characters or more registered on its own (random base64 of
+  that length does not collide with ayasee's outputs). One line may be shorter, the tail of a
+  base64 block; it is not masked and can appear in the log. A value with more than one such short
+  line is refused: write it on one line (minified JSON, for example). Masks cover the job log
+  only: a value that reaches a resource attribute or a non-sensitive variable lands in the plan
+  JSON and the state like any other value.
+- **Never outside the step.** The variables are exported in the plan or apply script's own
+  process and the engine it starts: never through `$GITHUB_ENV`, never on a command line, never to
+  a later step. The pairs pass from `ayasee provider-env` to the script through a mode-600 file
+  under `$RUNNER_TEMP`, deleted before anything is exported. The script unsets the raw JSON in its
+  shell, so the engine's environment does not carry it; the script's own process environment
+  (`/proc/<pid>/environ`) still does, as it does the named tokens.
+
+**What a reviewer of `provider_env` checks.** A declared name is a decision about where
+credentials go, so protect `.ayasee.yaml` with `CODEOWNERS` and review a change to the list like a
+change to a provider block:
+
+- A variable that holds a URL, an endpoint or a file path (`HCLOUD_ENDPOINT`, `SCW_API_URL`,
+  `OVH_ENDPOINT`, a `*_CONFIG_FILE`) decides where the provider sends its credentials, or what file
+  it reads them from. Whoever can write the secret then chooses that destination. Prefer to set it
+  as a unit input in reviewed code.
+- A `TF_VAR_<variable>` overrides the unit's `inputs` of the same name: Terragrunt passes `inputs`
+  as `TF_VAR_*` variables, and its reference ("Variable Precedence" under `inputs`) states that an
+  explicitly set `TF_VAR_*` environment variable takes precedence over `inputs`. Declare a
+  `TF_VAR_` name only for a variable that no `terragrunt.hcl` sets, and mark the variable
+  `sensitive = true` in the module, or its value appears in the plan JSON and the state.
+
+The trust model is that of the named tokens: code planned in a pull request can read whatever the
+`dev-plan` environment holds, `provider_env` included, so `dev-plan` gets read-only credentials.
+The names `iac-pr` uses come from the pull request's own `.ayasee.yaml`, which widens nothing:
+every key in the secret has to be declared or the run fails.
 
 ## Units that serve every stage
 
