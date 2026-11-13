@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -541,6 +541,46 @@ class GitHub:
                 "comment": comment,
             },
         )
+
+    # ---- doctor (read-only; environments, secrets and variables need an admin's token) ------
+
+    def environments(self, repo: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/environments``: every environment with its protection rules."""
+        return self._paginate(
+            f"/repos/{repo}/environments", {"per_page": 100}, "environments", "environments"
+        )
+
+    def environment_branch_policies(self, repo: str, env: str) -> list[dict[str, Any]]:
+        """The custom deployment branch and tag policies of ``env``."""
+        return self._paginate(
+            f"/repos/{repo}/environments/{quote(env, safe='')}/deployment-branch-policies",
+            {"per_page": 100},
+            "deployment branch policies",
+            "branch_policies",
+        )
+
+    def _names(self, path: str, what: str, key: str) -> set[str]:
+        names = set()
+        for item in self._paginate(path, {"per_page": 100}, what, key):
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                raise GitHubError(0, f"unexpected {what} response (name)")
+            names.add(name)
+        return names
+
+    def secret_names(self, repo: str, env: str | None = None) -> set[str]:
+        """Names of the Actions secrets of ``env``, or of the repository without ``env``."""
+        if env is None:
+            return self._names(f"/repos/{repo}/actions/secrets", "secrets", "secrets")
+        path = f"/repos/{repo}/environments/{quote(env, safe='')}/secrets"
+        return self._names(path, "environment secrets", "secrets")
+
+    def variable_names(self, repo: str, env: str | None = None) -> set[str]:
+        """Names of the Actions variables of ``env``, or of the repository without ``env``."""
+        if env is None:
+            return self._names(f"/repos/{repo}/actions/variables", "variables", "variables")
+        path = f"/repos/{repo}/environments/{quote(env, safe='')}/variables"
+        return self._names(path, "environment variables", "variables")
 
     # ---- cockpit collector (read-only) ----------------------------------------------------
 
