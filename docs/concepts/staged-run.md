@@ -53,8 +53,12 @@ no record at this SHA), so the run would stay safe but fail at random; and the o
 property of the runner, not of the workflow file. With fixed slots the order and the stop on
 failure are in `needs:` and `if:`, and the workflow tests check them statically
 (`tests/workflows/test_iac_staged.py`): each slot needs the one before it, and a skipped slot
-counts as passed only when `resolve` said to skip it. Raising the limit means adding a slot to the
-workflow and to `PRE_PROD_SLOTS` in `ayasee.config`; the tests then cover the new slot.
+counts as passed only when `resolve` said to skip it, and the slots are identical apart from their
+name, `needs:` and `if:`. Raising the limit means adding a slot to the workflow, as a copy of
+`stage-1` chained after the last slot and named in `prod-plan`'s `needs:` and `if:`, and raising
+`PRE_PROD_SLOTS` in `ayasee.config` (the tests derive the slot list from it). An unused slot is
+skipped; its concurrency group carries the run id (`unused-<run id>-stage-<i>`), so it never
+waits for or cancels another job.
 
 These layouts are covered by unit tests of the CLI, the guard and the workflow definition; no
 two-stage, four-stage or five-stage run has been executed on GitHub yet.

@@ -223,7 +223,11 @@ def test_pre_prod_slots_run_the_configured_stage(wf):
         expr = f"${{{{ needs.resolve.outputs.{job} }}}}"
         assert j["env"]["STAGE"] == expr
         assert j["name"] == f"${{{{ needs.resolve.outputs.{job} || '{job}' }}}}"
-        assert j["concurrency"]["group"] == f"ayasee-${{{{ github.repository }}}}-{expr}"
+        # an unused (skipped) slot gets a group of its own run, never the shared empty-stage one
+        assert j["concurrency"]["group"] == (
+            f"ayasee-${{{{ github.repository }}}}-${{{{ needs.resolve.outputs.{job} || "
+            f"format('unused-{{0}}-{job}', github.run_id) }}}}"
+        )
         steps = _steps(wf, job)
         for kind in ("plan", "apply", "ledger", "notify"):
             step = next(s for s in steps if f"/actions/{kind}@" in s.get("uses", ""))
@@ -240,6 +244,19 @@ def test_pre_prod_slots_run_the_configured_stage(wf):
     # every slot and its run flag the CLI prints is wired; no other slot exists
     jobs = [j for j in wf["jobs"] if re.fullmatch(r"stage-\d+", j)]
     assert jobs == SLOTS
+
+
+def test_pre_prod_slots_are_identical_but_for_their_name(wf):
+    """Every slot is a copy of stage-1 except `needs` and `if` (#10), so the per-step checks on
+    one slot hold for all, and a new slot only has to be a copy to be covered."""
+
+    def shape(job):
+        j = {k: v for k, v in wf["jobs"][job].items() if k not in ("needs", "if")}
+        return yaml.safe_dump(j, sort_keys=True).replace(job, "<slot>")
+
+    assert "<slot>" in shape(SLOTS[0])
+    for job in SLOTS[1:]:
+        assert shape(job) == shape(SLOTS[0]), job
 
 
 def test_pre_prod_slots_and_prod_plan_form_one_chain(wf):

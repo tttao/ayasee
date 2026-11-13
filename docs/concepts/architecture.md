@@ -121,7 +121,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 1. A pull request runs `iac-pr`. The change set and risk tiers appear in a comment. Nothing is applied.
 2. The merge starts one `iac-staged` run. The job of the first stage (`dev` by default) runs the
    guard, plans and applies the units one at a time in dependency order, runs a converge re-plan
-   that must be empty, and writes the ledger record for `dev`. Each later pre-prod stage (`uat`)
+   that must be empty, and writes the ledger record for that stage. Each later pre-prod stage (`uat`)
    repeats this.
 3. `prod-plan` runs the guard, plans every prod unit, refuses a cascading change, runs the Rego pack
    and Trivy on the plan JSON inside the job, writes the manifest, and uploads only the encrypted
