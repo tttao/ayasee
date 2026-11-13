@@ -120,6 +120,34 @@ def test_bootstrap_creates_the_environments_and_the_ledger_variable():
         '[for s in local.stages : "drift-${s}"])'
     ) in text
     assert "azure" not in text.lower()
+    assert 'output "secret_commands"' in text
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_bootstrap_lists_the_secrets_doctor_checks(profile):
+    """secret_commands names what ayasee doctor checks: the key provider of the configuration,
+    the provider tokens with identity: secrets, and every other secret a caller passes."""
+    from ayasee.doctor import PLAN_KEY_SECRETS, PROVIDER_SECRETS
+
+    ex = ROOT / "examples" / profile
+    cfg = load_config(ex / ".ayasee.yaml")
+    text = (ex / "bootstrap" / "main.tf").read_text()
+    assert f'key_provider = "{cfg.plan_encryption.key_provider}"' in text
+    passed = set()
+    for name in CALLS:
+        for job in _yaml(ex / ".github" / "workflows" / name)["jobs"].values():
+            for value in (job.get("secrets") or {}).values():
+                m = re.fullmatch(r"\$\{\{ secrets\.([A-Z_]+) \}\}", value)
+                passed.add(m.group(1))
+    key_names = {s for v in PLAN_KEY_SECRETS.values() for s in v}
+    for secret in passed - key_names:
+        if secret in PROVIDER_SECRETS:
+            assert cfg.identity == "secrets", secret
+            assert f"{secret} = s." in re.sub(r" +", " ", text), secret
+        else:
+            assert re.search(rf"^\s+{secret}\s+= \"", text, re.M), secret
+    if cfg.plan_encryption.key_provider == "pbkdf2":
+        assert "generate_plan_passphrase = var.generate_plan_passphrase" in text
 
 
 def test_readme_covers_the_steps_the_issue_asked_for():

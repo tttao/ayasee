@@ -12,3 +12,8 @@ output "environments" {
   description = "GitHub environments created."
   value       = module.environments.environments
 }
+
+output "secret_commands" {
+  description = "The gh secret set commands still to run, each with the scope its value needs: tofu output -raw secret_commands."
+  value       = module.environments.secret_commands
+}

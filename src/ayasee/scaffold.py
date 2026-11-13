@@ -235,7 +235,8 @@ def _run(args: argparse.Namespace) -> int:
         f"\nPinned to {args.source}@{sha}.\n"
         "Next:\n"
         f"  1. run the bootstrap root in {base}bootstrap (a repository administrator, locally)\n"
-        "  2. create the state store, the secrets and the ledger token (the profile's README)\n"
+        "  2. create the state store (the profile's README), then the secrets: run one by one\n"
+        f"     the commands of `tofu output -raw secret_commands` in {base}bootstrap\n"
         f"  3. add the units under {base}stages/<stage>/\n"
         '  4. GITHUB_TOKEN="$(gh auth token)" ayasee doctor, until it has no failure\n'
         "  5. open the first pull request"

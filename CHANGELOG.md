@@ -28,6 +28,15 @@ released version into the GitHub release notes.
   monorepo gets `iac_root`, `units_root` and a `paths:` filter on the `push` caller. Existing files
   are never overwritten without `--force`. The wheel packages the profile templates file by file.
 - The Cloudflare and S3 example's bootstrap derives its environments from one `stages` local.
+- `github-environments` (#11): a `secret_commands` output prints one `gh secret set` command per
+  secret the bootstrap cannot create (provider tokens per environment from `secret_scopes`, the
+  plan-key secrets of `prod-plan`, `prod` and `prod-breakglass` from `key_provider`, repository
+  secrets from `repository_secret_scopes`), each with the scope its value needs and never a value;
+  `pending_secrets` gives the same list as data. The opt-in `generate_plan_passphrase`
+  (`key_provider = "pbkdf2"` only) generates `AYASEE_PLAN_PASSPHRASE` with `random_password` (64
+  characters of `[A-Za-z0-9]`) and sets it on those three environments; the value is then in the
+  bootstrap's state in plain text. Both example bootstraps wire it, so `ayasee init` writes it
+  too; the module needs the github provider `~> 6.12` and `hashicorp/random`.
 
 - `ayasee doctor` (#11): checks, before the first run and in one pass, what it needs: the
   configuration (supported settings, job slots, `shared_units`, stage directories), the callers

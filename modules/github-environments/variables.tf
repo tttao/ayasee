@@ -83,3 +83,52 @@ variable "solo_mode" {
   type        = bool
   default     = false
 }
+
+variable "key_provider" {
+  description = "plan_encryption.key_provider of .ayasee.yaml (azure_vault, pbkdf2 or aws_kms). It selects the plan-key secrets of prod-plan, prod and prod-breakglass that secret_commands lists; generate_plan_passphrase needs pbkdf2."
+  type        = string
+  default     = "azure_vault"
+
+  validation {
+    condition     = contains(["azure_vault", "pbkdf2", "aws_kms"], var.key_provider)
+    error_message = "key_provider must be azure_vault, pbkdf2 or aws_kms."
+  }
+}
+
+variable "generate_plan_passphrase" {
+  description = "Opt-in, key_provider pbkdf2 only: generate AYASEE_PLAN_PASSPHRASE (random_password, 64 characters of [A-Za-z0-9]) and set it as an environment secret of prod-plan, prod and prod-breakglass. The passphrase is then stored in plain text in the state of the root that calls this module: whoever reads that state can decrypt the approved prod plans. Turning it on replaces a passphrase set by hand; turning it off deletes the secret."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.generate_plan_passphrase || var.key_provider == "pbkdf2"
+    error_message = "generate_plan_passphrase needs key_provider = \"pbkdf2\"."
+  }
+}
+
+variable "secret_scopes" {
+  description = "Environment secrets this module cannot create (provider tokens, state keys), for the secret_commands output: map of environment name to map of secret name to the scope its value needs. Never values. The plan-key secrets follow key_provider and must not be listed here."
+  type        = map(map(string))
+  default     = {}
+
+  validation {
+    condition = alltrue(flatten([
+      for env, secrets in var.secret_scopes : [
+        for name in keys(secrets) : !contains(["AYASEE_PLAN_PASSPHRASE", "AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"], name)
+      ]
+    ]))
+    error_message = "secret_scopes must not list the plan-key secrets; they follow key_provider."
+  }
+}
+
+variable "repository_secret_scopes" {
+  description = "Repository secrets to create by hand (AYASEE_LEDGER_TOKEN, TEAMS_WEBHOOK), for the secret_commands output: map of secret name to the scope its value needs. Never values."
+  type        = map(string)
+  default     = {}
+}
+
+variable "owner" {
+  description = "Owner of the repository. When set, secret_commands carry --repo <owner>/<repository>; when empty, gh uses the repository of the current directory."
+  type        = string
+  default     = ""
+}
