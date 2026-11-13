@@ -155,7 +155,7 @@ Then:
   a skipped workflow cannot satisfy a required check.
 - leave the `push` caller of `iac-staged` without a `paths:` filter too. A push to `main` that
   touches only application code still runs every stage: each pre-prod stage logs in, plans, applies
-  nothing and writes its ledger record, and `prod-plan` logs in and plans. When prod is in sync,
+  nothing (unless an earlier IaC commit has not reached that stage yet) and writes its ledger record, and `prod-plan` logs in and plans. When prod is in sync,
   every unit plans clean and `prod-in-sync` records the SHA without asking for an approval
   ([the empty-plan path](staged-run.md#the-empty-plan-path)). When an IaC change is waiting at the
   prod gate, the application push supersedes it: its pre-prod stage records the newer SHA, the
