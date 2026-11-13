@@ -1,0 +1,172 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.10.6",
+  "resource_changes": [
+    {
+      "address": "cloudflare_dns_record.this[\"app.example.com\"]",
+      "mode": "managed",
+      "type": "cloudflare_dns_record",
+      "name": "this",
+      "index": "app.example.com",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "zone_id": "11111111111111111111111111111111",
+          "name": "app.example.com",
+          "type": "CNAME",
+          "content": "00000000-0000-0000-0000-000000000000.cfargotunnel.com",
+          "proxied": true,
+          "ttl": 1
+        },
+        "after_unknown": {"id": true, "created_on": true, "modified_on": true},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_dns_record.this[\"new.example.com\"]",
+      "mode": "managed",
+      "type": "cloudflare_dns_record",
+      "name": "this",
+      "index": "new.example.com",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "zone_id": "11111111111111111111111111111111",
+          "name": "new.example.com",
+          "type": "CNAME",
+          "content": "00000000-0000-0000-0000-000000000000.cfargotunnel.com",
+          "proxied": true,
+          "ttl": 1
+        },
+        "after_unknown": {"id": true},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_dns_record.this[\"old.example.com\"]",
+      "mode": "managed",
+      "type": "cloudflare_dns_record",
+      "name": "this",
+      "index": "old.example.com",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "zone_id": "11111111111111111111111111111111",
+          "name": "old.example.com",
+          "type": "CNAME"
+        },
+        "after": {
+          "zone_id": "11111111111111111111111111111111",
+          "name": "old.example.com",
+          "type": "CNAME"
+        },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_zero_trust_tunnel_cloudflared_config.this",
+      "mode": "managed",
+      "type": "cloudflare_zero_trust_tunnel_cloudflared_config",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "account_id": "22222222222222222222222222222222",
+          "tunnel_id": "33333333-3333-3333-3333-333333333333",
+          "config": {
+            "ingress": [
+              {"hostname": "app.example.com", "service": "http://localhost:8080"},
+              {"service": "http_status:404"}
+            ]
+          }
+        },
+        "after_unknown": {"id": true},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_zero_trust_access_policy.ssh",
+      "mode": "managed",
+      "type": "cloudflare_zero_trust_access_policy",
+      "name": "ssh",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "account_id": "22222222222222222222222222222222",
+          "name": "SSH to the host",
+          "decision": "allow",
+          "include": [{"email": {"email": "ops@example.com"}}]
+        },
+        "after_unknown": {"id": true},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_zero_trust_access_application.ssh",
+      "mode": "managed",
+      "type": "cloudflare_zero_trust_access_application",
+      "name": "ssh",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "account_id": "22222222222222222222222222222222",
+          "name": "SSH to the host",
+          "domain": "ssh.example.com",
+          "type": "ssh",
+          "session_duration": "8h",
+          "policies": [{"precedence": 1}]
+        },
+        "after_unknown": {"id": true, "aud": true, "policies": [{"id": true}]},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "cloudflare_ruleset.waf",
+      "mode": "managed",
+      "type": "cloudflare_ruleset",
+      "name": "waf",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {"zone_id": "11111111111111111111111111111111", "name": "waf"},
+        "after_unknown": {"id": true},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "data.cloudflare_zone.this",
+      "mode": "data",
+      "type": "cloudflare_zone",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/cloudflare/cloudflare",
+      "change": {
+        "actions": ["read"],
+        "before": null,
+        "after": {},
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

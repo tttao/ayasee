@@ -235,7 +235,10 @@ when the checks pass. See [pull-request checks](../concepts/pr-checks.md).
 
 Do not add all nine unit directories at once. On a first create every unit in prod changes, and
 `unity-catalog` reads `workspace` while `grants` reads `unity-catalog`, so `prod-plan` refuses the plan
-as a cascade. Land one unit per pull request, across all stages:
+as a cascade. Land one unit per pull request, across all stages. If a unit's objects already exist,
+import them in that pull request rather than create them: see
+[onboard a brownfield estate](onboard-brownfield.md) (`ayasee import-plan` writes the import blocks
+for the Cloudflare example).
 
 1. Merge 1: `workspace` in dev, uat and prod. Wait until it is live in prod.
 2. Merge 2: `unity-catalog` in dev, uat and prod. Wait until it is live in prod.
