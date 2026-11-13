@@ -33,7 +33,8 @@ uv run python -m e2e.ephemeral down --repo you/ayasee-20261109-101500-sandbox
    but the fixture holds no secrets and creates no cloud resources.
 2. It pushes the fixture and this checkout's `actions/`, `src/`, `policy/` and `rules/`, without
    workflows. Then it creates the environments (prod and prod-breakglass gated by you, or by
-   `--reviewer LOGIN`, all but dev-plan limited to `main`) and the secrets `LEDGER_TOKEN`,
+   `--reviewer LOGIN`, all but dev-plan, the pull-request plan environment `<first stage>-plan`, limited to
+   `main`) and the secrets `LEDGER_TOKEN`,
    `STATE_TOKEN`, `PLAN_PASSPHRASE` and, if `SANDBOX_TEAMS_WEBHOOK` is set, `TEAMS_WEBHOOK`.
    `prod-breakglass` also gets the variable `AYASEE_LEDGER_URL`, which break-glass requires.
 3. It pushes the workflows with every action reference pinned to the first commit of the sandbox

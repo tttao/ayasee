@@ -123,7 +123,7 @@ When the change set touches a unit listed in `shared_units`, the summary opens w
 ([units that serve every stage](staged-run.md#units-that-serve-every-stage)).
 
 The same summary is appended to the job summary of `prod-plan` and appears in the sticky comment on
-the pull request (for the dev plan). The Teams `prod_waiting` card carries the counts
+the pull request (for the pull-request plan). The Teams `prod_waiting` card carries the counts
 (critical, high, medium, total) and a link, never addresses or values.
 
 A change to a root output alone is still a change (R72). The change set lists it as an item of kind
@@ -169,7 +169,7 @@ made the plan**, so the JSON never leaves the job, and a `deny` fails the job.
 
 | Where | Stage in the data file | Effect |
 |---|---|---|
-| `iac-pr` `plan-dev` | `dev` | A deny fails the job; the sticky comment says "Policy pack: failed" with a link to the run |
+| `iac-pr` `plan-first-stage` | the first stage (`dev` by default) | A deny fails the job and so `plan-dev`; the sticky comment says "Policy pack: failed" with a link to the run |
 | `iac-staged` `prod-plan` | `prod` | A deny stops the run before anything is uploaded |
 | `iac-breakglass` | `prod` | A deny fails the run before the apply; it is the only pre-apply check on that path (R46) |
 

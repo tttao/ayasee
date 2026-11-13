@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ayasee.config import load_config, staged_layout
+from ayasee.config import load_config, pr_plan_environment, staged_layout
 from ayasee.ledger import open_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -181,6 +181,8 @@ def _called_environments() -> set[str]:
                 layout = staged_layout(stages, "")
                 if env == "drift-${{ matrix.env }}":
                     found |= {f"drift-{s}" for s in stages}
+                elif env == "${{ needs.resolve.outputs.pr-plan-environment }}":
+                    found.add(pr_plan_environment(stages))
                 else:
                     m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.(stage-\d+) \}\}", env)
                     assert m, env
@@ -194,12 +196,15 @@ def test_bootstrap_creates_every_environment_the_workflows_use():
     text = (EX / "bootstrap" / "main.tf").read_text()
     stages = load_config(EX / ".ayasee.yaml").stages
     assert re.search(r"stages\s*=\s*\[" + ",\\s*".join(f'"{s}"' for s in stages) + r"\]", text)
-    # the module creates the stages, drift-<stage>, dev-plan, prod-plan, prod, prod-breakglass
+    # the module creates the stages, drift-<stage>, <first stage>-plan, prod-plan, prod,
+    # prod-breakglass
     module = (ROOT / "modules" / "github-environments" / "main.tf").read_text()
-    for fixed in ("dev-plan", "prod-plan", "prod-breakglass", '"drift-${s}"'):
+    for fixed in ('"${var.stages[0]}-plan"', "prod-plan", "prod-breakglass", '"drift-${s}"'):
         assert fixed in module
     created = (
-        set(stages) | {f"drift-{s}" for s in stages} | {"dev-plan", "prod-plan", "prod-breakglass"}
+        set(stages)
+        | {f"drift-{s}" for s in stages}
+        | {f"{stages[0]}-plan", "prod-plan", "prod-breakglass"}
     )
     # prod-pr-plan (#5) is opt-in: the module creates it only with shared_units_pr_plan, which an
     # example without shared_units does not need
@@ -207,7 +212,8 @@ def test_bootstrap_creates_every_environment_the_workflows_use():
     assert not cfg.shared_units and "shared_units_pr_plan" not in text
     assert _called_environments() - {"prod-pr-plan"} == created
     # identities: one per environment, listed in the bootstrap locals
-    assert 'concat(\n    ["dev-plan"],\n    local.stages,' in text
+    assert "concat(\n    [local.pr_plan_environment],\n    local.stages," in text
+    assert 'pr_plan_environment = "${local.stages[0]}-plan"' in text
     assert '["prod-plan", "prod-breakglass"]' in text
     assert '"drift-${s}"' in text
     assert "for_each = toset(local.environments)" in text

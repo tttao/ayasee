@@ -5,12 +5,18 @@ Provider: `integrations/github`.
 
 | Environment | Branches | Reviewers |
 |---|---|---|
-| `dev-plan` | all | none |
+| `<first stage>-plan` (`dev-plan` by default) | all | none |
 | each stage (default `dev`, `uat`, `prod`) | `main` only | none (`prod`: `prod_reviewers`) |
 | `prod-plan` | `main` only | none |
 | `drift-<stage>` per stage | `main` only | none |
 | `prod-breakglass` | `main` only | `breakglass_reviewers` |
 | `prod-pr-plan` (only with `shared_units_pr_plan = true`) | all | `prod_reviewers` |
+
+The pull-request plan environment is named after the first stage, so `stages = ["test", "prod"]`
+gives `test-plan`, matching `prod-plan` (output `pr_plan_environment`). The first stage must not be
+`prod`, and no stage may end in `-plan`, start with `drift-` or be `prod-pr` or `prod-breakglass`:
+those names would make a pull-request environment, which accepts every branch, collide with one
+that has a fixed role.
 
 Every environment sets `prevent_self_review = true` and `can_admins_bypass = false` (D2).
 `prod_reviewers` and `breakglass_reviewers` must be non-empty, and the break-glass set must differ
@@ -37,4 +43,4 @@ module "environments" {
 }
 ```
 
-Output: `environments`, the list of environment names. Test: `tofu init -backend=false && tofu test`.
+Outputs: `environments`, the list of environment names, and `pr_plan_environment`. Test: `tofu init -backend=false && tofu test`.

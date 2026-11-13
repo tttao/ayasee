@@ -47,9 +47,9 @@ tofu apply -var github_owner=my-org -var github_repository=my-estate \
   -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}'
 ```
 
-It creates `dev-plan`, `test`, `prod-plan`, `prod`, `prod-breakglass`, `prod-pr-plan`, `drift-test`
-and `drift-prod` (the pull-request plan environment keeps the name `dev-plan` whatever the first
-stage is called), and sets `AYASEE_LEDGER_URL` on every environment that touches the ledger (step 4).
+It creates `test-plan`, `test`, `prod-plan`, `prod`, `prod-breakglass`, `prod-pr-plan`, `drift-test`
+and `drift-prod` (the pull-request plan environment is named after the first stage,
+`<first stage>-plan`), and sets `AYASEE_LEDGER_URL` on every environment that touches the ledger (step 4).
 
 Managing GitHub environments needs administration rights on the repository. Run this root from a
 maintainer's machine, or from a workflow with a GitHub App or fine-grained token that has the
@@ -75,7 +75,7 @@ or Access permission, and use a separate zone for the test hostnames if that is 
 
 | Environment | `CLOUDFLARE_API_TOKEN` | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `AYASEE_PLAN_PASSPHRASE` |
 |---|---|---|---|
-| `dev-plan` (PR plan of `test`) | Zone DNS Read | read on `ayasee-state-test` | - |
+| `test-plan` (PR plan of `test`) | Zone DNS Read | read on `ayasee-state-test` | - |
 | `prod-pr-plan` (PR plan of the shared units) | Zone DNS Read, Account Cloudflare Tunnel Read, Access: Apps and Policies Read | read on `ayasee-state-prod` | - |
 | `test` | Zone DNS Edit | read and write on `ayasee-state-test` | - |
 | `prod-plan` | Zone DNS Read, Cloudflare Tunnel Read, Access: Apps and Policies Read | read and write on `ayasee-state-prod` (the lock file) | yes |
@@ -90,7 +90,7 @@ done
 gh secret set CLOUDFLARE_API_TOKEN --env test   # paste the test token; repeat per environment
 ```
 
-The `dev-plan` and `prod-pr-plan` tokens are used by pull-request code (same-repository pull
+The `test-plan` and `prod-pr-plan` tokens are used by pull-request code (same-repository pull
 requests only; forks get no secrets). Keep them read-only. `prod-pr-plan` carries the prod
 reviewers, so its token is used only after a reviewer approves the run
 ([shared units](../../docs/concepts/pr-checks.md#shared-units)).

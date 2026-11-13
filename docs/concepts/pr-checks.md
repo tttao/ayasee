@@ -1,11 +1,13 @@
 # Pull-request checks
 
 `iac-pr` is a reusable workflow for pull requests. It runs static checks and scans, plans the
-changed **dev** units with a read-only identity, runs the policy pack on that plan and posts one
+changed units of the **first stage** (`dev` by default) with a read-only identity, runs the policy pack on that plan and posts one
 sticky comment with the risk summary. **It never applies**: no apply, no guard, no ledger write, and
 nothing the plan produced is uploaded. The only artifacts are the scrubbed SARIF and the comment
-text, both kept for one day. Running a job in the `dev-plan` environment still creates a deployment
-record for that environment (separate from `dev`, which is why the environment has its own name).
+text, both kept for one day. Running a job in the
+[pull-request plan environment](#the-pull-request-plan-environment) still creates
+a deployment record for that environment (separate from the first stage's, which is why the
+environment has its own name).
 Suppressing that record where the platform allows it needs feature detection, which belongs to the
 GHES compatibility work that has not been done yet (see
 [known limitations](architecture.md#known-limitations)).
@@ -34,11 +36,20 @@ result to small jobs that run no PR code (R39).
 |---|---|---|
 | `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on `iac_root` (the repository by default; SARIF, no cache); Checkov via `uvx checkov@<version>` on `iac_root` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
 | `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs. |
-| `plan-dev` | `contents: read`, `id-token: write` | Environment `dev-plan`. Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default; the environment is `dev-plan` whatever that stage is called), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives the `dev-plan` environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text to artifact `ayasee-pr-comment` (1 day). |
+| `resolve` | `contents: read` | No environment, no identity. Checks out the PR head and prints the environment `plan-first-stage` runs in with `ayasee config pr-plan-environment`: `<first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test, prod]`). It fails when the configuration does not load, the first stage is `prod` or a stage name is reserved (`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`); `plan-first-stage` is then skipped, `plan-dev` fails and `comment` posts "the configuration was refused". |
+| `plan-first-stage` | `contents: read`, `id-token: write` | Environment `<first stage>-plan`, from `resolve` (a job's environment is fixed before its steps run). Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives that environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text, headed "Plan of `<stage>`", to artifact `ayasee-pr-comment` (1 day). |
+| `plan-dev` | none | The verdict of the pull-request plan, and the check to require. No checkout, no environment, no identity. It runs whenever `resolve` ran, also after a failure, and fails unless `resolve` succeeded and `plan-first-stage` succeeded. A skipped job counts as passed in branch protection, so requiring `plan-first-stage` alone would let a refused configuration merge. |
 | `shared-changes` | `contents: read` | Only when `shared_units` is set. No environment, no identity: works out which shared prod units the PR changes (`ayasee changed-units --env prod --shared ...`). |
 | `plan-shared` | `contents: read`, `id-token: write` | Only when `shared-changes` found some. Environment `prod-pr-plan`. Plans those units against prod (`binding-mode: replan`, `encrypt: false`, `lock: false`; never applied, the plan files are deleted), runs the pack (stage `prod`) and keeps the comment text as `ayasee-pr-comment-shared`. See [shared units](#shared-units). |
-| `comment-shared` | `contents: read`, `pull-requests: write` | Like `comment`, for a second sticky comment (`--marker pr-plan-shared`), so the dev plan's comment never waits for the `prod-pr-plan` approval. |
-| `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` and runs `ayasee pr-comment`. Plan-dev refuses settings that are not supported yet before its Azure login. |
+| `comment-shared` | `contents: read`, `pull-requests: write` | Like `comment`, for a second sticky comment (`--marker pr-plan-shared`), so the first stage's comment never waits for the `prod-pr-plan` approval. |
+| `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` (or, when `resolve` failed, writes a fixed "the configuration was refused" text) and runs `ayasee pr-comment`. `plan-first-stage` refuses settings that are not supported yet before its Azure login. |
+
+### Required checks
+
+Require `checks` and `plan-dev` (shown as `<caller job> / checks` and `<caller job> / plan-dev`).
+Do not require `plan-first-stage` or `resolve` instead of `plan-dev`: `plan-first-stage` is skipped
+when `resolve` refuses the configuration, and a skipped check passes. All three are skipped for
+fork pull requests, which get no plan.
 
 ### Which units are planned
 
@@ -71,12 +82,19 @@ HTML in addresses and principal names are neutralised. **The comment is advisory
 produces the plan it summarises, so an author can influence what it says. Decide on the plan and the
 required checks, not on the comment alone.
 
-## The `dev-plan` environment
+## The pull-request plan environment
+
+The pull-request plan environment is named after the first stage: `<first stage>-plan`, so
+`dev-plan` with the default stages and `test-plan` with `stages: [test, prod]`, next to `prod-plan`.
+This page writes `dev-plan` for the default stages. Up to v0.1.0-rc.2 it was `dev-plan` whatever the
+first stage was called; see the [changelog](../../CHANGELOG.md) to move an estate whose first stage
+is not `dev`.
 
 A separate environment keeps PR plans out of the `dev` environment's history and approvals. Create
 `dev-plan` with these variables (the same names `dev` uses): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
 `AZURE_SUBSCRIPTION_ID`, for a dedicated user-assigned managed identity with a federated credential
-for the subject `repo:<owner>/<repo>:environment:dev-plan`. It must not be the identity `dev` applies with.
+for the subject `repo:<owner>/<repo>:environment:dev-plan` (`environment:<first stage>-plan`). It must
+not be the identity `dev` applies with.
 
 Give that identity the least that lets a plan run:
 
@@ -102,7 +120,7 @@ environment. The workflow reads no uat or prod variable and no secret.
 ## Shared units
 
 A unit listed in `shared_units` exists under `prod` only and serves every stage
-([the staged run](staged-run.md#units-that-serve-every-stage)), so the dev plan never shows it. To
+([the staged run](staged-run.md#units-that-serve-every-stage)), so the first stage's plan never shows it. To
 let the reviewer see its change before merge, `iac-pr` plans it against prod, read-only:
 
 - `ayasee changed-units --env prod --shared a,b` prints the shared units a PR changes: a change
@@ -126,7 +144,8 @@ then waits and the change is seen first at the prod gate.
 
 ## Fork pull requests
 
-A fork PR gets a read-only token and no OIDC token. For those PRs `plan-dev` is skipped
+A fork PR gets a read-only token and no OIDC token. For those PRs `resolve`, `plan-first-stage`
+and `plan-dev` are skipped
 (`github.event.pull_request.head.repo.full_name == github.repository`), and so is `upload-sarif`;
 fmt, validate, Trivy and Checkov still run, and their failures fail the check.
 

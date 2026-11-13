@@ -28,8 +28,10 @@ locals {
   # Every environment the ayasee workflows use, one identity each (never shared). A test keeps
   # this list equal to the environments of the called workflows.
   stages = ["dev", "uat", "prod"]
+  # pull requests plan the first stage in <first stage>-plan (dev-plan here)
+  pr_plan_environment = "${local.stages[0]}-plan"
   environments = concat(
-    ["dev-plan"],
+    [local.pr_plan_environment],
     local.stages,
     ["prod-plan", "prod-breakglass"],
     [for s in local.stages : "drift-${s}"],
@@ -46,7 +48,7 @@ locals {
         AZURE_TENANT_ID       = var.tenant_id
         AZURE_SUBSCRIPTION_ID = var.subscription_id
       },
-      var.ledger_url == "" || env == "dev-plan" ? {} : { AYASEE_LEDGER_URL = var.ledger_url },
+      var.ledger_url == "" || env == local.pr_plan_environment ? {} : { AYASEE_LEDGER_URL = var.ledger_url },
       var.key_vault_key_id == "" || !contains(local.key_environments, env) ? {} : { AYASEE_KEY_VAULT_KEY_ID = var.key_vault_key_id },
     )
   }

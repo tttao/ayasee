@@ -69,7 +69,7 @@ that the published data holds counts, addresses and links only. See
 
 ## Things to check on the first run
 
-- `deployment: false`: whether PR plans can skip creating deployment records (`dev-plan`); until
+- `deployment: false`: whether PR plans can skip creating deployment records (`<first stage>-plan`, `dev-plan` by default); until
   verified, `deployment_false` stays false on GHES.
 - Merge queue (`queue_max`), dependency lockfile support (`lockfiles`) and reusable-workflow context
   properties (`github.job_workflow_sha`, R33).

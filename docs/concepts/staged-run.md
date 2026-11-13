@@ -38,8 +38,9 @@ before prod and the unused slots come first, skipped. `resolve` refuses any othe
 The job ids are the slot names; each job's display name, `environment`, concurrency group,
 units directory (`<units_root>/<stage>`), ledger record, stop-the-line label and notifications use
 the configured stage name. `prod` must be the last stage. A pre-prod stage name must match
-`[a-z0-9][a-z0-9_-]*` and must not be `prod`, `prod-plan`, `prod-breakglass`, `dev-plan` or
-start with `drift-`, because those environments have a fixed role. An unused slot is skipped
+`[a-z0-9][a-z0-9_-]*` and must not be `prod`, `prod-pr` or `prod-breakglass`, start with `drift-`
+or end in `-plan` (`prod-plan`, `prod-pr-plan` and `<first stage>-plan`, the pull-request plan
+environment), because those environments have a fixed role. An unused slot is skipped
 exactly as `start-stage` skips it, so the slots after it and `prod-plan` still run. The guard of
 every stage job reads the stage order from the same list, so each stage requires the stage before
 it to have this SHA live and converged, whatever it is called and whatever slot ran it. Lists of
@@ -132,7 +133,7 @@ checks that all placeholders share one ref.
 
 The staged run uses four GitHub environments with the default stages: `dev`, `uat`, `prod-plan` and
 `prod` (three with a two-stage list: `<pre-prod>`, `prod-plan`, `prod`). The whole set the workflows
-expect with the default stages is nine (add `dev-plan` for pull requests, `prod-breakglass` for emergencies, and
+expect with the default stages is nine (add `dev-plan`, named `<first stage>-plan`, for pull requests, `prod-breakglass` for emergencies, and
 `drift-dev`, `drift-uat` and `drift-prod` for the nightly check); the
 [`github-environments`](../../modules/github-environments/README.md) module creates all of them, and
 [architecture](architecture.md#environments-and-identities) lists what each may do. On every staged
@@ -217,7 +218,7 @@ the "no stored cloud secrets" default (D7):
   for an S3-compatible state backend). They are declared, optional, under `on.workflow_call.secrets`
   of every reusable workflow; with `identity: oidc` the steps get empty strings instead.
 - Create them as **environment secrets**, one set per environment (`dev`, `uat`, `prod-plan`,
-  `prod`, `prod-breakglass`, `dev-plan`, `drift-<stage>`), each token scoped to what that
+  `prod`, `prod-breakglass`, `<first stage>-plan`, `drift-<stage>`), each token scoped to what that
   environment may do, and never at repository or organisation level. The caller passes them by
   name, never with `secrets: inherit`:
 
@@ -241,9 +242,10 @@ stays usable until it is rotated. And a stage is isolated only as far as its tok
 provider that scopes tokens to a zone or an account, not to objects, lets a pre-prod token that
 applies without approval change prod objects of the same zone, and the prod gate then protects the
 workflow, not those objects. The `DEVIATION` label says so; the cockpit tag stays
-`secrets identity · deviation`. The `dev-plan` tokens are the most exposed, because `iac-pr` plans
-pull-request code with them (same-repository pull requests only; forks get no secrets): give
-`dev-plan` read-only tokens. The prod tokens live only in `prod` and `prod-breakglass`, behind their
+`secrets identity · deviation`. The `<first stage>-plan` tokens (`dev-plan`, `test-plan`) are the
+most exposed, because `iac-pr` plans pull-request code with them (same-repository pull requests
+only; forks get no secrets): give that environment read-only tokens. The prod tokens live only in
+`prod` and `prod-breakglass`, behind their
 reviewers; `prod-plan` should hold read-only ones.
 
 These tokens never reach the plan key. With `plan_encryption.key_provider: aws_kms` the plan key is

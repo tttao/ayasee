@@ -36,7 +36,7 @@ them before you start.
 
 Create the GitHub environments, one managed identity per environment and the environment variables
 (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and later `AYASEE_LEDGER_URL` and
-`AYASEE_KEY_VAULT_KEY_ID`; no secrets, R30). The environments are `dev-plan`, `dev`, `uat`,
+`AYASEE_KEY_VAULT_KEY_ID`; no secrets, R30). The environments are `dev-plan` (pull requests; `<first stage>-plan`), `dev`, `uat`,
 `prod-plan`, `prod`, `prod-breakglass`, `drift-dev`, `drift-uat` and `drift-prod`.
 
 ```bash

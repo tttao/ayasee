@@ -21,7 +21,11 @@ def test_same_job_is_allowed_for_any_pre_prod_stage(env):
     assert proc.returncode == 0, proc.stderr
 
 
-@pytest.mark.parametrize("env", ["prod", "prod-plan", "prod-breakglass", "dev-plan", "drift-dev"])
+@pytest.mark.parametrize(
+    "env",
+    # *-plan: prod-plan, prod-pr-plan and <first-stage>-plan, the PR plan environment (issue #11)
+    ["prod", "prod-plan", "prod-breakglass", "dev-plan", "test-plan", "prod-pr-plan", "drift-dev"],
+)
 def test_same_job_is_refused_for_prod_and_fixed_role_environments(env):
     proc = _check(env)
     assert proc.returncode != 0
