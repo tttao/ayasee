@@ -61,7 +61,9 @@ token would then be able to remove the gates that protect it.
 One bucket per stage, created once by hand: `ayasee-state-test` and `ayasee-state-prod` (or your
 prefix in `AYASEE_STATE_BUCKET_PREFIX`). Set `AYASEE_STATE_ENDPOINT` and `AYASEE_STATE_REGION`, or
 replace the defaults in `root.hcl`. Locking uses `use_lockfile`, so the store must support
-conditional writes; OpenTofu 1.10 or later.
+conditional writes; OpenTofu 1.10 or later. A store that ignores the condition gives no lock and no
+error: run [the lock check](../../docs/guides/quickstart.md#check-that-the-store-honours-the-lock)
+against each bucket before the first run.
 
 ### 3. Create the environment secrets
 
@@ -136,6 +138,41 @@ create a second tunnel configuration or Access application (`import` blocks in t
 pull request whose plan shows only imports). Land `dns` first, then `tunnel`, then `access`, each in
 its own merge: the pull request of each shared unit shows its prod plan, and its first prod apply is
 the one to watch.
+
+## In a monorepo
+
+This directory puts the estate at the repository root. When it sits beside application code, move
+`root.hcl`, `shared/` and `stages/` under one directory, keep `.ayasee.yaml` and
+`.github/workflows/` at the repository root, and set both keys:
+
+```
+.ayasee.yaml                  iac_root: infra/iac, units_root: infra/iac/stages
+.github/workflows/            the callers, unchanged
+infra/iac/root.hcl
+infra/iac/shared/<unit>/main.tf
+infra/iac/stages/<stage>/<unit>/
+apps/...                      application code, ignored by ayasee
+```
+
+```yaml
+iac_root: infra/iac
+units_root: infra/iac/stages   # from the repository root, not from iac_root
+```
+
+`units_root` must be inside `iac_root`. `units_root: stages`, or no `units_root` at all, fails every
+load of `.ayasee.yaml` with an error that says which path to write if the value was meant relative
+to `iac_root`, and the first job of every workflow stops on it. The units find `root.hcl` with
+`find_in_parent_folders`, and `root.hcl` takes the stage and the unit from the last two directories,
+so neither changes.
+
+Do not add a `paths:` filter to `pr.yml` or `main.yml`. A pull request that touches only
+application code gets "No IaC changes" and a green `iac-pr`, which can then stay a required check;
+a push of application code to `main` gives a staged run (a login and a plan per stage) that plans
+clean and, when prod is in sync, asks no approval. If an IaC change is waiting at the prod gate at
+that moment, the application push supersedes it and reviewers approve it again in the newer run. A
+filter would skip the required check, and on `main` it can leave an IaC commit unpromoted: see
+[monorepos](../../docs/concepts/pr-checks.md#monorepos). With `iac_root` set, the format checks and
+the scanners look only at `iac_root`, and Checkov skips the `github_actions` framework.
 
 ## What is not covered
 

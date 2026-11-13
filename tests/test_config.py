@@ -396,6 +396,48 @@ def test_invalid_iac_root_rejected(tmp_path, text):
         load_config(write(tmp_path, text + "\n"))
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "iac_root: infra/iac",  # the default units_root, 'stages', is read from the repository root
+        "{iac_root: infra/iac, units_root: stages}",
+        "{iac_root: infra/iac/, units_root: ./stages/}",
+    ],
+)
+def test_units_root_written_relative_to_iac_root_names_the_fix(tmp_path, text):
+    # issue #11: units_root is relative to the repository root; the error says what to write
+    with pytest.raises(ConfigError) as err:
+        load_config(write(tmp_path, text + "\n"))
+    message = str(err.value)
+    assert "relative to the repository root, not to iac_root" in message
+    assert "if it was written relative to iac_root, write units_root: infra/iac/stages" in message
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{iac_root: infra/iac, units_root: infra/iac}",
+        "{iac_root: infra/iac, units_root: infra/iacx/stages}",
+        "{iac_root: infra/iac, units_root: infra}",
+        "{iac_root: infra/iac, units_root: .}",
+    ],
+)
+def test_units_root_outside_iac_root_has_no_hint_when_joining_does_not_help(tmp_path, text):
+    # these are already written from the repository root; prefixing iac_root would be wrong
+    with pytest.raises(ConfigError) as err:
+        load_config(write(tmp_path, text + "\n"))
+    assert "not to iac_root" not in str(err.value)
+
+
+def test_cli_config_check_supported_refuses_units_root_outside_iac_root(
+    tmp_path, monkeypatch, capsys
+):
+    # the first job of every reusable workflow runs this command
+    p = write(tmp_path, "iac_root: infra/iac\n")
+    assert _cli(monkeypatch, "check-supported", "--path", str(p)) == 1
+    assert "units_root: must be a directory inside iac_root" in capsys.readouterr().err
+
+
 def test_shared_units(tmp_path):
     assert Config().shared_units == []
     cfg = load_config(write(tmp_path, "shared_units: [edge__tunnel, access]\n"))
