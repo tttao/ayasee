@@ -4,7 +4,11 @@ terraform {
   required_providers {
     github = {
       source  = "integrations/github"
-      version = "~> 6.6"
+      version = "~> 6.12"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
     }
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -36,6 +40,10 @@ locals {
     ["prod-plan", "prod-breakglass"],
     [for s in local.stages : "drift-${s}"],
   )
+
+  # plan_encryption.key_provider of .ayasee.yaml (the default, azure_vault: the key is a Key Vault
+  # key, reached with the environment's identity, so no plan-key secret)
+  key_provider = "azure_vault"
 
   # Environments that plan or apply prod need the plan-encryption key.
   key_environments = ["prod-plan", "prod", "prod-breakglass"]
@@ -72,6 +80,13 @@ module "environments" {
   prod_reviewers       = var.prod_reviewers
   breakglass_reviewers = var.breakglass_reviewers
   variables            = local.variables
+
+  owner        = var.github_owner
+  key_provider = local.key_provider
+  # identity: oidc, so no environment secret; the callers pass only teams-webhook
+  repository_secret_scopes = {
+    TEAMS_WEBHOOK = "the Teams incoming-webhook URL of the channel ayasee notifies (notify.teams; optional)"
+  }
 }
 
 # Fails the plan if the module and the identity list above ever disagree.

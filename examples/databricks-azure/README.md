@@ -100,7 +100,8 @@ sed -i -E 's#OWNER/ayasee#my-org/ayasee#; s#@0{40} \# replace with an ayasee rel
 ```
 
 Callers never use `secrets: inherit`; each passes only what the called workflow declares
-(`teams-webhook`, optional). Create the repository secret `TEAMS_WEBHOOK` or drop that line.
+(`teams-webhook`, optional). Create the repository secret `TEAMS_WEBHOOK` or drop that line; the
+bootstrap prints the command (`tofu output -raw secret_commands`, the only secret this profile needs).
 Renovate keeps the digests current (`renovate.json`).
 
 ### 6. First pull request

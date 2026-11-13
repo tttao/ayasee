@@ -164,6 +164,18 @@ This uses the two modules:
   the `AZURE_CLIENT_ID` environment variable. Keep the state of this root outside the stage units'
   state.
 
+The bootstrap cannot create secret values it does not own. It prints, instead, the exact command for
+each one still to set, with the scope its value needs and never a value:
+
+```bash
+tofu output -raw secret_commands
+```
+
+Run the lines one at a time: `gh secret set` without `--body` prompts for the value, so a value
+never lands on a command line or in a shell history (pasting the whole block would feed the next
+line to the first prompt). With OIDC identities and a Key Vault plan key, only the optional
+`TEAMS_WEBHOOK` remains.
+
 ## 4. Assign roles
 
 The identities have no rights yet. Use the `principal_ids` output and the minimum table in
@@ -236,7 +248,10 @@ when the checks pass. See [pull-request checks](../concepts/pr-checks.md).
 
 Do not add all nine unit directories at once. On a first create every unit in prod changes, and
 `unity-catalog` reads `workspace` while `grants` reads `unity-catalog`, so `prod-plan` refuses the plan
-as a cascade. Land one unit per pull request, across all stages:
+as a cascade. Land one unit per pull request, across all stages. If a unit's objects already exist,
+import them in that pull request rather than create them: see
+[onboard a brownfield estate](onboard-brownfield.md) (`ayasee import-plan` writes the import blocks
+for the Cloudflare example).
 
 1. Merge 1: `workspace` in dev, uat and prod. Wait until it is live in prod.
 2. Merge 2: `unity-catalog` in dev, uat and prod. Wait until it is live in prod.
@@ -272,15 +287,18 @@ profile is new and **has not run end to end on GitHub yet**: expect to adjust it
 **Provider tokens instead of OIDC.** Set `identity: secrets` in `.ayasee.yaml`, create
 `CLOUDFLARE_API_TOKEN` (and `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the state bucket) as
 environment secrets of each environment, scoped per environment, and pass them by name from the
-callers. A provider other than those (OVH, Hetzner, Scaleway) declares its variable names in
+callers. The [Cloudflare and S3 bootstrap](../../examples/cloudflare-s3/README.md#3-create-the-environment-secrets)
+prints one `gh secret set` command per environment and secret, each with the token scope it needs
+(`tofu output -raw secret_commands`). A provider other than those (OVH, Hetzner, Scaleway) declares its variable names in
 `provider_env` and puts the values in one more environment secret, `AYASEE_PROVIDER_ENV` (see
 [provider environment](../concepts/staged-run.md#provider-environment)). Every run then carries a
 `DEVIATION:` warning. Read [identity: secrets](../concepts/staged-run.md#identity-secrets) for what
 this costs.
 
-**Plan encryption with a passphrase.** Set the key provider in `.ayasee.yaml` and create one
-environment secret, `AYASEE_PLAN_PASSPHRASE`, on `prod-plan`, `prod` and `prod-breakglass` (never at
-repository or organisation level), then pass it by name from the callers:
+**Plan encryption with a passphrase.** Set the key provider in `.ayasee.yaml` and in the
+bootstrap's `key_provider` local, and give `prod-plan`, `prod` and `prod-breakglass` one environment
+secret, `AYASEE_PLAN_PASSPHRASE` (never at repository or organisation level), then pass it by name
+from the callers:
 
 ```yaml
 # .ayasee.yaml
@@ -288,12 +306,15 @@ plan_encryption:
   key_provider: pbkdf2
 ```
 
-```bash
-passphrase="$(openssl rand -base64 48 | tr -d '\n')"   # 64 characters of [A-Za-z0-9+/=]
-for env in prod-plan prod prod-breakglass; do
-  gh secret set AYASEE_PLAN_PASSPHRASE --env "$env" --body "$passphrase"
-done
-```
+The bootstrap can generate it: `tofu apply -var generate_plan_passphrase=true` sets 64 random
+characters of `[A-Za-z0-9]` on the three environments. It is opt-in because the github provider
+has no write-only secret argument: the passphrase is then kept in plain text in the bootstrap's
+state, and whoever reads that state can decrypt the approved prod plans. Keep that state as private
+as the passphrase (an encrypted local state, with OpenTofu's `TF_ENCRYPTION`, or a private backend),
+or leave the option off and set the secret yourself from the `secret_commands` output. Turning it on
+replaces a passphrase already set by hand, and turning it off deletes the secret: do either only
+when no approved prod plan is waiting, since a plan encrypted with the old passphrase can no longer
+be applied (re-run `main` to plan it again).
 
 ```yaml
 # .github/workflows/iac.yml and breakglass.yml
