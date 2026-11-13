@@ -90,6 +90,8 @@ def test_no_secrets_inherit(wf):
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "AYASEE_PROVIDER_ENV",
+        "AYASEE_LEDGER_AWS_ACCESS_KEY_ID",
+        "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY",
     }
     assert all(v["required"] is False for v in secrets.values())
 

@@ -72,6 +72,11 @@ TOKENS = (
     "AWS_SECRET_ACCESS_KEY",
     "AYASEE_PROVIDER_ENV",
 )
+# issue #10: the guard and ledger steps get the dedicated s3:// ledger key under the same names
+LEDGER_KEY_ENV = {
+    "AWS_ACCESS_KEY_ID": "${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}",
+    "AWS_SECRET_ACCESS_KEY": "${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}",
+}
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -92,7 +97,11 @@ def test_provider_tokens_reach_only_plan_and_apply_steps_for_the_secrets_identit
         for token in TOKENS:
             assert token not in str(job.get("env") or {}), (name, job_name)
         for step in job.get("steps", []):
-            env = step.get("env") or {}
+            env = dict(step.get("env") or {})
+            for key, value in LEDGER_KEY_ENV.items():
+                if env.get(key) == value:  # the ledger's own key, see test_ledger_keys.py
+                    del env[key]
+            step = {**step, "env": env}
             has = [t for t in TOKENS if t in env]
             if not has:
                 assert not any(t in str(step) for t in TOKENS), (name, job_name, step)

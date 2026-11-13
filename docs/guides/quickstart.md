@@ -221,8 +221,9 @@ It checks:
 - **GitHub**: every environment the callers use exists; `prod`, `prod-breakglass` and
   `prod-pr-plan` have required reviewers and prevent self-review (unless `solo_mode`); every
   environment except the pull-request plan ones deploys from `main` only; each secret a caller
-  passes exists where its jobs read it (provider and plan-key secrets as environment secrets, not
-  repository secrets); `AYASEE_LEDGER_URL`, the `AZURE_*` variables (`identity: oidc`) and the
+  passes exists where its jobs read it (provider, plan-key and `s3://` ledger-key secrets as
+  environment secrets, not repository secrets; the ledger key passed as a pair, and passed at all
+  when `ledger.url` is `s3://`); `AYASEE_LEDGER_URL`, the `AZURE_*` variables (`identity: oidc`) and the
   plan-key ID are set; and `main` has a pull-request ruleset when a `ledger-token` is passed;
 - **the state lock**, only when asked, once per state bucket:
   `--lock-check 's3://<bucket>?region=<region>&endpoint=https://<host>'` with `AWS_ACCESS_KEY_ID`
@@ -377,8 +378,8 @@ remote_state {
 The workflows write it through the runner's checkout, so its URL holds the checkout path and goes in
 the `AYASEE_LEDGER_URL` variable of each environment, and the push needs the `ledger-token` secret
 (a fine-grained token with Contents read and write on the repository). The cockpit reads the same
-branch with `github-branch://`, which is read-only. An experimental `s3://` ledger store exists, but only from the CLI: it is not
-wired into the reusable workflows, so use `git-branch://` in CI (see
+branch with `github-branch://`, which is read-only. An experimental `s3://` ledger store also exists, with a key of
+its own for the guard and ledger steps; it has not run against a real bucket yet (see
 [the s3 store](../concepts/ledger.md#the-s3-store)).
 
 All of this, worked out for a Cloudflare and S3 estate with a tunnel shared by two stages, is the

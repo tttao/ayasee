@@ -13,6 +13,10 @@ configuration, read at the ``main`` SHA for its ``labels``: the opt-ins that wea
 default (``solo_mode``, ``identity: secrets``). A missing file means the defaults (no labels); an
 unreadable or invalid one leaves ``labels`` out (unknown).
 
+Ledgers are read only, through :class:`ReadOnlyLedger`: ``github-branch://`` with the GitHub
+token, ``s3://`` (experimental, issue #10) with ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY``
+from the environment. An S3 ledger costs no GitHub request: per env a listing and two GETs.
+
 Rate limit: per repo and run about 6 + 7 x envs requests (main, waiting runs, code scanning
 x2, plus per env: ledger current.json + history listing + newest history entry, compare, drift
 issues, stop-the-line issues, and one pending_deployments per waiting run). With
@@ -33,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import yaml
 
@@ -42,7 +46,7 @@ from ayasee.cockpit.render_md import add_subcommands
 from ayasee.drift import DRIFT_BULLET_PREFIX
 from ayasee.github import GitHub, GitHubError
 from ayasee.labels import DRIFT_LABEL, STOP_LABEL
-from ayasee.ledger import LedgerError, LedgerRecord, LedgerStore, open_store
+from ayasee.ledger import LedgerError, LedgerRecord, LedgerStore, S3Store, open_store
 
 SCHEMA = "ayasee.snapshot/v1"
 DEFAULT_STAGES = ["dev", "uat", "prod"]
@@ -238,6 +242,23 @@ def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str,
     return out
 
 
+class ReadOnlyLedger:
+    """The collector's view of a ledger: reads pass through, ``append`` always raises. A store
+    that could write (``s3://``) is still never written by the cockpit."""
+
+    def __init__(self, store: LedgerStore) -> None:
+        self._store = store
+
+    def current(self, repo: str, env: str) -> LedgerRecord | None:
+        return self._store.current(repo, env)
+
+    def history(self, repo: str, env: str, limit: int = 50) -> list[LedgerRecord]:
+        return self._store.history(repo, env, limit)
+
+    def append(self, rec: LedgerRecord) -> None:
+        raise LedgerError("the cockpit never writes a ledger")
+
+
 def _short(exc: Exception) -> str:
     return str(exc).replace("\n", " ")[:200] or type(exc).__name__
 
@@ -252,8 +273,10 @@ def collect(
     """Build the snapshot. Per-repo failures become ``error`` entries, never exceptions."""
     repos: list[dict[str, Any]] = []
     for entry in entries:
+        store: LedgerStore | None = None
         try:
-            repos.append(_collect_repo(entry, gh, store_factory(entry.ledger, gh=gh)))
+            store = store_factory(entry.ledger, gh=gh)
+            repos.append(_collect_repo(entry, gh, ReadOnlyLedger(store)))
         except (GitHubError, LedgerError) as exc:
             repos.append(
                 {
@@ -264,6 +287,9 @@ def collect(
                     "envs": [_env_unknown(s) for s in entry.stages],
                 }
             )
+        finally:
+            if isinstance(store, S3Store):
+                store.client.close()
     stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {"schema": SCHEMA, "generated_at": stamp, "repos": repos}
 
@@ -302,21 +328,37 @@ def _run(args: argparse.Namespace) -> int:
 MAX_ESTATE_REPOS = 500
 
 
+def _check_s3_ledger(repo: str, url: str) -> None:
+    """An ``s3://`` ledger of repos.yaml: the region in the URL (the workflow sets no
+    AWS_REGION), and a URL that ``open_store`` accepts. No request is sent."""
+    if "region" not in parse_qs(urlparse(url).query):
+        raise ReposFileError(f"{repo}: an s3:// ledger needs ?region= in repos.yaml")
+    try:
+        store = open_store(url)
+    except LedgerError as exc:
+        raise ReposFileError(f"{repo}: {exc}") from None
+    if isinstance(store, S3Store):
+        store.client.close()
+
+
 def estate_repositories(entries: list[RepoEntry], owner: str) -> list[str]:
     """Names (without owner) of every repository the collector reads: ``repo:`` entries and the
     repositories of ``github-branch://`` ledgers. All must belong to ``owner``; at most 500.
 
-    The cockpit-collect workflow reads ledgers only through the GitHub App token, so any other
-    store URL (file://, git-branch://, azure-blob://, s3://) is refused here, before a token is
-    minted."""
+    The cockpit-collect workflow reads ledgers through the GitHub App token (``github-branch://``)
+    or, read-only, with the cockpit's own S3 key (``s3://``, issue #10). Any other store URL
+    (file://, git-branch://, azure-blob://) is refused here, before a token is minted."""
     full: set[str] = set()
     for e in entries:
         full.add(e.repo)
         u = urlparse(e.ledger)
+        if u.scheme == "s3":
+            _check_s3_ledger(e.repo, e.ledger)
+            continue  # no repository to mint the read token for
         if u.scheme != "github-branch":
             raise ReposFileError(
-                f"{e.repo}: ledger must be a github-branch:// URL; cockpit-collect reads no other "
-                "ledger store (see docs/cockpit/setup.md)"
+                f"{e.repo}: ledger must be a github-branch:// or s3:// URL; cockpit-collect reads "
+                "no other ledger store (see docs/cockpit/setup.md)"
             )
         full.add(f"{u.netloc}/{u.path.strip('/')}")
     names: set[str] = set()

@@ -15,8 +15,10 @@
 # (./actions) form is not supported for this workflow: no job checks out the repository root, so
 # ./actions would not exist.
 #
-# Ledgers: the collector reads only github-branch:// ledger URLs, through the read token (it has
-# no cloud login). `ayasee cockpit repos` refuses any other store URL before a token is minted.
+# Ledgers: the collector reads github-branch:// ledger URLs through the read token, and s3://
+# ledger URLs (experimental) with the optional read-only AYASEE_COCKPIT_AWS_* key, given to the
+# collect step only. It never writes a ledger. `ayasee cockpit repos` refuses any other store URL
+# before a token is minted.
 name: cockpit-collect
 
 on:
@@ -60,6 +62,18 @@ on:
       app-private-key:
         description: Private key of the GitHub App.
         required: true
+      AYASEE_COCKPIT_AWS_ACCESS_KEY_ID:
+        description: >-
+          Only for s3:// ledgers in repos.yaml (experimental). Access key id of a read-only key
+          of the cockpit's own: s3:GetObject on the ledger prefix and s3:ListBucket on it,
+          nothing else, never a key that may write. Only the collect step receives it, as
+          AWS_ACCESS_KEY_ID; one pair serves every s3:// ledger of the estate.
+        required: false
+      AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY:
+        description: >-
+          Only for s3:// ledgers. The secret access key that goes with
+          AYASEE_COCKPIT_AWS_ACCESS_KEY_ID; same rules.
+        required: false
 
 permissions: {}
 
@@ -180,6 +194,9 @@ jobs:
       - name: Collect the snapshot
         env:
           GITHUB_TOKEN: ${{ steps.read-token.outputs.token }}
+          # the cockpit's read-only key for s3:// ledgers (issue #10); empty without one
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_COCKPIT_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_COCKPIT_AWS_SECRET_ACCESS_KEY }}
           REPOS_FILE: ${{ inputs.repos-file }}
         run: |
           # exit 1 means every repository failed: the job fails and nothing is committed
