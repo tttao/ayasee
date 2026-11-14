@@ -86,6 +86,8 @@ def test_no_secrets_inherit(wf):
         "AYASEE_PLAN_PASSPHRASE",
         "AYASEE_KMS_ACCESS_KEY_ID",
         "AYASEE_KMS_SECRET_ACCESS_KEY",
+        "AYASEE_GCP_KMS_CREDENTIALS",
+        "AYASEE_OPENBAO_TOKEN",
         "CLOUDFLARE_API_TOKEN",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -697,6 +699,8 @@ def test_key_provider_reaches_the_prod_plan_and_apply_only(wf):
         assert step["with"]["encrypt"] == "true"
         # issue #10: the aws_kms key, next to the Key Vault key; the action refuses both set
         assert step["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
+        assert step["with"]["gcp-kms-key-name"] == "${{ vars.AYASEE_GCP_KMS_KEY_NAME }}"
+        assert step["with"]["openbao-key-url"] == "${{ vars.AYASEE_OPENBAO_KEY_URL }}"
 
 
 def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
@@ -714,9 +718,17 @@ def test_the_plan_passphrase_reaches_only_the_prod_plan_and_apply_steps(wf):
     assert secret["required"] is False and "environment secret" in secret["description"]
 
 
-@pytest.mark.parametrize("secret", ["AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"])
-def test_the_kms_key_pair_reaches_only_the_prod_plan_and_apply_steps(wf, secret):
-    """issue #10: the aws_kms credential is prod-only, like the pbkdf2 passphrase."""
+@pytest.mark.parametrize(
+    ("secret", "provider"),
+    [
+        ("AYASEE_KMS_ACCESS_KEY_ID", "aws_kms"),
+        ("AYASEE_KMS_SECRET_ACCESS_KEY", "aws_kms"),
+        ("AYASEE_GCP_KMS_CREDENTIALS", "gcp_kms"),
+        ("AYASEE_OPENBAO_TOKEN", "openbao"),
+    ],
+)
+def test_the_kms_credentials_reach_only_the_prod_plan_and_apply_steps(wf, secret, provider):
+    """issue #10: each key-service credential is prod-only, like the pbkdf2 passphrase."""
     seen = []
     for name, job in wf["jobs"].items():
         assert secret not in str(job.get("env", {})), name
@@ -727,8 +739,10 @@ def test_the_kms_key_pair_reaches_only_the_prod_plan_and_apply_steps(wf, secret)
     assert seen == [("prod-plan", "plan"), ("prod", "apply")]
     declared = wf[True]["workflow_call"]["secrets"][secret]
     assert declared["required"] is False
-    text = wf[True]["workflow_call"]["secrets"]["AYASEE_KMS_ACCESS_KEY_ID"]["description"]
-    assert "environment secret of prod-plan, prod and" in text and "aws_kms" in text
+    if secret != "AYASEE_KMS_SECRET_ACCESS_KEY":  # its description points at the access key id
+        text = " ".join(declared["description"].split())
+        assert "environment secret of prod-plan, prod and prod-breakglass only" in text
+        assert provider in text
 
 
 def test_prod_plan_flags_shared_units_and_resolve_checks_their_layout():

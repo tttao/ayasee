@@ -107,6 +107,8 @@ def test_prod_vars_come_from_the_breakglass_environment(wf):
     assert plan["env"]["ARM_CLIENT_ID"] == f"${{{{ {oidc} && vars.AZURE_CLIENT_ID || '' }}}}"
     assert plan["with"]["key-vault-key-id"] == "${{ vars.AYASEE_KEY_VAULT_KEY_ID }}"
     assert plan["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
+    assert plan["with"]["gcp-kms-key-name"] == "${{ vars.AYASEE_GCP_KMS_KEY_NAME }}"
+    assert plan["with"]["openbao-key-url"] == "${{ vars.AYASEE_OPENBAO_KEY_URL }}"
 
 
 def test_opens_post_approval_issue_step(wf):
@@ -365,9 +367,17 @@ def test_breakglass_key_provider_and_passphrase_reach_plan_and_apply_only(wf):
         assert step["env"]["AYASEE_PLAN_PASSPHRASE"] == "${{ secrets.AYASEE_PLAN_PASSPHRASE }}"
         assert step["with"]["key-provider"] == "${{ steps.cfg.outputs.key-provider }}"
         assert step["with"]["kms-key-id"] == "${{ vars.AYASEE_KMS_KEY_ID }}"
+        assert step["with"]["gcp-kms-key-name"] == "${{ vars.AYASEE_GCP_KMS_KEY_NAME }}"
+        assert step["with"]["openbao-key-url"] == "${{ vars.AYASEE_OPENBAO_KEY_URL }}"
     assert "AYASEE_PLAN_PASSPHRASE" not in str(wf["jobs"][JOB].get("env", {}))
-    # issue #10: the aws_kms key pair goes to the same two steps and nowhere else
-    for secret in ("AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"):
+    # issue #10: the aws_kms key pair, the gcp_kms key file and the openbao token go to the same
+    # two steps and nowhere else
+    for secret in (
+        "AYASEE_KMS_ACCESS_KEY_ID",
+        "AYASEE_KMS_SECRET_ACCESS_KEY",
+        "AYASEE_GCP_KMS_CREDENTIALS",
+        "AYASEE_OPENBAO_TOKEN",
+    ):
         with_pair = [s for s in steps if secret in str(s)]
         assert [s.get("id") for s in with_pair] == ["plan", "apply"]
         for step in with_pair:

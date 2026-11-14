@@ -30,9 +30,8 @@ DEVIATION_SECRETS = (
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")
 IDENTITIES = ("oidc", "secrets")
-# Wired plan-encryption key providers (D1); gcp_kms and openbao are not yet (issue #10: neither
-# has a credential path into the prod jobs).
-KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms")
+# Wired plan-encryption key providers (D1, issue #10).
+KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms", "gcp_kms", "openbao")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
 STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # Environments with a fixed role that a pre-prod stage must never be called. Besides these, every

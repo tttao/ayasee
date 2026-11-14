@@ -43,12 +43,23 @@ inputs:
     description: AWS KMS key ARN (key-provider aws_kms); the same value as given to the plan action.
     required: false
     default: ""
+  gcp-kms-key-name:
+    description: Cloud KMS key name (key-provider gcp_kms); the same value as given to the plan action.
+    required: false
+    default: ""
+  openbao-key-url:
+    description: OpenBao transit key URL (key-provider openbao); the same value as given to the plan action.
+    required: false
+    default: ""
   key-provider:
     description: >-
       Plan-encryption key provider (plan_encryption.key_provider) - azure_vault (key-vault-key-id),
       pbkdf2 (passphrase in the AYASEE_PLAN_PASSPHRASE environment variable, from an
-      environment secret) or aws_kms (kms-key-id, reached with the key pair in the AYASEE_KMS_ACCESS_KEY_ID and
-      AYASEE_KMS_SECRET_ACCESS_KEY environment variables, from environment secrets).
+      environment secret), aws_kms (kms-key-id, reached with the key pair in the AYASEE_KMS_ACCESS_KEY_ID and
+      AYASEE_KMS_SECRET_ACCESS_KEY environment variables, from environment secrets), gcp_kms
+      (gcp-kms-key-name, reached with the service-account key in the AYASEE_GCP_KMS_CREDENTIALS
+      environment variable, from an environment secret) or openbao (openbao-key-url, reached with
+      the token in the AYASEE_OPENBAO_TOKEN environment variable, from an environment secret).
       Only used with encrypt true.
     required: false
     default: azure_vault
@@ -80,6 +91,8 @@ runs:
         SG_ENCRYPT: ${{ inputs.encrypt }}
         SG_KEY_VAULT_KEY_ID: ${{ inputs.key-vault-key-id }}
         SG_KMS_KEY_ID: ${{ inputs.kms-key-id }}
+        SG_GCP_KMS_KEY_NAME: ${{ inputs.gcp-kms-key-name }}
+        SG_OPENBAO_KEY_URL: ${{ inputs.openbao-key-url }}
         SG_KEY_PROVIDER: ${{ inputs.key-provider }}
         SG_ENGINE: ${{ inputs.engine }}
         SG_LOCK_TIMEOUT: ${{ inputs.lock-timeout }}

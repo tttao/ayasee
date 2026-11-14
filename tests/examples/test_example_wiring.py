@@ -230,9 +230,12 @@ def test_bootstrap_writes_the_variables_the_workflows_read():
         "AZURE_SUBSCRIPTION_ID",
         "AYASEE_LEDGER_URL",
         "AYASEE_KEY_VAULT_KEY_ID",
-        "AYASEE_KMS_KEY_ID",  # aws_kms only (issue #10); this example uses azure_vault
+        # aws_kms, gcp_kms and openbao only (issue #10); this example uses azure_vault
+        "AYASEE_KMS_KEY_ID",
+        "AYASEE_GCP_KMS_KEY_NAME",
+        "AYASEE_OPENBAO_KEY_URL",
     }
-    for name in read - {"AYASEE_KMS_KEY_ID"}:
+    for name in read - {"AYASEE_KMS_KEY_ID", "AYASEE_GCP_KMS_KEY_NAME", "AYASEE_OPENBAO_KEY_URL"}:
         assert name in text, name
     assert "github_actions_environment_secret" not in text  # R30: variables, not secrets
     assert "../../../modules/azure-stage-identity" in text

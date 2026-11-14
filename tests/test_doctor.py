@@ -264,6 +264,67 @@ def test_the_passphrase_must_be_passed(estate, capsys):
     assert any("the plan key needs AYASEE_PLAN_PASSPHRASE; pass it" in f for f in _fails(out))
 
 
+def _switch_key_provider(estate, provider: str, secret: str) -> None:
+    """Make the example use another key provider, passing its secret instead of the passphrase."""
+    cfg = estate / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text().replace("key_provider: pbkdf2", f"key_provider: {provider}"))
+    for name in ("main.yml", "breakglass.yml"):
+        wf = estate / ".github/workflows" / name
+        wf.write_text(
+            wf.read_text().replace(
+                "AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}",
+                f"{secret}: ${{{{ secrets.{secret} }}}}",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "secret", "variable"),
+    [
+        ("gcp_kms", "AYASEE_GCP_KMS_CREDENTIALS", "AYASEE_GCP_KMS_KEY_NAME"),
+        ("openbao", "AYASEE_OPENBAO_TOKEN", "AYASEE_OPENBAO_KEY_URL"),
+    ],
+)
+@respx.mock
+def test_kms_key_providers(estate, capsys, provider, secret, variable):
+    """issue #10: the key credential is an environment secret of the three key environments
+    only, and the key variable is set where the plan and apply steps read it."""
+    _switch_key_provider(estate, provider, secret)
+    state = _good_state()
+    for env in ("prod-plan", "prod", "prod-breakglass"):
+        state["secrets"][env].discard("AYASEE_PLAN_PASSPHRASE")
+        state["secrets"][env].add(secret)
+        state["variables"][env].add(variable)
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+
+    state["secrets"]["prod"].discard(secret)
+    state["repo_secrets"].add(secret)
+    state["variables"]["prod-breakglass"].discard(variable)
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    assert f"prod: {secret} is a repository secret; make it an environment secret" in fails
+    assert f"prod-breakglass: variable {variable} is missing (key_provider {provider})" in fails
+    # pre-prod environments never need the key credential
+    assert not any(f.startswith(("test:", "test-plan:")) and secret in f for f in fails)
+
+
+@respx.mock
+def test_a_kms_key_credential_must_be_passed(estate, capsys):
+    _switch_key_provider(estate, "openbao", "AYASEE_OPENBAO_TOKEN")
+    main = estate / ".github/workflows/main.yml"
+    main.write_text(
+        main.read_text().replace(
+            "      AYASEE_OPENBAO_TOKEN: ${{ secrets.AYASEE_OPENBAO_TOKEN }}\n", ""
+        )
+    )
+    _mock(_good_state())
+    _, out = _doctor(estate, capsys)
+    assert any("the plan key needs AYASEE_OPENBAO_TOKEN; pass it" in f for f in _fails(out))
+
+
 @respx.mock
 def test_ledger_variable_on_the_environment_or_the_repository(estate, capsys):
     state = _good_state()
@@ -419,3 +480,26 @@ def test_an_s3_ledger_url_needs_the_ledger_key(estate, capsys):
             for x in fails
         ), fails
     assert not any("pr.yml: ledger.url" in x for x in fails)
+
+
+def test_the_bootstrap_module_lists_the_plan_key_secrets_doctor_checks():
+    """issue #10: key_secret_scopes of modules/github-environments, per key provider, names the
+    same secrets as PLAN_KEY_SECRETS, and its key_provider validation the same providers."""
+    import re
+
+    from ayasee.config import KEY_PROVIDERS
+
+    module = Path(__file__).resolve().parents[1] / "modules" / "github-environments"
+    main = (module / "main.tf").read_text()
+    block = main[main.index("key_secret_scopes = {") : main.index("pending_secrets")]
+    found = {}
+    for provider in KEY_PROVIDERS:
+        m = re.search(
+            rf"^    {provider} = \{{\}}$|^    {provider} = (.*?)^    \}}", block, re.M | re.S
+        )
+        assert m, provider
+        found[provider] = set(re.findall(r"^\s+(AYASEE_[A-Z_]+)\s+=", m.group(0), re.M))
+    assert found == {p: set(doctor.PLAN_KEY_SECRETS.get(p, ())) for p in KEY_PROVIDERS}
+    variables = (module / "variables.tf").read_text()
+    listed = ", ".join(f'"{p}"' for p in KEY_PROVIDERS)
+    assert f"contains([{listed}], var.key_provider)" in variables

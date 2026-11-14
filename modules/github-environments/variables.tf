@@ -85,13 +85,13 @@ variable "solo_mode" {
 }
 
 variable "key_provider" {
-  description = "plan_encryption.key_provider of .ayasee.yaml (azure_vault, pbkdf2 or aws_kms). It selects the plan-key secrets of prod-plan, prod and prod-breakglass that secret_commands lists; generate_plan_passphrase needs pbkdf2."
+  description = "plan_encryption.key_provider of .ayasee.yaml (azure_vault, pbkdf2, aws_kms, gcp_kms or openbao). It selects the plan-key secrets of prod-plan, prod and prod-breakglass that secret_commands lists; generate_plan_passphrase needs pbkdf2."
   type        = string
   default     = "azure_vault"
 
   validation {
-    condition     = contains(["azure_vault", "pbkdf2", "aws_kms"], var.key_provider)
-    error_message = "key_provider must be azure_vault, pbkdf2 or aws_kms."
+    condition     = contains(["azure_vault", "pbkdf2", "aws_kms", "gcp_kms", "openbao"], var.key_provider)
+    error_message = "key_provider must be azure_vault, pbkdf2, aws_kms, gcp_kms or openbao."
   }
 }
 
@@ -114,7 +114,7 @@ variable "secret_scopes" {
   validation {
     condition = alltrue(flatten([
       for env, secrets in var.secret_scopes : [
-        for name in keys(secrets) : !contains(["AYASEE_PLAN_PASSPHRASE", "AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY"], name)
+        for name in keys(secrets) : !contains(["AYASEE_PLAN_PASSPHRASE", "AYASEE_KMS_ACCESS_KEY_ID", "AYASEE_KMS_SECRET_ACCESS_KEY", "AYASEE_GCP_KMS_CREDENTIALS", "AYASEE_OPENBAO_TOKEN"], name)
       ]
     ]))
     error_message = "secret_scopes must not list the plan-key secrets; they follow key_provider."

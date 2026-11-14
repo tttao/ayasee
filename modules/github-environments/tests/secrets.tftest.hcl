@@ -91,9 +91,55 @@ run "generation_needs_pbkdf2" {
 run "unknown_key_provider_fails" {
   command = plan
   variables {
-    key_provider = "gcp_kms"
+    key_provider = "vault"
   }
   expect_failures = [var.key_provider]
+}
+
+run "gcp_kms_lists_the_key_file_on_the_three_environments" {
+  command = plan
+  variables {
+    key_provider = "gcp_kms"
+  }
+
+  assert {
+    condition = toset([
+      for s in output.pending_secrets : s.environment if s.name == "AYASEE_GCP_KMS_CREDENTIALS"
+    ]) == toset(["prod-plan", "prod", "prod-breakglass"])
+    error_message = "the service-account key file on prod-plan, prod and prod-breakglass only"
+  }
+  assert {
+    condition     = !strcontains(output.secret_commands, "AYASEE_PLAN_PASSPHRASE") && !strcontains(output.secret_commands, "AYASEE_KMS_")
+    error_message = "gcp_kms needs no other key secret"
+  }
+}
+
+run "openbao_lists_the_token_on_the_three_environments" {
+  command = plan
+  variables {
+    key_provider = "openbao"
+  }
+
+  assert {
+    condition = toset([
+      for s in output.pending_secrets : s.environment if s.name == "AYASEE_OPENBAO_TOKEN"
+    ]) == toset(["prod-plan", "prod", "prod-breakglass"])
+    error_message = "the OpenBao token on prod-plan, prod and prod-breakglass only"
+  }
+  assert {
+    condition     = !strcontains(output.secret_commands, "AYASEE_PLAN_PASSPHRASE") && !strcontains(output.secret_commands, "AYASEE_GCP_KMS_")
+    error_message = "openbao needs no other key secret"
+  }
+}
+
+run "secret_scopes_must_not_list_a_gcp_or_openbao_key_secret" {
+  command = plan
+  variables {
+    secret_scopes = {
+      prod = { AYASEE_OPENBAO_TOKEN = "x" }
+    }
+  }
+  expect_failures = [var.secret_scopes]
 }
 
 run "aws_kms_lists_the_key_pair_on_the_three_environments" {
