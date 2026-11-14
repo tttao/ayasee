@@ -166,6 +166,12 @@ tofu apply -var github_owner=my-org -var github_repository=my-platform \
   -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}'
 ```
 
+Set `environment_prefix: iac-` in `.ayasee.yaml` and add `-var environment_prefix=iac-` when the
+repository already deploys applications to environments called `dev`, `uat` or `prod`
+([why](adopt.md#environments-that-already-exist)): every name below then carries the prefix
+(`iac-prod`, `iac-drift-dev`, ...), the federated subjects too. The bootstrap refuses to take over an
+environment it did not create unless you add `-var adopt_existing_environments=true`.
+
 This uses the two modules:
 
 - [`github-environments`](../../modules/github-environments/README.md) creates `dev-plan` (the pull-request

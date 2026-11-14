@@ -13,6 +13,10 @@
 # rewrites them at release. The `--local` (./actions) form is not supported for this workflow: the
 # drift job checks out the live SHA after installing ayasee, and that checkout would replace
 # ./actions. This file is not callable before the release rewrite.
+#
+# Environment names: every GitHub environment below is `environment_prefix` of .ayasee.yaml plus the
+# name written here (dev, prod-plan, prod, drift-<stage>, ...), named by an output of the first job.
+# No job names an environment by a literal; docs/reference/ayasee-yaml.md#environment-names.
 name: iac-nightly
 
 on:

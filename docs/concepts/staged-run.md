@@ -143,6 +143,13 @@ environment:
   'refs/heads/main'` in each job is only defence in depth.
 - **Admins cannot bypass** protection rules (D2).
 
+The names above are the defaults. With `environment_prefix: iac-` in `.ayasee.yaml` every one of them
+gets the prefix (`iac-dev`, `iac-prod-plan`, `iac-prod`, `iac-drift-dev`, ...) and nothing else
+changes: the stages, the unit paths, the ledger and the guard still use `dev`, `uat` and `prod`
+([which names are prefixed](../reference/ayasee-yaml.md#environment-names)). A repository that
+already deploys applications to `test` and `prod` needs it, so that the approval of an application
+deploy and the approval of an infrastructure apply are not the same environment.
+
 On `prod`: **required reviewers** and **`prevent_self_review: true`** (D2), so the person who
 merged cannot approve the production apply. `dev`, `uat` and `prod-plan` have no reviewers. The
 `prod` job reads the approvers from the approvals API and refuses to apply when there are none.

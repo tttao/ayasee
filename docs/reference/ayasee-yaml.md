@@ -11,7 +11,8 @@ Print the resolved configuration, including the derived `binding_mode`, as JSON:
 ayasee config show [--path FILE]
 ayasee config check-supported [--path FILE]
 ayasee config staged [--path FILE] [--start-stage STAGE]
-ayasee config pr-plan-environment [--path FILE]
+ayasee config pr-plan-environment [--path FILE] [--logical]
+ayasee config environments [--path FILE] [--json]
 ayasee config labels [--path FILE]
 ayasee config check-shared [--path FILE]
 ```
@@ -21,13 +22,19 @@ ayasee config check-shared [--path FILE]
 summary.
 
 `staged` prints how `iac-staged` maps `stages` onto its jobs, as `key=value` lines for
-`$GITHUB_OUTPUT` (`run-stage-1` to `run-stage-4`, `stage-1` to `stage-4`, `order`), or exits 1 with
+`$GITHUB_OUTPUT` (`run-stage-1` to `run-stage-4`, `stage-1` to `stage-4`, `order`, and the GitHub
+environment of each job: `env-stage-1` to `env-stage-4`, `env-prod-plan`, `env-prod`), or exits 1 with
 a configuration error for a stage list or `start-stage` that `iac-staged` cannot run.
 
 `pr-plan-environment` prints the GitHub environment `iac-pr` plans a pull request in,
-`<first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test, prod]`), or exits 1
+`<environment_prefix><first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test,
+prod]`; `--logical` leaves the prefix out), or exits 1
 with a configuration error when the first stage is `prod` or a pre-prod stage name is reserved
 (`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`).
+
+`environments` prints every GitHub environment ayasee derives from the file, one `<name>=<GitHub
+name>` line each (or a JSON object with `--json`); `show` includes the same map as `environments`.
+See [environment names](#environment-names).
 
 `check-supported` exits 1 and prints one line per setting that the parser accepts but no workflow
 implements yet (R35, R73): `gate: risky`, `engine: terraform`, `terragrunt: false`, a non-empty
@@ -57,6 +64,7 @@ Run it from the repository root.
 | `extra_rules` | list of strings | `[]` | Extra risk-rule files, merged after the packaged rules; a file can only raise a tier (see [the risk gate](../concepts/risk-gate.md#rule-files)). Works with `ayasee changeset --rules` and the `rules` input of the `risk` action. A non-empty list is **not supported by the workflows yet**: they refuse it with "extra_rules: not supported yet" rather than ignore it (R73). |
 | `drift_noise` | map of string to list of strings | `{}` | Resource type to attribute paths ignored when judging drift. Read by `iac-nightly` at the live SHA ([drift](../concepts/drift.md#what-counts-as-drift)). |
 | `identity` | `oidc` or `secrets` | `oidc` | How stage jobs reach the cloud (D7). `oidc` is the Entra OIDC profile: `azure/login` and the `ARM_*` variables, one managed identity per environment, no stored cloud secret. `secrets` skips `azure/login` and leaves `ARM_*` and `DATABRICKS_AUTH_TYPE` empty, for providers that cannot federate with GitHub OIDC; the plan and apply steps then receive the provider tokens `CLOUDFLARE_API_TOKEN`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which must be environment secrets, one set per environment (see [identity: secrets](../concepts/staged-run.md#identity-secrets)). **DEVIATION**: every load prints `DEVIATION: identity: secrets stores provider API tokens as GitHub environment secrets instead of OIDC federation (D7); stages are isolated only as far as the token scopes are (a pre-prod token whose scope covers prod objects, e.g. a shared DNS zone, can change them without the prod gate)` to stderr, and the first job of every reusable workflow repeats it as a warning and in the run summary. |
+| `environment_prefix` | string | `""` | Put in front of the name of every GitHub environment ayasee uses, so that ayasee's environments never share a name with an application's own `test` or `prod`: with `iac-` they are `iac-test`, `iac-test-plan`, `iac-prod-plan`, `iac-prod`, `iac-prod-breakglass`, `iac-drift-test`, `iac-drift-prod`. Empty (the default) keeps the names ayasee always used, so nothing changes for a repository that does not set it. At most 32 characters of `[a-z0-9_-]`, starting with a letter or digit (lowercase because GitHub compares environment names without case; no space, dot, slash or other character that a shell, a URL path or a workflow expression could read differently). The stages, the unit paths, the ledger records and the drift issues are **not** prefixed: [what is, and what is not](#environment-names). Set the same value as `environment_prefix` in the `github-environments` bootstrap; `ayasee init --iac-root` sets `iac-` in both. Changing it later renames every environment: create the new ones (and their secrets and variables) first, and expect the old ones to stay until you delete them. |
 | `provider_env` | list of strings | `[]` | Only with `identity: secrets`. The names of the provider variables the `AYASEE_PROVIDER_ENV` environment secret (one JSON object of name to string value) may hold, for providers other than the three named tokens (OVH, Hetzner, Scaleway, a second Cloudflare account). The plan and apply steps export the declared ones, each value masked, and refuse the run when the secret holds an undeclared key. A name is `[A-Z][A-Z0-9_]*` or `TF_VAR_<variable>`; reserved names (`PATH`, `LD_*`, `BASH*`, bash variables such as `UID` or `POSIXLY_CORRECT`, `NODE_OPTIONS`, `GITHUB_*`, `TF_*` other than `TF_VAR_*`, `TERRAFORM_*`, `AWS_*`, `CLOUDFLARE_*`, `AYASEE_*`, proxies, ...) are refused, as are duplicates and a non-empty list with `identity: oidc`. Each value must have at least 16 characters (a short mask would drop job outputs), and a multi-line value at most one line shorter than 8. See [provider environment](../concepts/staged-run.md#provider-environment). |
 | `plan_encryption.key_provider` | `azure_vault`, `pbkdf2`, `aws_kms`, `gcp_kms` or `openbao` | `azure_vault` | Where the prod plan encryption key comes from (D1). `azure_vault` is the Key Vault key in the `AYASEE_KEY_VAULT_KEY_ID` variable. `pbkdf2` derives it from the `AYASEE_PLAN_PASSPHRASE` secret, which must be an environment secret of `prod-plan`, `prod` and `prod-breakglass` only. `aws_kms` is the AWS KMS key ARN in the `AYASEE_KMS_KEY_ID` variable, reached with a dedicated IAM key pair in the `AYASEE_KMS_ACCESS_KEY_ID` and `AYASEE_KMS_SECRET_ACCESS_KEY` secrets, environment secrets of `prod-plan`, `prod` and `prod-breakglass` only; it works with either `identity` and needs OpenTofu 1.13 or later (the default pin of the setup action). `gcp_kms` is the Cloud KMS key in the `AYASEE_GCP_KMS_KEY_NAME` variable (`projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`), reached with the service-account key file in the `AYASEE_GCP_KMS_CREDENTIALS` secret. `openbao` is the OpenBao transit key in the `AYASEE_OPENBAO_KEY_URL` variable (`https://<host>[:<port>]/v1/<transit mount>/keys/<name>`), reached with the token in the `AYASEE_OPENBAO_TOKEN` secret. Both secrets must be environment secrets of `prod-plan`, `prod` and `prod-breakglass` only, and both providers work with either `identity`. The manifest and the stale-plan checks do not change. See [key providers](../concepts/plan-binding.md#key-providers). |
 | `notify.teams` | boolean | `true` | A Teams card is sent whenever the `teams-webhook` secret is set, and skipped otherwise. `false` is **not supported yet** (the workflows refuse it with "notify.teams: not supported yet", R73): to turn Teams off, leave the secret unset. |
@@ -66,6 +74,40 @@ Run it from the repository root.
 `binding_mode` is read-only and cannot be set in the file: `encrypted_plan` for
 `engine: opentofu`, `replan` for `engine: terraform`. It appears in the output of
 `ayasee config show`.
+
+## Environment names
+
+With `environment_prefix` set, every name that **GitHub** sees gets the prefix, and every name that
+only ayasee reads does not. Each use was decided on that one question: does GitHub resolve the name
+(an environment, its secrets, its reviewers, an OIDC token), or is it a key ayasee wrote itself?
+
+| Use of the name | Prefixed | Why |
+|---|---|---|
+| `environment:` of every job of `iac-staged`, `iac-pr`, `iac-nightly`, `iac-breakglass` | yes | it is the GitHub environment: reviewers, branch policy, secrets, variables |
+| Environment secrets and variables the bootstrap creates, and `secret_commands` | yes | they live on the GitHub environment |
+| `github-environments` environment names and its outputs `environments`, `pr_plan_environment` | yes | the same environments; `environment_names` maps stage-level name to GitHub name |
+| `azure-stage-identity` federated credential subject `repo:<o>/<r>:environment:<name>` and the identity name | yes | the subject must equal the environment the job runs in, or the OIDC login fails |
+| Deployment mirror (`ayasee ledger write --mirror-deployments`, `--environment-prefix`) | yes | a deployment to an unknown environment would create it, unprotected |
+| Approvals lookup (`ayasee approvals list`, `rejected`) | yes | the approvals API names the GitHub environment |
+| Pending gates the cockpit shows | yes | GitHub names the pending deployment; the card is still the stage |
+| `ayasee doctor` (existence, reviewers, main-only, secrets, variables, marker) | yes | it checks GitHub |
+| Stage names, `order`, `STAGE`, unit paths `<units_root>/<stage>`, state keys | no | logical; they come from `stages` |
+| Ledger records (`--env`), the guard's predecessor chain, `NO_RECORD_STAGES` | no | keyed by stage; a prefix change must not orphan the history |
+| Drift issue titles (`drift: <stage>`) and labels `env:<stage>` | no | keyed by stage; the guard's stop-the-line lookup uses the same labels |
+| Notification `env`, run summaries, job names (`prod-plan`, `prod`) | no | labels for people, and the names of the required checks |
+| Policy pack, R-rules, risk tiers | no | they read plans, never environments |
+
+What decides whether a job needs reviewers is never a literal name in a workflow: the reviewers belong
+to the environment the bootstrap created under that name, and the doctor derives the gated names
+(`prod`, `prod-breakglass`, `prod-pr-plan`) with the prefix. A prefix set in `.ayasee.yaml` but not in
+the bootstrap makes every job fail on a missing environment (GitHub creates an unprotected one on
+first use, so `ayasee doctor` checks that the prefixed environments exist, carry their reviewers and
+are restricted to `main`).
+
+The environments are also never reused by accident: the bootstrap refuses an environment that
+already exists and that it did not create ([adopt an existing
+environment](../guides/adopt.md#environments-that-already-exist)), and `ayasee doctor` warns when a
+workflow that is not an ayasee caller names one of ayasee's environments.
 
 ## Full example
 

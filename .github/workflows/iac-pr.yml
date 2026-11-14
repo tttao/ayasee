@@ -18,6 +18,10 @@
 #
 # Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
 # rewrites them at release (or to ./actions for in-repo runs). This file is not callable before that.
+#
+# Environment names: every GitHub environment below is `environment_prefix` of .ayasee.yaml plus the
+# name written here (dev, prod-plan, prod, drift-<stage>, ...), named by an output of the first job.
+# No job names an environment by a literal; docs/reference/ayasee-yaml.md#environment-names.
 name: iac-pr
 
 on:

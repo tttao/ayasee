@@ -59,7 +59,7 @@ attributes.
 | `envs[]` | The repository's configured stages, `prod-plan` excluded | `repos.yaml` `stages` (default `dev, uat, prod`) |
 | `live_sha`, `live_at`, `converged` | The ledger's current record | [Ledger](ledger.md) |
 | `pending_commits`, `pending_compare_url` | The first environment compares its live SHA to `main`; each later one to its predecessor's live SHA. Null when unknown (no live SHA, or a compare that returned 404 or 422). | Compare API |
-| `gate.waiting`, `since`, `run_url` | A run of a listed caller workflow with status `waiting` whose pending deployments include this environment; `since` is the run's creation time. Null `waiting` when the token cannot read pending deployments. | Actions API |
+| `gate.waiting`, `since`, `run_url` | A run of a listed caller workflow with status `waiting` whose pending deployments include this environment (named `environment_prefix` plus the stage when the repository sets one, read from its `.ayasee.yaml`); `since` is the run's creation time. Null `waiting` when the token cannot read pending deployments. | Actions API |
 | `drift.open`, `since`, `issue_url`, `resources` | The open `ayasee:drift` issue for the environment and the number of drifted-resource bullet lines in it | Issues API |
 | `health.last_result` | `failed` if any unit failed, else `applied` if any applied, else `no_changes`; `unknown` without a record | Ledger |
 | `health.stop_the_line` | An open `ayasee:stop-the-line` issue exists for the environment | Issues API |
