@@ -7,8 +7,34 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - unreleased
 
+First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
+`v0.1.0-rc.1` failed before publishing anything), then `v0.1.0-rc.3`, whose changes since rc.2
+are listed first. The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
+
+### Since v0.1.0-rc.2
+
+#### Changed
+
+- **Breaking for estates whose first stage is not `dev`** (#11): the pull-request plan environment
+  is named after the first stage, `<first stage>-plan`, matching `prod-plan`: `stages: [test, prod]`
+  plans pull requests in `test-plan`, no longer in `dev-plan`. With the default stages, or any list
+  that starts with `dev`, nothing changes. A new `resolve` job of `iac-pr` names the environment
+  with the new `ayasee config pr-plan-environment`, and the plan runs in it, in a job now called
+  `plan-first-stage`. `plan-dev` stays the check to require: it no longer plans but fails unless
+  `resolve` accepted the configuration and `plan-first-stage` passed, so a refused configuration
+  turns it red instead of skipping it, and the comment says so. The comment is headed
+  "Plan of `<stage>`" instead of "Dev plan". The
+  `github-environments` module creates `<first stage>-plan` instead of `dev-plan` (new output
+  `pr_plan_environment`) and refuses a first stage named `prod`. To move an estate whose first stage
+  is not `dev`: apply the module (it destroys `dev-plan` and creates `<first stage>-plan`, so the
+  environment secrets of `dev-plan` go with it), re-create the provider tokens of
+  `identity: secrets` and the `AZURE_*` variables in the new environment, and with Azure OIDC
+  re-create the federated credential for the subject `environment:<first stage>-plan`
+  (`azure-stage-identity` with `environment = "<first stage>-plan"`). There is no setting that
+  keeps the old name. If `dev-plan` or its federated credential was created outside the module,
+  delete both: a leftover `dev-plan` accepts every branch and still holds a read identity.
 - R70 (#15): `resolve` in `iac-staged` refuses a commit that is no longer the tip of `main` only
   when a later commit changes the IaC: a file inside `iac_root` (documentation excepted, R38), the
   configuration file, or anything under `.github/`. Otherwise the run goes on and records its own
@@ -16,8 +42,24 @@ released version into the GitHub release notes.
   API and refuses on any doubt (an API error, a tip that does not descend from the SHA, a
   comparison of 300 files or more). The monorepo docs now recommend a `paths:` filter on the
   `push` caller of `iac-staged` (still none on the `pull_request` caller of `iac-pr`).
+- A `units_root` outside `iac_root` was already refused on every load of `.ayasee.yaml`; when the
+  value looks written relative to `iac_root` (`stages`, or no `units_root`, next to
+  `iac_root: infra/iac`), the error now says that `units_root` is relative to the repository root
+  and, if that was the intent, which path to write (#11).
+- The pre-prod jobs of `iac-staged` are four fixed slots, `stage-1` to `stage-4`, instead of `dev`
+  and `uat` (#10). Each needs the one before it; the pre-prod stages fill them right-aligned, so
+  `stage-4` always runs the stage just before prod and unused slots are skipped like slots before
+  `start-stage`. Display names, environments and ledger records still use the stage names. The
+  `resolve` outputs and `ayasee config staged` print `run-stage-<i>` and `stage-<i>` instead of
+  `run-dev`, `run-uat`, `first-stage` and `pre-prod-stage`. A matrix was not used because GitHub
+  does not order matrix jobs; see [the staged run](docs/concepts/staged-run.md#stages).
+- Stage names that end in `-plan`, start with `drift-` or are `prod`, `prod-pr` or
+  `prod-breakglass` are refused by `ayasee config staged`, `ayasee config pr-plan-environment` and
+  the `github-environments` module, so a pull-request plan environment, which accepts every branch,
+  can never share a name with an environment that has a fixed role. `binding-mode: same-job` is
+  refused for every `*-plan` environment.
 
-### Added
+#### Added
 
 - `docs/guides/adopt.md` (#11): adopting ayasee in an existing repository on one page, in one
   order: `init`, bootstrap, the printed secret commands, `doctor`, `import-plan`, the first pull
@@ -40,7 +82,6 @@ released version into the GitHub release notes.
   characters of `[A-Za-z0-9]`) and sets it on those three environments; the value is then in the
   bootstrap's state in plain text. Both example bootstraps wire it, so `ayasee init` writes it
   too; the module needs the github provider `~> 6.12` and `hashicorp/random`.
-
 - `ayasee doctor` (#11): checks, before the first run and in one pass, what it needs: the
   configuration (supported settings, job slots, `shared_units`, stage directories), the callers
   (one full release SHA, no placeholder, `iac-staged` and `iac-pr` present, no `paths:` filter on
@@ -52,7 +93,6 @@ released version into the GitHub release notes.
   conditional-write lock check against a state bucket without the AWS CLI. Exit 0 all passed, 1 a
   failure, 2 something could not be checked. The quickstart and the Cloudflare and S3 example run
   it before the first pull request.
-
 - `ayasee import-plan --plan-json <show -json of a plan> [--out imports.tf] [--force]` (#11, import
   help): writes the `import` blocks of a unit's first adoption. For each planned create of a
   supported type it lists the live objects through the provider API (GET requests only, the
@@ -141,7 +181,6 @@ released version into the GitHub release notes.
   `identity: secrets`, the `pbkdf2` plan key, an S3-compatible backend, a `git-branch://` ledger
   set per environment, and the tunnel ingress and Access application as `shared_units`. Its README
   gives the token scopes per environment and the worked no-cloud ledger setup.
-
 - The solo-maintainer path, end to end (#1): `solo_mode` in the `github-environments` module lets
   the prod and break-glass reviewers be the same person and turns `prevent_self_review` off on
   `prod`, `prod-breakglass` and `prod-pr-plan` (reviewers stay required, no admin bypass); without
@@ -168,47 +207,7 @@ released version into the GitHub release notes.
   is exported, so the variables never reach `$GITHUB_ENV`, a command line or a later step. The
   three named tokens are unchanged.
 
-### Changed
-
-- A `units_root` outside `iac_root` was already refused on every load of `.ayasee.yaml`; when the
-  value looks written relative to `iac_root` (`stages`, or no `units_root`, next to
-  `iac_root: infra/iac`), the error now says that `units_root` is relative to the repository root
-  and, if that was the intent, which path to write (#11).
-- The pre-prod jobs of `iac-staged` are four fixed slots, `stage-1` to `stage-4`, instead of `dev`
-  and `uat` (#10). Each needs the one before it; the pre-prod stages fill them right-aligned, so
-  `stage-4` always runs the stage just before prod and unused slots are skipped like slots before
-  `start-stage`. Display names, environments and ledger records still use the stage names. The
-  `resolve` outputs and `ayasee config staged` print `run-stage-<i>` and `stage-<i>` instead of
-  `run-dev`, `run-uat`, `first-stage` and `pre-prod-stage`. A matrix was not used because GitHub
-  does not order matrix jobs; see [the staged run](docs/concepts/staged-run.md#stages).
-
-### Changed
-
-- **Breaking for estates whose first stage is not `dev`** (#11): the pull-request plan environment
-  is named after the first stage, `<first stage>-plan`, matching `prod-plan`: `stages: [test, prod]`
-  plans pull requests in `test-plan`, no longer in `dev-plan`. With the default stages, or any list
-  that starts with `dev`, nothing changes. A new `resolve` job of `iac-pr` names the environment
-  with the new `ayasee config pr-plan-environment`, and the plan runs in it, in a job now called
-  `plan-first-stage`. `plan-dev` stays the check to require: it no longer plans but fails unless
-  `resolve` accepted the configuration and `plan-first-stage` passed, so a refused configuration
-  turns it red instead of skipping it, and the comment says so. The comment is headed
-  "Plan of `<stage>`" instead of "Dev plan". The
-  `github-environments` module creates `<first stage>-plan` instead of `dev-plan` (new output
-  `pr_plan_environment`) and refuses a first stage named `prod`. To move an estate whose first stage
-  is not `dev`: apply the module (it destroys `dev-plan` and creates `<first stage>-plan`, so the
-  environment secrets of `dev-plan` go with it), re-create the provider tokens of
-  `identity: secrets` and the `AZURE_*` variables in the new environment, and with Azure OIDC
-  re-create the federated credential for the subject `environment:<first stage>-plan`
-  (`azure-stage-identity` with `environment = "<first stage>-plan"`). There is no setting that
-  keeps the old name. If `dev-plan` or its federated credential was created outside the module,
-  delete both: a leftover `dev-plan` accepts every branch and still holds a read identity.
-- Stage names that end in `-plan`, start with `drift-` or are `prod`, `prod-pr` or
-  `prod-breakglass` are refused by `ayasee config staged`, `ayasee config pr-plan-environment` and
-  the `github-environments` module, so a pull-request plan environment, which accepts every branch,
-  can never share a name with an environment that has a fixed role. `binding-mode: same-job` is
-  refused for every `*-plan` environment.
-
-### Fixed
+#### Fixed
 
 - `actions/setup/install.sh` writes the azure extra as `"${src}[azure]"` (shellcheck SC1087; same
   string as before). A final newline, a trailing space and a blank last line in three files, and a
@@ -216,11 +215,6 @@ released version into the GitHub release notes.
 - The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that
   store is read-only. It now describes the `git-branch://` store, `AYASEE_LEDGER_URL` and
   `ledger-token`.
-
-## [0.1.0] - unreleased
-
-First release (pre-alpha), published first as the release candidate `v0.1.0-rc.2` (the run of
-`v0.1.0-rc.1` failed before publishing anything). The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
 
 ### Added
 
