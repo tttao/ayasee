@@ -59,7 +59,11 @@ and pins them all to the release commit of that version: the callers'
 `tttao/ayasee/...@<release SHA>` and the bootstrap's
 `git::https://github.com/tttao/ayasee.git//modules/<module>?ref=<release SHA>`. It finds that commit
 on GitHub as the head of `release/vX.Y.Z` and accepts it only when its single parent is the tagged
-commit; `--ref <release SHA>` skips the lookup, `--source owner/name` names a
+commit; `--ref <release SHA>` skips the lookup but is verified: it must be the head of
+`release/vX.Y.Z`, one commit on top of the tag, with `__version__` equal to the version of the
+templates, or init refuses (a SHA of another release would pin workflows that lack what these callers
+use). `--unverified-ref` skips that check (a mirror whose release commit was re-pinned, a source
+checkout ahead of its release); `--source owner/name` names a
 [mirror](releasing.md#mirrors-for-ghes-and-air-gapped-estates). It writes no unit and starts with
 `shared_units: []`. In a monorepo the `push` caller gets a `paths:` filter on `iac_root`, the
 configuration file and `.github/` ([monorepos](../concepts/pr-checks.md#monorepos)). It never
@@ -221,6 +225,10 @@ It checks:
 - **the callers**: every workflow that calls an ayasee reusable workflow pins one full release SHA
   (no `OWNER` or all-zero placeholder left), the `iac-staged` and `iac-pr` callers exist, and the
   pull-request caller has no `paths:` filter;
+- **the release pin**: the commit the callers pin is the release commit of a version at least as
+  new as the running CLI (the head of `release/vX.Y.Z`, one commit on top of its tag). Callers on
+  an older release fail, as the workflows then lack what the callers pass; an API error is "could
+  not check" (exit 2), never a pass. It needs `GITHUB_TOKEN`, not admin rights;
 - **GitHub**: every environment the callers use exists; `prod`, `prod-breakglass` and
   `prod-pr-plan` have required reviewers and prevent self-review (unless `solo_mode`); every
   environment except the pull-request plan ones deploys from `main` only; each secret a caller

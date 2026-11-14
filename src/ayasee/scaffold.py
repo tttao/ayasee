@@ -10,8 +10,10 @@ search for and no ``sed`` to run:
 
 The release commit is found on GitHub from the installed version: the head of
 ``release/v<version>``, accepted only when its single parent is the commit the tag
-``v<version>`` points at (docs/guides/releasing.md). ``--ref`` gives it instead; it is required
-when ayasee runs from a source checkout, whose templates may differ from any release.
+``v<version>`` points at (docs/guides/releasing.md). ``--ref`` gives it instead, and is checked:
+a release commit whose ``__version__`` is this version, else a refusal (a SHA of another release
+under these templates is the trap of issue #32); ``--unverified-ref`` skips that check. It is
+required when ayasee runs from a source checkout, whose templates may differ from any release.
 
 It writes no unit: ``<units_root>/<stage>/`` is created empty (a ``.gitkeep``), and
 ``shared_units`` starts empty. Existing files are never overwritten without ``--force``; on a
@@ -31,6 +33,7 @@ from ayasee import __version__, cli
 from ayasee.config import ConfigError, parse_config_text, staged_layout
 from ayasee.github import DEFAULT_API_URL, GitHub, GitHubError
 from ayasee.maintip import _repo
+from ayasee.releasepin import NotARelease, release_version
 
 DEFAULT_SOURCE = "tttao/ayasee"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -97,6 +100,21 @@ def resolve_release(gh: GitHub, source: str, version: str = __version__) -> str:
             "pass --ref <release SHA> after checking the release notes"
         )
     return head
+
+
+def verify_ref(gh: GitHub, source: str, sha: str, version: str = __version__) -> None:
+    """``--ref`` must be a release commit of exactly the version whose templates are written.
+    Raises :class:`InitError` otherwise (an API failure raises GitHubError: never a pass)."""
+    try:
+        found = release_version(gh, source, sha)
+    except NotARelease as exc:
+        raise InitError(f"--ref: {exc}; --unverified-ref skips this check") from None
+    if found != version:
+        raise InitError(
+            f"--ref {sha[:12]} is the release commit of {found}, but these templates are "
+            f"{version}: the callers would pass inputs and secrets the pinned workflows do not "
+            f"have. Use ayasee@{found} for it, or the release commit of {version}"
+        )
 
 
 def _sub_once(pattern: re.Pattern[str], repl: str, text: str, what: str) -> str:
@@ -190,6 +208,21 @@ def _run(args: argparse.Namespace) -> int:
         _check_args(profile, stages, iac_root)
         templates, packaged = templates_root()
         if args.ref:
+            if args.unverified_ref:
+                print(
+                    "init: warning: --ref is not verified as the release commit of "
+                    f"{__version__}; doctor will still check it",
+                    file=sys.stderr,
+                )
+            else:
+                gh = GitHub(
+                    os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL,
+                    os.environ.get("GITHUB_TOKEN", ""),
+                )
+                try:
+                    verify_ref(gh, args.source, args.ref)
+                finally:
+                    gh.close()
             sha, label = args.ref, f"ayasee release commit (--ref, {__version__} templates)"
         elif not packaged:
             raise InitError(
@@ -262,7 +295,18 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--source", type=_repo, default=DEFAULT_SOURCE, help="owner/name of ayasee (a mirror)"
     )
-    parser.add_argument("--ref", type=_sha, help="the release SHA to pin, instead of looking it up")
+    parser.add_argument(
+        "--ref",
+        type=_sha,
+        help="the release SHA to pin, instead of looking it up (verified: it must be this "
+        "version's release commit)",
+    )
+    parser.add_argument(
+        "--unverified-ref",
+        action="store_true",
+        help="pin --ref without checking it is the release commit of this version (a mirror whose "
+        "release commit was re-pinned, or a source checkout ahead of its release)",
+    )
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.set_defaults(handler=_run)
 

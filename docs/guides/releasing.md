@@ -124,6 +124,20 @@ the files from the release page: the upload cannot be undone.
 Then point the example repository at the release SHA and run the end-to-end scenarios
 (see [`e2e/README.md`](../../e2e/README.md)) before you announce the release.
 
+## 7b. Only now close the issues
+
+An issue or a changelog line that says "ships in `vX.Y.Z`" must be true when an adopter reads it.
+Close the issues the release fixes, and edit the `[Unreleased]` changelog section into the
+released one, **after** the tag, the `release/<tag>` branch, the GitHub release and the PyPI
+upload all exist (step 7 verified them), never when the pull request merges. Before closing,
+check: `git ls-remote --tags origin <tag>`, `git ls-remote origin release/<tag>`,
+`gh release view <tag>` and `pip index versions ayasee`. A merged fix is "merged on `main`",
+not "ships in".
+
+`ayasee init --ref <SHA>` and `ayasee doctor` refuse a SHA that is not this version's release
+commit (the head of `release/<tag>`, one commit on top of the tag, whose `__version__` is the
+version), so a wrong SHA in the release notes is caught by the first adopter, not silently pinned.
+
 ## 8. How adopters pin
 
 Adopters reference the reusable workflows by the **release SHA** from the release notes, never by

@@ -3,6 +3,7 @@
 The repository under test is a copy of examples/cloudflare-s3 with its callers pinned; the GitHub
 API is a respx fake whose state each test bends to break one thing."""
 
+import base64
 import shutil
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import httpx
 import pytest
 import respx
 
-from ayasee import cli, doctor  # noqa: F401  (registers the subcommand)
+from ayasee import __version__, cli, doctor  # noqa: F401  (registers the subcommand)
 
 API = "https://api.github.com"
 REPO = "acme/estate"
@@ -78,7 +79,30 @@ def _good_state():
     }
 
 
+def _mock_pin(version=None, parents=None, status=200, head=None):
+    """The pinned commit PIN of tttao/ayasee, a release commit of ``version`` (default: the CLI)."""
+    version = version or __version__
+    tag = "2" * 40
+    text = f'__version__ = "{version}"\n'
+    respx.get(f"{API}/repos/tttao/ayasee/contents/src/ayasee/__init__.py").mock(
+        return_value=httpx.Response(
+            status, json={"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+        )
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/ref/tags/v{version}").mock(
+        return_value=httpx.Response(200, json={"object": {"sha": tag, "type": "commit"}})
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/ref/heads/release/v{version}").mock(
+        return_value=httpx.Response(200, json={"object": {"sha": head or PIN}})
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/commits/{PIN}").mock(
+        return_value=httpx.Response(200, json={"parents": [{"sha": p} for p in parents or [tag]]})
+    )
+
+
 def _mock(state):
+    _mock_pin()
+
     def names(items, key):
         return httpx.Response(200, json={key: [{"name": n} for n in sorted(items)]})
 
@@ -364,10 +388,80 @@ def test_ledger_token_without_a_pull_request_ruleset(estate, capsys):
 
 @respx.mock
 def test_an_unreadable_api_fails_without_a_traceback(estate, capsys):
+    _mock_pin()
     respx.get(f"{API}/repos/{REPO}/environments").mock(return_value=httpx.Response(403, json={}))
     rc, out = _doctor(estate, capsys)
     assert rc == 1
     assert any(f.startswith("cannot list the environments") for f in _fails(out))
+
+
+# ---- the release pin (issue #32) ---------------------------------------------------------------
+
+
+def _pin_lines(out):
+    sec = out.split("release pin\n", 1)[1].split("\n\n", 1)[0]
+    return [line.strip() for line in sec.splitlines()]
+
+
+@respx.mock
+def test_a_pin_of_this_release_passes(estate, capsys):
+    _mock(_good_state())
+    rc, out = _doctor(estate, capsys)
+    assert all(line.startswith("ok") for line in _pin_lines(out)), out
+    assert f"release commit of {__version__}" in out
+
+
+@respx.mock
+def test_a_pin_older_than_the_cli_fails(estate, capsys):
+    # the issue's example: callers on the rc.2 commit, CLI rc.3
+    _mock(_good_state())
+    _mock_pin("0.0.1")
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    assert any("older than this CLI" in f for f in _fails(out)), out
+
+
+@respx.mock
+def test_a_pin_newer_than_the_cli_passes(estate, capsys):
+    _mock(_good_state())
+    _mock_pin("99.0.0")
+    rc, out = _doctor(estate, capsys)
+    assert not any("release commit" in f for f in _fails(out)), out
+
+
+@respx.mock
+def test_a_pin_that_is_not_a_release_commit_fails(estate, capsys):
+    _mock(_good_state())
+    _mock_pin(parents=["3" * 40, "4" * 40])
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1 and any("one commit on top of tag" in f for f in _fails(out)), out
+
+
+@respx.mock
+def test_a_pin_that_is_not_the_release_branch_head_fails(estate, capsys):
+    _mock(_good_state())
+    _mock_pin(head="5" * 40)  # e.g. a fork's commit on top of the tag
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1 and any("not the head of release/v" in f for f in _fails(out)), out
+
+
+@respx.mock
+def test_an_api_error_on_the_pin_is_could_not_check_not_a_pass(estate, capsys):
+    _mock(_good_state())
+    _mock_pin(status=500)
+    rc, out = _doctor(estate, capsys)
+    assert any(
+        line.startswith("skip") and "could not check the release" in line
+        for line in _pin_lines(out)
+    ), out
+    assert not any(line.startswith("ok") for line in _pin_lines(out))
+    assert rc == 2
+
+
+def test_the_pin_is_not_checked_without_a_token(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    rc, out = _doctor(estate, capsys)
+    assert "set GITHUB_TOKEN to check the pinned release" in out
 
 
 # ---- the lock check ----------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 """`ayasee init` (issue #11): a profile scaffold pinned to one release commit, no placeholder."""
 
+import base64
 import tomllib
 from pathlib import Path
 
@@ -18,7 +19,7 @@ SHA = "b" * 40
 
 
 def _init(tmp_path, *args):
-    return cli.main(["init", "--dir", str(tmp_path), "--ref", SHA, *args])
+    return cli.main(["init", "--dir", str(tmp_path), "--ref", SHA, "--unverified-ref", *args])
 
 
 def test_cloudflare_in_a_monorepo(tmp_path, capsys):
@@ -189,6 +190,95 @@ def test_no_tag(gh):
     )
     with pytest.raises(scaffold.InitError, match="no tag v1.2.3"):
         scaffold.resolve_release(gh, "tttao/ayasee", "1.2.3")
+
+
+# ---- --ref is verified (issue #32) -------------------------------------------------------------
+
+
+def _pin(version, tag_sha=TAG_SHA, parents=(TAG_SHA,), init_file=None, head=None):
+    text = init_file if init_file is not None else f'__version__ = "{version}"\n'
+    respx.get(f"{API}/repos/tttao/ayasee/contents/src/ayasee/__init__.py").mock(
+        return_value=httpx.Response(
+            200, json={"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+        )
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/ref/tags/v{version}").mock(
+        return_value=httpx.Response(200, json={"object": {"sha": tag_sha, "type": "commit"}})
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/commits/{SHA}").mock(
+        return_value=httpx.Response(200, json={"parents": [{"sha": p} for p in parents]})
+    )
+    respx.get(f"{API}/repos/tttao/ayasee/git/ref/heads/release/v{version}").mock(
+        return_value=httpx.Response(200, json={"object": {"sha": head or SHA}})
+    )
+
+
+@respx.mock
+def test_ref_of_this_versions_release_commit_is_accepted(tmp_path):
+    _pin(scaffold.__version__)
+    rc = cli.main(["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA])
+    assert rc == 0
+    assert f"@{SHA}" in (tmp_path / ".github/workflows/pr.yml").read_text()
+
+
+@respx.mock
+def test_ref_of_another_release_is_refused(tmp_path, capsys):
+    # the trap of issue #32: the rc.2 commit under rc.3 templates
+    _pin("0.0.1")
+    rc = cli.main(["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA])
+    err = capsys.readouterr().err
+    assert rc == 1 and "release commit of 0.0.1" in err and scaffold.__version__ in err
+    assert not any(tmp_path.iterdir())
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("kwargs", "msg"),
+    [
+        ({"parents": ("f" * 40,)}, "not the one commit on top of tag"),
+        ({"parents": (TAG_SHA, "f" * 40)}, "not the one commit on top of tag"),
+        ({"head": "f" * 40}, "not the head of release/v"),
+        ({"init_file": "x = 1\n"}, "no src/ayasee/__init__.py with a __version__"),
+        ({"init_file": '__version__ = "banana"\n'}, "not a MAJOR.MINOR.PATCH"),
+    ],
+)
+def test_ref_that_is_not_a_release_commit_is_refused(tmp_path, capsys, kwargs, msg):
+    _pin(scaffold.__version__, **kwargs)
+    rc = cli.main(["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA])
+    err = capsys.readouterr().err
+    assert rc == 1 and msg in err and "--unverified-ref" in err
+    assert not any(tmp_path.iterdir())
+
+
+@respx.mock
+def test_ref_with_no_tag_or_no_file_is_refused(tmp_path, capsys):
+    respx.get(f"{API}/repos/tttao/ayasee/contents/src/ayasee/__init__.py").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    args = ["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA]
+    assert cli.main(args) == 1
+    assert "no src/ayasee/__init__.py" in capsys.readouterr().err
+    _pin(scaffold.__version__)
+    respx.get(f"{API}/repos/tttao/ayasee/git/ref/tags/v{scaffold.__version__}").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    assert cli.main(args) == 1
+    assert "has no tag" in capsys.readouterr().err
+
+
+@respx.mock
+def test_an_api_error_never_verifies_the_ref(tmp_path, capsys):
+    respx.get(f"{API}/repos/tttao/ayasee/contents/src/ayasee/__init__.py").mock(
+        return_value=httpx.Response(500, json={})
+    )
+    rc = cli.main(["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA])
+    assert rc == 1 and "init: error" in capsys.readouterr().err
+    assert not any(tmp_path.iterdir())
+
+
+def test_unverified_ref_warns_and_makes_no_request(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0  # respx not active: a call would fail
+    assert "not verified" in capsys.readouterr().err
 
 
 # ---- packaging ---------------------------------------------------------------------------------
