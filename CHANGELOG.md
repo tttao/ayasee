@@ -7,77 +7,6 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
-### Added
-
-- `environment_prefix` in `.ayasee.yaml` (#31), default empty: it is put in front of the name of every
-  GitHub environment ayasee uses, so that ayasee's environments stop colliding with an application's
-  own `test` and `prod`. With `iac-` they are `iac-test`, `iac-test-plan`, `iac-prod-plan`, `iac-prod`,
-  `iac-prod-breakglass`, `iac-drift-test`, `iac-drift-prod` (and `iac-prod-pr-plan` with
-  `shared_units`). Stages, unit paths, ledger records, guard order, drift issues and notifications
-  keep the stage names; what GitHub resolves (`environment:`, the deployment mirror, the approvals
-  lookup, secrets, variables, OIDC subjects, the cockpit's pending gates) gets the prefix. The
-  decision table is in [the reference](docs/reference/ayasee-yaml.md#environment-names). **With the
-  setting unset every name is the one used before: nothing changes for a repository that does not
-  set it.** New: `ayasee config environments`, `ayasee config pr-plan-environment --logical`, the
-  `environments` map of `ayasee config show`, the `env-*` outputs of `ayasee config staged`,
-  `ayasee ledger write --environment-prefix` (input `environment-prefix` of the ledger action).
-- `github-environments`: variables `environment_prefix` and `adopt_existing_environments`, output
-  `environment_names`. The keys of `variables` and `secret_scopes` stay the unprefixed names; the
-  `environments`, `pr_plan_environment`, `plan_passphrase_environments` outputs and the `--env` of
-  `secret_commands` give the GitHub names. Both example bootstraps take the two variables, and
-  `azure-stage-identity` documents that `environment` is the prefixed GitHub name (its subject and
-  identity name follow it).
-- The bootstrap refuses to take over an environment that already exists and that it did not create
-  (#31): applying used to rewrite the reviewers and branch policy of an application's `test` or
-  `prod` silently. The module reads the repository's environments, marks every environment it
-  creates with the variable `AYASEE_MANAGED`, and fails the plan, naming the environment, when an
-  unmarked one exists. Set `environment_prefix`, or `adopt_existing_environments = true` to take one
-  over on purpose ([adopt](docs/guides/adopt.md#environments-that-already-exist)).
-- `ayasee doctor` checks the environments under their prefixed names, warns about environments
-  without the `AYASEE_MANAGED` marker, and warns when a workflow that is not an ayasee caller names an
-  environment ayasee uses (`environment:` literals, per job; no token needed).
-- `ayasee init --iac-root` sets `environment_prefix: iac-` in `.ayasee.yaml` and as the default of
-  the bootstrap variable, because a monorepo is where the names collide; `--environment-prefix`
-  sets another prefix or, with an empty value, none.
-
-### Changed
-
-- **Upgrading an existing bootstrap (#31):** its environments have no `AYASEE_MANAGED` marker, so the
-  new check would take them for foreign. Apply once with `adopt_existing_environments = true`
-  (nothing else changes: it writes the marker), then drop the flag. `iac-breakglass` now checks out
-  and reads `environment_prefix` from the ref it runs from (main) in its `validate` job, before
-  the job that names its environment starts.
-
-### Fixed
-
-- `ayasee init --ref <SHA>` refuses a commit that is not the release commit of the version whose
-  templates it writes (the head of `release/v<version>`, one commit on top of the tag, with that
-  `__version__`), so an rc.2 SHA can no longer sit under rc.3 templates; `--unverified-ref` skips
-  the check (#32).
-- `ayasee doctor` has a "release pin" check: the callers' pinned commit must be a release commit
-  of a version at least the running CLI's; an API error is "could not check" (exit 2) (#32).
-
-### Changed
-
-- `ayasee init` scaffolds the callers as `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
-  `iac-breakglass.yml` (`name:` to match), in the examples too, so they do not collide with the
-  workflows of an application repository (#33). The cockpit's default `workflows:` is now
-  `.github/workflows/iac-staged.yml`; an estate that kept `main.yml` names it in its repos file.
-- With `--iac-root`, the `paths:` filter of `iac-staged.yml` lists the ayasee callers
-  (`.github/workflows/iac-*.yml`), not all of `.github/**`; `ayasee main-tip --check` (R70) now
-  counts the same set as a change of the IaC, so a commit the filter skips never supersedes a
-  waiting run.
-- `ayasee init` can be run again: it skips identical files, ignores empty `.gitkeep` files, and
-  prints a diff (and the differing keys of `.ayasee.yaml`) for files that differ, which `--force`
-  overwrites.
-
-### Added
-
-- `ayasee init --upgrade` moves only the release SHA pinned in the callers and the bootstrap
-  sources (#33).
-- Docs: why `iac-pr.yml` has no `paths:` filter (a comment in the file), and how to run the staged
-  workflow by `workflow_dispatch` only, with what R70 does then.
-
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
@@ -88,6 +17,11 @@ are listed first. The date is set when the final version is tagged, see [releasi
 
 #### Changed
 
+- **Upgrading an existing bootstrap (#31):** its environments have no `AYASEE_MANAGED` marker, so the
+  new check would take them for foreign. Apply once with `adopt_existing_environments = true`
+  (nothing else changes: it writes the marker), then drop the flag. `iac-breakglass` now checks out
+  and reads `environment_prefix` from the ref it runs from (main) in its `validate` job, before
+  the job that names its environment starts.
 - **Breaking for estates whose first stage is not `dev`** (#11): the pull-request plan environment
   is named after the first stage, `<first stage>-plan`, matching `prod-plan`: `stages: [test, prod]`
   plans pull requests in `test-plan`, no longer in `dev-plan`. With the default stages, or any list
@@ -106,6 +40,17 @@ are listed first. The date is set when the final version is tagged, see [releasi
   (`azure-stage-identity` with `environment = "<first stage>-plan"`). There is no setting that
   keeps the old name. If `dev-plan` or its federated credential was created outside the module,
   delete both: a leftover `dev-plan` accepts every branch and still holds a read identity.
+- `ayasee init` scaffolds the callers as `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
+  `iac-breakglass.yml` (`name:` to match), in the examples too, so they do not collide with the
+  workflows of an application repository (#33). The cockpit's default `workflows:` is now
+  `.github/workflows/iac-staged.yml`; an estate that kept `main.yml` names it in its repos file.
+- With `--iac-root`, the `paths:` filter of `iac-staged.yml` lists the ayasee callers
+  (`.github/workflows/iac-*.yml`), not all of `.github/**`; `ayasee main-tip --check` (R70) now
+  counts the same set as a change of the IaC, so a commit the filter skips never supersedes a
+  waiting run.
+- `ayasee init` can be run again: it skips identical files, ignores empty `.gitkeep` files, and
+  prints a diff (and the differing keys of `.ayasee.yaml`) for files that differ, which `--force`
+  overwrites.
 - R70 (#15): `resolve` in `iac-staged` refuses a commit that is no longer the tip of `main` only
   when a later commit changes the IaC: a file inside `iac_root` (documentation excepted, R38), the
   configuration file, or anything under `.github/`. Otherwise the run goes on and records its own
@@ -277,6 +222,40 @@ are listed first. The date is set when the final version is tagged, see [releasi
   line, and hands the pairs to the script through a private file that is deleted before anything
   is exported, so the variables never reach `$GITHUB_ENV`, a command line or a later step. The
   three named tokens are unchanged.
+- `environment_prefix` in `.ayasee.yaml` (#31), default empty: it is put in front of the name of every
+  GitHub environment ayasee uses, so that ayasee's environments stop colliding with an application's
+  own `test` and `prod`. With `iac-` they are `iac-test`, `iac-test-plan`, `iac-prod-plan`, `iac-prod`,
+  `iac-prod-breakglass`, `iac-drift-test`, `iac-drift-prod` (and `iac-prod-pr-plan` with
+  `shared_units`). Stages, unit paths, ledger records, guard order, drift issues and notifications
+  keep the stage names; what GitHub resolves (`environment:`, the deployment mirror, the approvals
+  lookup, secrets, variables, OIDC subjects, the cockpit's pending gates) gets the prefix. The
+  decision table is in [the reference](docs/reference/ayasee-yaml.md#environment-names). **With the
+  setting unset every name is the one used before: nothing changes for a repository that does not
+  set it.** New: `ayasee config environments`, `ayasee config pr-plan-environment --logical`, the
+  `environments` map of `ayasee config show`, the `env-*` outputs of `ayasee config staged`,
+  `ayasee ledger write --environment-prefix` (input `environment-prefix` of the ledger action).
+- `github-environments`: variables `environment_prefix` and `adopt_existing_environments`, output
+  `environment_names`. The keys of `variables` and `secret_scopes` stay the unprefixed names; the
+  `environments`, `pr_plan_environment`, `plan_passphrase_environments` outputs and the `--env` of
+  `secret_commands` give the GitHub names. Both example bootstraps take the two variables, and
+  `azure-stage-identity` documents that `environment` is the prefixed GitHub name (its subject and
+  identity name follow it).
+- The bootstrap refuses to take over an environment that already exists and that it did not create
+  (#31): applying used to rewrite the reviewers and branch policy of an application's `test` or
+  `prod` silently. The module reads the repository's environments, marks every environment it
+  creates with the variable `AYASEE_MANAGED`, and fails the plan, naming the environment, when an
+  unmarked one exists. Set `environment_prefix`, or `adopt_existing_environments = true` to take one
+  over on purpose ([adopt](docs/guides/adopt.md#environments-that-already-exist)).
+- `ayasee doctor` checks the environments under their prefixed names, warns about environments
+  without the `AYASEE_MANAGED` marker, and warns when a workflow that is not an ayasee caller names an
+  environment ayasee uses (`environment:` literals, per job; no token needed).
+- `ayasee init --iac-root` sets `environment_prefix: iac-` in `.ayasee.yaml` and as the default of
+  the bootstrap variable, because a monorepo is where the names collide; `--environment-prefix`
+  sets another prefix or, with an empty value, none.
+- `ayasee init --upgrade` moves only the release SHA pinned in the callers and the bootstrap
+  sources (#33).
+- Docs: why `iac-pr.yml` has no `paths:` filter (a comment in the file), and how to run the staged
+  workflow by `workflow_dispatch` only, with what R70 does then.
 
 #### Fixed
 
@@ -286,6 +265,12 @@ are listed first. The date is set when the final version is tagged, see [releasi
 - The quickstart told adopters without a cloud to use `github-branch://` as their ledger; that
   store is read-only. It now describes the `git-branch://` store, `AYASEE_LEDGER_URL` and
   `ledger-token`.
+- `ayasee init --ref <SHA>` refuses a commit that is not the release commit of the version whose
+  templates it writes (the head of `release/v<version>`, one commit on top of the tag, with that
+  `__version__`), so an rc.2 SHA can no longer sit under rc.3 templates; `--unverified-ref` skips
+  the check (#32).
+- `ayasee doctor` has a "release pin" check: the callers' pinned commit must be a release commit
+  of a version at least the running CLI's; an API error is "could not check" (exit 2) (#32).
 
 ### Added
 
