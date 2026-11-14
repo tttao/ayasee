@@ -7,8 +7,8 @@ static, server-less estate view.
 The name is "IaC" spelled the way it sounds: *ay-a-see*.
 
 **Status: pre-alpha.** The workflows, actions, CLI, risk gate, policy pack, cockpit and a reference
-example are implemented and tested. The first release candidate is
-[`v0.1.0-rc.2`](https://github.com/tttao/ayasee/releases); GitHub Enterprise Server
+example are implemented and tested. The latest release candidate is
+[`v0.1.0-rc.3`](https://github.com/tttao/ayasee/releases); GitHub Enterprise Server
 behaviour and the end-to-end sandbox are unverified, and governance is not settled. See the
 [known limitations](docs/concepts/architecture.md#known-limitations) before you adopt it.
 
