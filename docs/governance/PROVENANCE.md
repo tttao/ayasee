@@ -9,8 +9,8 @@ concept pages. The design decisions are recorded in [decisions.md](decisions.md)
 implementation plan is in [`docs/superpowers/plans/`](../superpowers/plans/).
 
 The repository contains no third-party names, tickets, runner labels, secrets, brand tokens, brand
-assets or data. One third-party file is copied into it, unmodified: the Mermaid bundle that the
-documentation site serves (see [Dependencies](#dependencies)). Tools such as OpenTofu,
+assets or data. Third-party files are copied into it, unmodified, for the documentation site only: the Mermaid
+bundle and the window engine of the animated demo (see [Dependencies](#dependencies)). Tools such as OpenTofu,
 Terragrunt, Trivy and Checkov are downloaded at run time under their own licences and are not
 redistributed.
 
@@ -40,12 +40,14 @@ The Python dependencies (`pyproject.toml`, `uv.lock`) and the cockpit site's bui
 MPL-2.0. They are installed from their registries, not vendored. The built cockpit site bundles no
 third-party runtime library.
 
-The documentation site serves one vendored file, so that its diagrams render without a CDN (the site
-makes no third-party requests):
+The documentation site serves vendored files, so that its diagrams and its demo render without a CDN
+(the site makes no third-party requests):
 
 | File | Upstream | Version | Licence | SHA-256 |
 |---|---|---|---|---|
 | `website/javascripts/vendor/mermaid-11.17.2.min.js` | npm `mermaid`, `dist/mermaid.min.js` | 11.17.2 | MIT (text in `mermaid-11.17.2.LICENSE.txt` beside it) | `581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8` |
+| `website/demo/vendor/step-window.js` | [MengTo/Skills](https://github.com/MengTo/Skills), `agent-skills/web-design/html-demo/scripts/step-window.js` | commit `07274a3b` | MIT (text in `step-window.LICENSE.txt` beside it) | `8086eea441ce6d7d507a53dd0c6342cfcedba67feca9b11d3108a872c2bba0d3` |
+| `website/demo/vendor/step-window.css` | the same, `step-window.css` | commit `07274a3b` | MIT | `c981bb1314c9c5f6abb73d9bfd55c8dd7a1a46b9fe9d7213723658899ab2dd8d` |
 
 To update it, take `dist/mermaid.min.js` from `npm pack mermaid@<version>`, rename it with the new
 version, change the path in `website/overrides/main.html`, and update this table and `NOTICE`.

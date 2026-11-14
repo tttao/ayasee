@@ -19,6 +19,7 @@ your own Actions, with OIDC identities and no stored cloud secrets.
 [Quickstart](docs/guides/quickstart.md){ .md-button .md-button--primary }
 [Architecture](docs/concepts/architecture.md){ .md-button }
 [Compare with other tools](docs/comparison.md){ .md-button }
+[Watch the demo](demo/index.html){ .md-button }
 { .ay-actions }
 
 <p class="ay-status"><strong>Status: pre-alpha.</strong> Implemented and tested; latest release
