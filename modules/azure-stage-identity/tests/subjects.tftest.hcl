@@ -121,3 +121,22 @@ run "immutable_subject_override" {
     error_message = "the immutable sub override must be used verbatim"
   }
 }
+
+# environment_prefix (issue #31): the module takes the GitHub environment name as it is, so the
+# caller passes <prefix><name> and the subject is the one the prefixed environment's tokens carry.
+run "prefixed_environment_subject" {
+  command = plan
+
+  variables {
+    environment = "iac-prod"
+  }
+
+  assert {
+    condition     = azurerm_federated_identity_credential.this.subject == "repo:acme/platform:environment:iac-prod"
+    error_message = "the subject must name the prefixed GitHub environment"
+  }
+  assert {
+    condition     = azurerm_user_assigned_identity.this.name == "ayasee-platform-iac-prod"
+    error_message = "the identity is named after the prefixed environment"
+  }
+}

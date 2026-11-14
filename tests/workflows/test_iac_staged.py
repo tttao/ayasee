@@ -16,10 +16,11 @@ SLOTS = [f"stage-{i}" for i in range(1, PRE_PROD_SLOTS + 1)]
 STAGE_JOBS = [*SLOTS, "prod-plan", "prod", "prod-in-sync"]
 # prod-plan and prod-in-sync never wait for prod reviewers (R31)
 EXPECTED_ENV = {
-    **{slot: f"${{{{ needs.resolve.outputs.{slot} }}}}" for slot in SLOTS},
-    "prod-plan": "prod-plan",
-    "prod": "prod",
-    "prod-in-sync": "prod-plan",
+    # the GitHub environment is environment_prefix + the stage, named by the resolve job (#31)
+    **{slot: f"${{{{ needs.resolve.outputs.env-{slot} }}}}" for slot in SLOTS},
+    "prod-plan": "${{ needs.resolve.outputs.env-prod-plan }}",
+    "prod": "${{ needs.resolve.outputs.env-prod }}",
+    "prod-in-sync": "${{ needs.resolve.outputs.env-prod-plan }}",
 }
 
 
@@ -514,7 +515,7 @@ def test_prod_result_notifies_prod_rejected_only_when_the_gate_was_rejected(wf):
     s = _steps(wf, "prod-result")
     check = next(x for x in s if x.get("id") == "rejected")
     assert "ayasee approvals rejected" in check["run"]
-    assert "--env prod --job prod" in check["run"]
+    assert '--env "$PROD_ENV" --job prod' in check["run"]
     notify = next(x for x in s if x.get("uses", "").startswith("OWNER/ayasee/actions/notify@"))
     assert notify["with"]["event"] == "prod_rejected"
     assert notify["if"] == "${{ steps.rejected.outputs.rejected == 'true' }}"

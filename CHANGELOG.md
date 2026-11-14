@@ -7,6 +7,47 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- `environment_prefix` in `.ayasee.yaml` (#31), default empty: it is put in front of the name of every
+  GitHub environment ayasee uses, so that ayasee's environments stop colliding with an application's
+  own `test` and `prod`. With `iac-` they are `iac-test`, `iac-test-plan`, `iac-prod-plan`, `iac-prod`,
+  `iac-prod-breakglass`, `iac-drift-test`, `iac-drift-prod` (and `iac-prod-pr-plan` with
+  `shared_units`). Stages, unit paths, ledger records, guard order, drift issues and notifications
+  keep the stage names; what GitHub resolves (`environment:`, the deployment mirror, the approvals
+  lookup, secrets, variables, OIDC subjects, the cockpit's pending gates) gets the prefix. The
+  decision table is in [the reference](docs/reference/ayasee-yaml.md#environment-names). **With the
+  setting unset every name is the one used before: nothing changes for a repository that does not
+  set it.** New: `ayasee config environments`, `ayasee config pr-plan-environment --logical`, the
+  `environments` map of `ayasee config show`, the `env-*` outputs of `ayasee config staged`,
+  `ayasee ledger write --environment-prefix` (input `environment-prefix` of the ledger action).
+- `github-environments`: variables `environment_prefix` and `adopt_existing_environments`, output
+  `environment_names`. The keys of `variables` and `secret_scopes` stay the unprefixed names; the
+  `environments`, `pr_plan_environment`, `plan_passphrase_environments` outputs and the `--env` of
+  `secret_commands` give the GitHub names. Both example bootstraps take the two variables, and
+  `azure-stage-identity` documents that `environment` is the prefixed GitHub name (its subject and
+  identity name follow it).
+- The bootstrap refuses to take over an environment that already exists and that it did not create
+  (#31): applying used to rewrite the reviewers and branch policy of an application's `test` or
+  `prod` silently. The module reads the repository's environments, marks every environment it
+  creates with the variable `AYASEE_MANAGED`, and fails the plan, naming the environment, when an
+  unmarked one exists. Set `environment_prefix`, or `adopt_existing_environments = true` to take one
+  over on purpose ([adopt](docs/guides/adopt.md#environments-that-already-exist)).
+- `ayasee doctor` checks the environments under their prefixed names, warns about environments
+  without the `AYASEE_MANAGED` marker, and warns when a workflow that is not an ayasee caller names an
+  environment ayasee uses (`environment:` literals, per job; no token needed).
+- `ayasee init --iac-root` sets `environment_prefix: iac-` in `.ayasee.yaml` and as the default of
+  the bootstrap variable, because a monorepo is where the names collide; `--environment-prefix`
+  sets another prefix or, with an empty value, none.
+
+### Changed
+
+- **Upgrading an existing bootstrap (#31):** its environments have no `AYASEE_MANAGED` marker, so the
+  new check would take them for foreign. Apply once with `adopt_existing_environments = true`
+  (nothing else changes: it writes the marker), then drop the flag. `iac-breakglass` now checks out
+  and reads `environment_prefix` from the ref it runs from (main) in its `validate` job, before
+  the job that names its environment starts.
+
 ### Fixed
 
 - `ayasee init --ref <SHA>` refuses a commit that is not the release commit of the version whose

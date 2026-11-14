@@ -5,6 +5,10 @@
 #
 # Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
 # rewrites them at release (or to ./actions for in-repo runs). This file is not callable before that.
+#
+# Environment names: every GitHub environment below is `environment_prefix` of .ayasee.yaml plus the
+# name written here (dev, prod-plan, prod, drift-<stage>, ...), named by an output of the first job.
+# No job names an environment by a literal; docs/reference/ayasee-yaml.md#environment-names.
 name: iac-staged
 
 on:
@@ -146,6 +150,13 @@ jobs:
       stage-2: ${{ steps.resolve.outputs.stage-2 }}
       stage-3: ${{ steps.resolve.outputs.stage-3 }}
       stage-4: ${{ steps.resolve.outputs.stage-4 }}
+      env-stage-1: ${{ steps.resolve.outputs.env-stage-1 }}
+      env-stage-2: ${{ steps.resolve.outputs.env-stage-2 }}
+      env-stage-3: ${{ steps.resolve.outputs.env-stage-3 }}
+      env-stage-4: ${{ steps.resolve.outputs.env-stage-4 }}
+      env-prod-plan: ${{ steps.resolve.outputs.env-prod-plan }}
+      env-prod: ${{ steps.resolve.outputs.env-prod }}
+      environment-prefix: ${{ steps.resolve.outputs.environment-prefix }}
       identity: ${{ steps.resolve.outputs.identity }}
       provider-env-names: ${{ steps.resolve.outputs.provider-env-names }}
       key-provider: ${{ steps.resolve.outputs.key-provider }}
@@ -232,6 +243,7 @@ jobs:
             echo run-prod-plan=true
             echo "ledger-url=$(jq -r '.ledger.url // ""' "$cfg")"
             echo "units-root=$(jq -r '.units_root' "$cfg")"
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "allow-cascade=$(jq -r '.allow_cascade' "$cfg")"
             echo "identity=$identity"
@@ -267,7 +279,7 @@ jobs:
     needs: resolve
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-1 == 'true' }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.stage-1 }}
+    environment: ${{ needs.resolve.outputs.env-stage-1 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -378,6 +390,7 @@ jobs:
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:
@@ -401,7 +414,7 @@ jobs:
     needs: [resolve, stage-1]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-2 == 'true' && (needs.stage-1.result == 'success' || (needs.resolve.outputs.run-stage-1 == 'false' && needs.stage-1.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.stage-2 }}
+    environment: ${{ needs.resolve.outputs.env-stage-2 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -512,6 +525,7 @@ jobs:
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:
@@ -535,7 +549,7 @@ jobs:
     needs: [resolve, stage-2]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-3 == 'true' && (needs.stage-2.result == 'success' || (needs.resolve.outputs.run-stage-2 == 'false' && needs.stage-2.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.stage-3 }}
+    environment: ${{ needs.resolve.outputs.env-stage-3 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -646,6 +660,7 @@ jobs:
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:
@@ -669,7 +684,7 @@ jobs:
     needs: [resolve, stage-3]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-stage-4 == 'true' && (needs.stage-3.result == 'success' || (needs.resolve.outputs.run-stage-3 == 'false' && needs.stage-3.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.stage-4 }}
+    environment: ${{ needs.resolve.outputs.env-stage-4 }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -780,6 +795,7 @@ jobs:
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:
@@ -808,7 +824,7 @@ jobs:
     needs: [resolve, stage-1, stage-2, stage-3, stage-4]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-prod-plan == 'true' && (needs.stage-1.result == 'success' || (needs.resolve.outputs.run-stage-1 == 'false' && needs.stage-1.result == 'skipped')) && (needs.stage-2.result == 'success' || (needs.resolve.outputs.run-stage-2 == 'false' && needs.stage-2.result == 'skipped')) && (needs.stage-3.result == 'success' || (needs.resolve.outputs.run-stage-3 == 'false' && needs.stage-3.result == 'skipped')) && (needs.stage-4.result == 'success' || (needs.resolve.outputs.run-stage-4 == 'false' && needs.stage-4.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    environment: prod-plan
+    environment: ${{ needs.resolve.outputs.env-prod-plan }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -957,7 +973,7 @@ jobs:
     needs: [resolve, prod-plan]
     if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' }}
     runs-on: ubuntu-latest
-    environment: prod
+    environment: ${{ needs.resolve.outputs.env-prod }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -1017,8 +1033,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          PROD_ENV: ${{ needs.resolve.outputs.env-prod }}
         run: |
-          login="$(ayasee approvals list --repo "$REPO" --run-id "$RUN_ID" --env prod)"
+          login="$(ayasee approvals list --repo "$REPO" --run-id "$RUN_ID" --env "$PROD_ENV")"
           echo "login=$login" >>"$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1082,6 +1099,7 @@ jobs:
           units-json: ${{ steps.units.outputs.units-json }}
           approver: ${{ steps.approver.outputs.login }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:
@@ -1116,7 +1134,7 @@ jobs:
     needs: [resolve, prod-plan]
     if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'false' }}
     runs-on: ubuntu-latest
-    environment: prod-plan
+    environment: ${{ needs.resolve.outputs.env-prod-plan }}
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -1200,6 +1218,7 @@ jobs:
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
         if: ${{ failure() && steps.guard.outcome != 'failure' }}
         with:
@@ -1235,9 +1254,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          PROD_ENV: ${{ needs.resolve.outputs.env-prod }}
         run: |
           rc=0
-          ayasee approvals rejected --repo "$REPO" --run-id "$RUN_ID" --env prod --job prod || rc=$?
+          ayasee approvals rejected --repo "$REPO" --run-id "$RUN_ID" --env "$PROD_ENV" --job prod || rc=$?
           case "$rc" in
             0) echo "rejected=true" >>"$GITHUB_OUTPUT" ;;
             1) echo "rejected=false" >>"$GITHUB_OUTPUT" ;;

@@ -314,6 +314,12 @@ def test_cli_staged_prints_github_outputs(tmp_path, monkeypatch, capsys):
         "stage-3=",
         "stage-4=staging",
         "order=staging,prod",
+        "env-stage-1=",
+        "env-stage-2=",
+        "env-stage-3=",
+        "env-stage-4=staging",
+        "env-prod-plan=prod-plan",
+        "env-prod=prod",
     ]
 
 
@@ -659,3 +665,127 @@ def test_endpoint_refusal_covers_every_url_open_store_reads_an_endpoint_from(mon
         store = open_store(url)
         assert store.client.base == "https://h.example"
         assert names_s3_endpoint(url)
+
+
+# ---- environment_prefix (issue #31) -----------------------------------------------------
+
+
+def test_environment_prefix_defaults_to_empty(tmp_path):
+    assert load_config(write(tmp_path, "")).environment_prefix == ""
+    assert load_config(write(tmp_path, "environment_prefix: ''\n")).environment_prefix == ""
+
+
+@pytest.mark.parametrize("prefix", ["iac-", "iac_", "ayasee-", "a", "0x-", "a" * 32])
+def test_environment_prefix_accepts(tmp_path, prefix):
+    cfg = load_config(write(tmp_path, f"environment_prefix: {prefix}\n"))
+    assert cfg.environment_prefix == prefix
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "IAC-",
+        "-iac",
+        "_iac",
+        "iac ",
+        "i ac-",
+        "iac.",
+        "iac/",
+        "iac:",
+        "a" * 33,
+        "iac-\\n",
+        "é-",
+        "$x-",
+        "a|b-",
+        ".*",
+    ],
+)
+def test_environment_prefix_refuses(tmp_path, prefix):
+    p = tmp_path / ".ayasee.yaml"
+    p.write_text(f'environment_prefix: "{prefix}"\n')
+    with pytest.raises(ConfigError, match="environment_prefix"):
+        load_config(p)
+
+
+def test_environment_prefix_must_be_a_string(tmp_path):
+    with pytest.raises(ConfigError, match="environment_prefix: expected a string"):
+        load_config(write(tmp_path, "environment_prefix: 12\n"))
+    with pytest.raises(ConfigError, match="environment_prefix: expected a string"):
+        load_config(write(tmp_path, "environment_prefix: [a]\n"))
+
+
+def test_environment_names_without_prefix_are_todays_names():
+    cfg = Config()
+    assert config.environment_names(cfg) == {
+        n: n
+        for n in [
+            "dev",
+            "uat",
+            "prod",
+            "dev-plan",
+            "prod-plan",
+            "prod-breakglass",
+            "drift-dev",
+            "drift-uat",
+            "drift-prod",
+        ]
+    }
+
+
+def test_environment_names_with_prefix_and_shared_units():
+    cfg = Config(stages=["test", "prod"], shared_units=["tunnel"], environment_prefix="iac-")
+    assert config.environment_names(cfg) == {
+        "test": "iac-test",
+        "prod": "iac-prod",
+        "test-plan": "iac-test-plan",
+        "prod-plan": "iac-prod-plan",
+        "prod-breakglass": "iac-prod-breakglass",
+        "drift-test": "iac-drift-test",
+        "drift-prod": "iac-drift-prod",
+        "prod-pr-plan": "iac-prod-pr-plan",
+    }
+
+
+def test_environment_names_never_collide():
+    cfg = Config(stages=["dev", "uat", "prod"], shared_units=["x"], environment_prefix="drift-")
+    names = config.environment_names(cfg)
+    assert len(set(names.values())) == len(names)
+
+
+def test_staged_layout_names_the_github_environments():
+    layout = config.staged_layout(["test", "prod"], "")
+    assert layout["stage-4"] == "test" and layout["order"] == "test,prod"  # logical
+    out = config.staged_environments(layout, "iac-")
+    assert out["env-stage-4"] == "iac-test"
+    assert out["env-stage-1"] == out["env-stage-2"] == out["env-stage-3"] == ""
+    assert (out["env-prod-plan"], out["env-prod"]) == ("iac-prod-plan", "iac-prod")
+    plain = config.staged_environments(layout, "")
+    assert (plain["env-stage-4"], plain["env-prod"]) == ("test", "prod")
+
+
+def test_cli_staged_prints_prefixed_environments(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [test, prod]\nenvironment_prefix: iac-\n")
+    assert _cli(monkeypatch, "staged", "--path", str(p)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "env-stage-4=iac-test" in lines and "env-prod=iac-prod" in lines
+    assert "stage-4=test" in lines
+
+
+def test_cli_pr_plan_environment_is_prefixed(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [test, prod]\nenvironment_prefix: iac-\n")
+    assert _cli(monkeypatch, "pr-plan-environment", "--path", str(p)) == 0
+    assert capsys.readouterr().out == "iac-test-plan\n"
+    assert _cli(monkeypatch, "pr-plan-environment", "--path", str(p), "--logical") == 0
+    assert capsys.readouterr().out == "test-plan\n"
+
+
+def test_cli_environments_and_show(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, "stages: [test, prod]\nenvironment_prefix: iac-\n")
+    assert _cli(monkeypatch, "environments", "--path", str(p)) == 0
+    assert "prod-breakglass=iac-prod-breakglass" in capsys.readouterr().out.splitlines()
+    assert _cli(monkeypatch, "environments", "--path", str(p), "--json") == 0
+    assert json.loads(capsys.readouterr().out)["drift-test"] == "iac-drift-test"
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["environment_prefix"] == "iac-"
+    assert shown["environments"]["prod"] == "iac-prod"

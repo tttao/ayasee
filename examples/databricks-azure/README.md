@@ -50,6 +50,13 @@ tofu apply -var github_owner=OWNER -var github_repository=my-platform \
   -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}'
 ```
 
+If the repository already deploys applications to environments called `dev`, `uat` or `prod`, set
+`environment_prefix: iac-` in `.ayasee.yaml` and `-var environment_prefix=iac-` here: every
+environment, identity and federated subject then carries the prefix (`iac-prod`,
+`repo:<owner>/<repo>:environment:iac-prod`). The bootstrap refuses to take over an environment that
+already exists unless you pass `-var adopt_existing_environments=true`
+([why and how](../../docs/guides/adopt.md#environments-that-already-exist)).
+
 `prod` and `prod-breakglass` need different, non-empty reviewer sets; the environments forbid self
 review and admin bypass (D2). Keep the state of this root outside the stage units' state. The
 `client_ids` and `principal_ids` outputs are what the next step needs. See

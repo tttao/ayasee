@@ -132,3 +132,20 @@ variable "owner" {
   type        = string
   default     = ""
 }
+
+variable "environment_prefix" {
+  description = "environment_prefix of .ayasee.yaml (keep the two equal): put in front of the name of every GitHub environment this module creates, so that ayasee's environments never share a name with an application's own test or prod. With \"iac-\": iac-dev, iac-dev-plan, iac-prod-plan, iac-prod, iac-prod-breakglass, iac-drift-dev, ... The keys of variables and secret_scopes stay the unprefixed names (dev, prod-plan, drift-prod, ...); every output that names an environment gives the prefixed name. Empty (the default) keeps the names ayasee used before the setting existed."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.environment_prefix == "" || can(regex("^[a-z0-9][a-z0-9_-]{0,31}$", var.environment_prefix))
+    error_message = "environment_prefix is empty or at most 32 characters of [a-z0-9_-] starting with a letter or digit (for example \"iac-\")."
+  }
+}
+
+variable "adopt_existing_environments" {
+  description = "Allow this module to take over a GitHub environment that already exists in the repository and was not created by it (no AYASEE_MANAGED variable). Default false: the plan fails naming the environment, because applying would overwrite its reviewers and deployment branch policy and share its secrets with ayasee's jobs. Set an environment_prefix instead, unless you mean to give an environment to ayasee. Upgrading a bootstrap created before this variable existed needs it once, to write the marker."
+  type        = bool
+  default     = false
+}

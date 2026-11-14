@@ -62,6 +62,13 @@ and `drift-prod` (the pull-request plan environment is named after the first sta
 `<first stage>-plan`), sets `AYASEE_LEDGER_URL` on every environment that touches the ledger (step 4),
 and, with `generate_plan_passphrase=true`, sets `AYASEE_PLAN_PASSPHRASE` (step 3).
 
+**Own environments.** If the repository already deploys applications to environments called `test`
+or `prod`, set `environment_prefix: iac-` in `.ayasee.yaml` and `-var environment_prefix=iac-` here
+(`ayasee init --iac-root` sets both): the environments above then become `iac-test`, `iac-prod`, and so
+on, and ayasee's secrets and approvals stay apart from the application's. The bootstrap refuses
+to take over an environment that already exists unless you pass `-var
+adopt_existing_environments=true` ([why and how](../../docs/guides/adopt.md#environments-that-already-exist)).
+
 Managing GitHub environments needs administration rights on the repository. Run this root from a
 maintainer's machine, or from a workflow with a GitHub App or fine-grained token that has the
 **Administration** permission, never with `github.token`, and never as an ayasee unit: a unit's

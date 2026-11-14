@@ -18,6 +18,37 @@ gives `test-plan`, matching `prod-plan` (output `pr_plan_environment`). The firs
 those names would make a pull-request environment, which accepts every branch, collide with one
 that has a fixed role.
 
+## Names: `environment_prefix`
+
+`environment_prefix` (default `""`, the names above) is put in front of every environment name, so
+that ayasee's environments never share a name with the `test` and `prod` an application already
+deploys to. With `environment_prefix = "iac-"` the environments are `iac-dev`, `iac-dev-plan`,
+`iac-prod-plan`, `iac-prod`, `iac-prod-breakglass`, `iac-drift-dev`, and so on. Set the same value as
+`environment_prefix:` in `.ayasee.yaml` (`ayasee init --iac-root` writes `iac-` in both). The keys of
+`variables` and `secret_scopes` stay the **unprefixed** names (`prod-plan`, `drift-prod`); the
+module prefixes them, and every output that names an environment (`environments`,
+`pr_plan_environment`, `plan_passphrase_environments`, the `--env` of `secret_commands`) gives the
+GitHub name. `environment_names` maps one to the other, for the identity module and the variables:
+pass `module.environments.environment_names["prod"]` where a GitHub name is needed.
+
+## Existing environments
+
+Creating a GitHub environment is an upsert, so applying this module over an environment that already
+exists silently rewrites its reviewers and deployment branch policy, and its secrets become readable
+by ayasee's jobs. The module therefore reads the repository's environments and **refuses to plan**
+when one it would create already exists and was not created by it, naming that environment. Every
+environment the module creates carries the variable `AYASEE_MANAGED`, which is how it tells its own
+from an application's.
+
+- Normal fix: set `environment_prefix`, so ayasee gets environments of its own.
+- Deliberate adoption: set `adopt_existing_environments = true` and apply once. The environment
+  becomes ayasee's (reviewers, main-only branch policy, the marker); later plans pass without the
+  flag, which you can set back to `false`. Check first that no other workflow needs the environment
+  to stay as it was: `ayasee doctor` lists the workflows that reference an ayasee environment and
+  are not ayasee callers.
+- Upgrading a bootstrap created before the marker existed: its environments have no marker, so run
+  one apply with `adopt_existing_environments = true`.
+
 Every environment sets `prevent_self_review = true` and `can_admins_bypass = false` (D2).
 `prod_reviewers` and `breakglass_reviewers` must be non-empty, and the break-glass set must differ
 from the prod set.
@@ -70,5 +101,5 @@ approved prod plans, which is why it is opt-in. Turning it on replaces a passphr
 turning it off deletes the secret; a plan encrypted with the old passphrase can then no longer be
 applied, so do either when no approved prod plan is waiting.
 
-Outputs: `environments`, the list of environment names, `pr_plan_environment`, `secret_commands`,
+Outputs: `environments`, the list of GitHub environment names, `environment_names`, `pr_plan_environment`, `secret_commands`,
 `pending_secrets` and `plan_passphrase_environments`. Test: `tofu init -backend=false && tofu test`.

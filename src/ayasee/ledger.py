@@ -785,7 +785,11 @@ def _write(args: argparse.Namespace) -> int:
         try:
             gh = GitHub.from_env()
             # ref = the commit sha (not the branch tip); payload.branch = "main". See github.py.
-            dep = gh.create_deployment(rec.repo, rec.sha, rec.sha, rec.env, rec.env == "prod")
+            # the deployment is GitHub-facing (it creates or reuses an environment of that name):
+            # prefix it; the record and the production flag stay keyed by the stage
+            dep = gh.create_deployment(
+                rec.repo, rec.sha, rec.sha, args.environment_prefix + rec.env, rec.env == "prod"
+            )
             gh.create_deployment_status(
                 rec.repo,
                 dep,
@@ -833,6 +837,13 @@ def _positive(text: str) -> int:
     return n
 
 
+def _environment_prefix(text: str) -> str:
+    # the same rule as config.ENVIRONMENT_PREFIX, repeated so that ledger stays import-light
+    if text and not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", text):
+        raise argparse.ArgumentTypeError("not a valid environment_prefix")
+    return text
+
+
 def _setup(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="ledger_command", required=True, metavar="<action>")
 
@@ -852,6 +863,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--breakglass-incident")
     p.add_argument(
         "--mirror-deployments", action="store_true", help="also post a GitHub deployment"
+    )
+    p.add_argument(
+        "--environment-prefix",
+        default="",
+        type=_environment_prefix,
+        help="environment_prefix of .ayasee.yaml: the deployment mirror names <prefix><env>",
     )
     p.add_argument(
         "--allow-ref", action="store_true", help="skip the refs/heads/main check (tests)"

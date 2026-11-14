@@ -1,16 +1,21 @@
 output "environments" {
-  description = "Names of the environments created."
-  value       = sort(keys(github_repository_environment.this))
+  description = "GitHub names of the environments created (environment_prefix included)."
+  value       = sort([for e in github_repository_environment.this : e.environment])
+}
+
+output "environment_names" {
+  description = "Map of the unprefixed environment name (dev, prod-plan, drift-prod, ...) to its GitHub name; the keys are what variables and secret_scopes use."
+  value       = { for k, e in github_repository_environment.this : k => e.environment }
 }
 
 output "pr_plan_environment" {
-  description = "The environment iac-pr plans a pull request in: <first stage>-plan (dev-plan with the default stages)."
-  value       = local.pr_plan_environment
+  description = "The GitHub environment iac-pr plans a pull request in: <environment_prefix><first stage>-plan (dev-plan with the default stages and no prefix)."
+  value       = "${var.environment_prefix}${local.pr_plan_environment}"
 }
 
 output "plan_passphrase_environments" {
-  description = "Environments on which this module set AYASEE_PLAN_PASSPHRASE (empty unless generate_plan_passphrase). Never the value."
-  value       = sort(keys(github_actions_environment_secret.plan_passphrase))
+  description = "GitHub environments on which this module set AYASEE_PLAN_PASSPHRASE (empty unless generate_plan_passphrase). Never the value."
+  value       = sort([for s in github_actions_environment_secret.plan_passphrase : s.environment])
 }
 
 output "pending_secrets" {

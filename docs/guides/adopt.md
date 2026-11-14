@@ -30,10 +30,14 @@ It writes `.ayasee.yaml`, the callers under `.github/workflows/`, `root.hcl`, th
 one empty directory per stage, all pinned to the release commit of `X.Y.Z`: no placeholder to
 search, no `sed`. The callers are `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
 `iac-breakglass.yml`. It can be run again: a file with identical content is skipped, a file that
-differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. Fill
-the Cloudflare zone, account and tunnel IDs it leaves as placeholders. `--ref <SHA>` is accepted
-only for the release commit of `X.Y.Z`; `doctor` (step 5) fails callers pinned to an older
-release. Details:
+differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. With
+`--iac-root` it also sets `environment_prefix: iac-` in `.ayasee.yaml` and in the bootstrap, because a
+repository that holds code already deploys it to environments called `test` and `prod`, and ayasee
+must not share them ([below](#environments-that-already-exist)); `--environment-prefix other-`
+chooses another prefix and `--environment-prefix ''` none (`--upgrade` moves the pin only and never
+touches it). Fill the Cloudflare zone, account and tunnel IDs it leaves as placeholders. `--ref
+<SHA>` is accepted only for the release commit of `X.Y.Z`; `doctor` (step 5) fails callers pinned to
+an older release. Details:
 [start from the example](quickstart.md#1-start-from-the-example).
 
 ## 2. Bootstrap the environments
@@ -49,12 +53,30 @@ tofu apply -var github_owner=my-org -var github_repository=my-estate \
   -var generate_plan_passphrase=true
 ```
 
-It creates the eight environments with their reviewers and `main`-only deployment policies, sets
+It creates the eight environments (with the prefix, if any) with their reviewers and `main`-only deployment policies, sets
 `AYASEE_LEDGER_URL` where the ledger is read or written, and, with `generate_plan_passphrase=true`,
 generates `AYASEE_PLAN_PASSPHRASE` on `prod-plan`, `prod` and `prod-breakglass`. That passphrase is
 then in the bootstrap's state: keep the state private (never commit it), or leave the option off
 and set the passphrase yourself in step 4. See
 [the plan passphrase](../../examples/cloudflare-s3/README.md#3-create-the-environment-secrets).
+
+### Environments that already exist
+
+Creating a GitHub environment is an upsert, so a bootstrap that declared your application's `test`
+or `prod` would silently rewrite their reviewers and branch policy (a deploy from `develop` then fails
+with a branch-policy error that names nothing of ayasee), and ayasee's secrets would sit next to the
+application's. Two things stop that:
+
+- **Use a prefix** (the default with `--iac-root`): `iac-test`, `iac-prod`, ... are ayasee's own.
+  `ayasee doctor` warns when a workflow that is not an ayasee caller names one of ayasee's
+  environments, which is the sign that you need it.
+- **The bootstrap refuses** to plan when an environment it would create already exists and carries no
+  `AYASEE_MANAGED` variable (the marker it sets on its own environments), and the error names the
+  environment. To take one over deliberately (you want ayasee to own it, and nothing else deploys
+  to it), apply once with `-var adopt_existing_environments=true`: the environment gets ayasee's
+  reviewers, its `main`-only branch policy and the marker, and later plans pass without the flag. A
+  bootstrap created before this check existed has no markers either: one apply with the flag writes
+  them.
 
 ## 3. Create the state buckets **(you)**
 

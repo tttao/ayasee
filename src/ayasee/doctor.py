@@ -8,7 +8,11 @@ instead of failed jobs found one at a time:
 - **callers**: the workflows under ``.github/workflows`` that call the ayasee reusable workflows
   pin one full release SHA (no ``OWNER`` placeholder, no all-zero SHA), the ``iac-staged`` and
   ``iac-pr`` callers exist, and the pull-request caller has no ``paths:`` filter;
-- **GitHub** (with ``GITHUB_TOKEN``, read-only): every environment the callers use exists; prod,
+- **environments**: no workflow that is not an ayasee caller names an environment ayasee uses
+  (``environment_prefix`` keeps them apart, issue #31);
+- **GitHub** (with ``GITHUB_TOKEN``, read-only): every environment the callers use exists, under
+  its ``environment_prefix`` name, and carries the ``AYASEE_MANAGED`` marker of the bootstrap (a
+  warning when not); prod,
   prod-breakglass and prod-pr-plan have required reviewers and prevent self-review (unless
   ``solo_mode``); the environments are restricted to ``main`` except the pull-request plan ones;
   each secret a caller passes exists where its jobs read it (provider, plan-key and ``s3://``
@@ -46,6 +50,7 @@ from ayasee.changed import DEFAULT_CONFIG
 from ayasee.config import (
     Config,
     ConfigError,
+    environment_names,
     parse_config_text,
     pr_plan_environment,
     shared_layout_problems,
@@ -284,11 +289,62 @@ def check_pin(report: Report, gh: GitHub, callers: list[Caller]) -> None:
                 )
 
 
+def _environment_literal(env: Any) -> str | None:
+    """The literal name of a job's ``environment:`` (a string or ``{name: ..}``), or None for none
+    or an expression: a name built at run time cannot be read from the file."""
+    name = env.get("name") if isinstance(env, dict) else env
+    if not isinstance(name, str) or "${{" in name:
+        return None
+    return name.strip()
+
+
+def check_shared_environments(report: Report, cfg: Config, root: Path) -> None:
+    """Warn when a job that is not an ayasee call names an environment ayasee derives (#31).
+
+    The adopter's own ``deploy-test`` and ``deploy-prod`` workflows are the case: they share the
+    environment, so its secrets and its approvals mean two things. Only literal names can be seen.
+    """
+    sec = "environments"
+    try:
+        ours = set(environment_names(cfg).values())
+    except ConfigError:
+        return  # the configuration check already reported the stages
+    wf_dir = root / ".github" / "workflows"
+    files = sorted([*wf_dir.glob("*.yml"), *wf_dir.glob("*.yaml")]) if wf_dir.is_dir() else []
+    shared: dict[str, list[str]] = {}
+    for path in files:
+        try:
+            doc = yaml.safe_load(path.read_text())
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue  # reported by find_callers
+        jobs = doc.get("jobs") if isinstance(doc, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        for name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            uses = job.get("uses")
+            if isinstance(uses, str) and _CALLER.match(uses.strip()):
+                continue  # an ayasee caller
+            env = _environment_literal(job.get("environment"))
+            if env is not None and env in ours:
+                shared.setdefault(env, []).append(f"{path.relative_to(root)} (job {name})")
+    for env, where in sorted(shared.items()):
+        report.add(
+            WARN,
+            sec,
+            f"{env} is also used by {', '.join(where)}, which is not an ayasee caller: its "
+            "secrets and approvals would serve both; set environment_prefix (for example 'iac-')"
+            " so that ayasee gets environments of its own",
+        )
+    if ours and not shared and cfg.environment_prefix:
+        report.add(OK, sec, f"no other workflow uses {cfg.environment_prefix}* environments")
+
+
 # ---- GitHub ----------------------------------------------------------------------------------
 
 
-def environments_of(kind: str, cfg: Config) -> list[str]:
-    """The environments whose jobs read secrets and variables, per reusable workflow."""
+def _logical_environments_of(kind: str, cfg: Config) -> list[str]:
     pre = [s for s in cfg.stages if s != "prod"]
     if kind == "iac-staged":
         return [*pre, "prod-plan", "prod"]
@@ -299,10 +355,15 @@ def environments_of(kind: str, cfg: Config) -> list[str]:
     return ["prod-breakglass"]
 
 
-def _plan_key_envs(kind: str) -> list[str]:
-    return {"iac-staged": ["prod-plan", "prod"], "iac-breakglass": ["prod-breakglass"]}.get(
-        kind, []
-    )
+def environments_of(kind: str, cfg: Config) -> list[str]:
+    """The GitHub environments whose jobs read secrets and variables, per reusable workflow:
+    ``environment_prefix`` plus the stage-level name (issue #31)."""
+    return [cfg.environment_prefix + e for e in _logical_environments_of(kind, cfg)]
+
+
+def _plan_key_envs(kind: str, cfg: Config) -> list[str]:
+    logical = {"iac-staged": ["prod-plan", "prod"], "iac-breakglass": ["prod-breakglass"]}
+    return [cfg.environment_prefix + e for e in logical.get(kind, [])]
 
 
 def _reviewers(env: dict[str, Any]) -> tuple[int, bool | None]:
@@ -317,7 +378,13 @@ def _reviewers(env: dict[str, Any]) -> tuple[int, bool | None]:
 
 def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: list[Caller]) -> None:
     sec = f"GitHub ({repo})"
-    pr_envs = {pr_plan_environment(cfg.stages), "prod-pr-plan"}
+    # every decision below is keyed on the GitHub name, prefix included: a literal "prod" here
+    # would check the application's own environment and skip the gate of the prefixed one
+    pfx = cfg.environment_prefix
+    gated = {pfx + e for e in GATED}
+    prod_env = pfx + "prod"
+    pr_plan = pfx + "prod-pr-plan"
+    pr_envs = {pfx + pr_plan_environment(cfg.stages), pr_plan}
     wanted: dict[str, None] = {}  # ordered set
     for kind in ("iac-staged", "iac-pr", *sorted({c.kind for c in callers})):
         for env in environments_of(kind, cfg):
@@ -336,20 +403,20 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
 
     for env in present:
         data = found[env]
-        if env in GATED:
+        if env in gated:
             n, prevent = _reviewers(data)
             if n == 0:
                 report.add(FAIL, sec, f"{env}: no required reviewers")
             elif prevent is False and not cfg.solo_mode:
                 report.add(FAIL, sec, f"{env}: self-review is allowed but solo_mode is off")
-            elif prevent is True and cfg.solo_mode and env == "prod":
+            elif prevent is True and cfg.solo_mode and env == prod_env:
                 report.add(
                     WARN, sec, f"{env}: prevents self-review, so a solo maintainer cannot approve"
                 )
             else:
                 report.add(OK, sec, f"{env}: {n} required reviewer(s)")
         policy = data.get("deployment_branch_policy")
-        if env in pr_envs and env != "prod-pr-plan":
+        if env in pr_envs and env != pr_plan:
             if policy:
                 report.add(FAIL, sec, f"{env}: restricted branches; pull-request plans need any")
             continue
@@ -366,6 +433,7 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
         if names != ["main"]:
             report.add(FAIL, sec, f"{env}: deploys from {names or 'no branch'}, expected [main]")
 
+    _check_ownership(report, gh, repo, present, sec)
     _check_secrets_and_variables(report, gh, repo, cfg, callers, present, sec)
 
     if any(c.secrets and c.secrets.get("ledger-token") for c in callers):
@@ -387,6 +455,34 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
                     "a ledger-token is passed but no ruleset requires pull requests on main: "
                     "the token could push to main",
                 )
+
+
+MARKER = "AYASEE_MANAGED"
+
+
+def _check_ownership(report: Report, gh: GitHub, repo: str, present: list[str], sec: str) -> None:
+    """Which environments the bootstrap did not create: they have no AYASEE_MANAGED variable.
+
+    A warning, because an environment of an older bootstrap has none either; an application's
+    ``test`` or ``prod`` that ayasee shares has none and is the case this exists for (issue #31).
+    """
+    unmarked = []
+    for env in present:
+        try:
+            have = gh.variable_names(repo, env)
+        except GitHubError as exc:
+            report.add(FAIL, sec, f"{env}: cannot read the variables: {exc}")
+            continue
+        if MARKER not in have:
+            unmarked.append(env)
+    if unmarked:
+        report.add(
+            WARN,
+            sec,
+            f"not created by the ayasee bootstrap (no {MARKER} variable): {', '.join(unmarked)}; "
+            "if an application also deploys to one of them, set environment_prefix so that "
+            "ayasee gets environments of its own",
+        )
 
 
 def _check_secrets_and_variables(
@@ -427,7 +523,7 @@ def _check_secrets_and_variables(
                     continue
                 envs = environments_of(c.kind, cfg)
             elif name in key_secrets:
-                envs = _plan_key_envs(c.kind)
+                envs = _plan_key_envs(c.kind, cfg)
             elif name in LEDGER_KEY_SECRETS and c.kind in LEDGER_KEY_KINDS:
                 envs = environments_of(c.kind, cfg)
             elif name in {s for v in PLAN_KEY_SECRETS.values() for s in v}:
@@ -493,7 +589,9 @@ def _check_secrets_and_variables(
             for env in environments_of(kind, cfg):
                 need_var[(env, "AYASEE_LEDGER_URL")] = "no ledger.url in the configuration"
     if "iac-breakglass" in kinds:
-        need_var[("prod-breakglass", "AYASEE_LEDGER_URL")] = "the break-glass run needs it"
+        need_var[(cfg.environment_prefix + "prod-breakglass", "AYASEE_LEDGER_URL")] = (
+            "the break-glass run needs it"
+        )
     if cfg.identity == "oidc":
         for kind in kinds:
             for env in environments_of(kind, cfg):
@@ -502,7 +600,7 @@ def _check_secrets_and_variables(
     key_var = PLAN_KEY_VARIABLES.get(cfg.plan_encryption.key_provider)
     if key_var:
         for kind in kinds:
-            for env in _plan_key_envs(kind):
+            for env in _plan_key_envs(kind, cfg):
                 need_var[(env, key_var)] = f"key_provider {cfg.plan_encryption.key_provider}"
     repo_vars = names(variables, None, gh.variable_names) or set()
     missing = checked = 0
@@ -587,6 +685,8 @@ def run(args: argparse.Namespace) -> Report:
     cfg = check_config(report, args.config_path, root)
     callers = find_callers(report, root)
     check_callers(report, callers)
+    if cfg is not None:
+        check_shared_environments(report, cfg, root)
     repo = args.repo or _origin_repo(root)
     sec = "GitHub"
     if cfg is None:

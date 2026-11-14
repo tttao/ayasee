@@ -177,14 +177,23 @@ def _called_environments() -> set[str]:
                 env = env["name"]
             if env is None:
                 continue
+            # the example sets no environment_prefix, so every prefix expression is empty here
+            env = re.sub(r"\$\{\{ needs\.[a-z-]+\.outputs\.environment-prefix \}\}", "", env)
             if "${{" in env:
                 layout = staged_layout(stages, "")
                 if env == "drift-${{ matrix.env }}":
                     found |= {f"drift-{s}" for s in stages}
                 elif env == "${{ needs.resolve.outputs.pr-plan-environment }}":
                     found.add(pr_plan_environment(stages))
+                elif env in (
+                    "${{ needs.resolve.outputs.env-prod-plan }}",
+                    "${{ needs.resolve.outputs.env-prod }}",
+                ):
+                    found.add(
+                        env.removeprefix("${{ needs.resolve.outputs.env-").removesuffix(" }}")
+                    )
                 else:
-                    m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.(stage-\d+) \}\}", env)
+                    m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.env-(stage-\d+) \}\}", env)
                     assert m, env
                     found |= {layout[m.group(1)]} - {""}
             else:
@@ -470,3 +479,25 @@ def test_azurerm_constraint_is_the_same_in_bootstrap_and_the_workspace_unit():
 def test_cockpit_workflow_run_is_limited_to_main():
     on = yaml.safe_load((EX / ".github" / "workflows" / "cockpit.yml").read_text())[True]
     assert on["workflow_run"]["branches"] == ["main"]
+
+
+@pytest.mark.parametrize("example", ["databricks-azure", "cloudflare-s3"])
+def test_bootstrap_passes_environment_prefix_and_adoption_to_the_module(example):
+    """issue #31: the bootstrap takes the prefix of .ayasee.yaml and refuses foreign ones."""
+    text = (ROOT / "examples" / example / "bootstrap" / "main.tf").read_text()
+    variables = text
+    if example == "databricks-azure":
+        variables += (ROOT / "examples" / example / "bootstrap" / "variables.tf").read_text()
+    assert re.search(r'variable "environment_prefix" \{[^}]*default\s*=\s*""', variables, re.S)
+    assert re.search(
+        r'variable "adopt_existing_environments" \{[^}]*default\s*=\s*false', variables, re.S
+    )
+    assert "environment_prefix   = var.environment_prefix" in text
+    assert "adopt_existing_environments = var.adopt_existing_environments" in text
+
+
+def test_databricks_identities_are_named_after_the_prefixed_environment():
+    """The federated subject is repo:<o>/<r>:environment:<GitHub name>, prefix included."""
+    text = (EX / "bootstrap" / "main.tf").read_text()
+    assert 'environment         = "${var.environment_prefix}${each.key}"' in text
+    assert '"${var.environment_prefix}${e}"' in text  # the environments_match check

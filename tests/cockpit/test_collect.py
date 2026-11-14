@@ -664,3 +664,40 @@ def test_load_repos_config_key(tmp_path):
         f.write_text(f"- {{repo: a/b, ledger: 'file:///l', config: {bad}}}\n")
         with pytest.raises(ReposFileError, match="config"):
             load_repos(f)
+
+
+@respx.mock
+def test_a_waiting_gate_is_found_under_the_prefixed_environment(tmp_path):
+    """issue #31: GitHub names the pending deployment iac-prod; the card is the stage prod."""
+    _mock_basics(
+        config="environment_prefix: iac-\n",
+        waiting=[
+            (
+                {"id": 9, "created_at": "2026-11-06T09:00:00Z", "html_url": "https://r/9"},
+                ["iac-prod"],
+            )
+        ],
+    )
+    for base, head in ((DEV, MAIN), (UAT, DEV), (PROD, UAT)):
+        _compare(base, head, 0)
+    url = _ledger(tmp_path, [_rec("dev", DEV), _rec("uat", UAT), _rec("prod", PROD)])
+    snap = collect([_entry(url)], _gh())
+    envs = {e["env"]: e for e in snap["repos"][0]["envs"]}
+    assert set(envs) == {"dev", "uat", "prod"}  # the stages are not prefixed
+    assert envs["prod"]["gate"]["waiting"] is True
+    assert envs["dev"]["gate"]["waiting"] is False
+    jsonschema.validate(snap, SCHEMA)
+
+
+@respx.mock
+def test_an_unprefixed_gate_is_not_the_prefixed_one(tmp_path):
+    """The application's own prod waiting for its reviewers is not ayasee's prod gate."""
+    _mock_basics(
+        config="environment_prefix: iac-\n",
+        waiting=[({"id": 9, "created_at": "2026-11-06T09:00:00Z", "html_url": "u"}, ["prod"])],
+    )
+    for base, head in ((DEV, MAIN), (UAT, DEV), (PROD, UAT)):
+        _compare(base, head, 0)
+    url = _ledger(tmp_path, [_rec("dev", DEV), _rec("uat", UAT), _rec("prod", PROD)])
+    envs = {e["env"]: e for e in collect([_entry(url)], _gh())["repos"][0]["envs"]}
+    assert envs["prod"]["gate"]["waiting"] is False

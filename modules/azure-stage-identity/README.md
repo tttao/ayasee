@@ -5,6 +5,11 @@ One user-assigned managed identity (`ayasee-<repo>-<environment>`) and one feder
 `<first stage>-plan` (`dev-plan` by default), `drift-<stage>`, each stage, `prod-plan`, `prod`, `prod-breakglass`. Never share an
 identity between environments. Provider: `azurerm`.
 
+`environment` is the name of the GitHub environment **as GitHub knows it**, `environment_prefix` of
+`.ayasee.yaml` included: with `environment_prefix: iac-` pass `iac-prod`, `iac-drift-test`, and so on.
+The subject (`...:environment:iac-prod`) must match the environment the job runs in, or the login
+fails; the identity name carries the prefix too.
+
 Outputs: `client_id` (set it as `AZURE_CLIENT_ID` on the environment), `principal_id`, `subject`.
 
 ## Subject

@@ -13,6 +13,10 @@
 # rewrites them at release. The `--local` (./actions) form is not supported for this workflow: the
 # drift job checks out the live SHA after installing ayasee, and that checkout would replace
 # ./actions. This file is not callable before the release rewrite.
+#
+# Environment names: every GitHub environment below is `environment_prefix` of .ayasee.yaml plus the
+# name written here (dev, prod-plan, prod, drift-<stage>, ...), named by an output of the first job.
+# No job names an environment by a literal; docs/reference/ayasee-yaml.md#environment-names.
 name: iac-nightly
 
 on:
@@ -106,6 +110,7 @@ jobs:
       engine: ${{ steps.resolve.outputs.engine }}
       identity: ${{ steps.resolve.outputs.identity }}
       provider-env-names: ${{ steps.resolve.outputs.provider-env-names }}
+      environment-prefix: ${{ steps.resolve.outputs.environment-prefix }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -157,6 +162,7 @@ jobs:
           {
             # every configured stage; prod-plan is a step of the staged run, not an environment
             echo "envs=$(jq -c '[.stages[] | select(. != "prod-plan")]' "$cfg")"
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
             echo "ledger-url=$(jq -r '.ledger.url // ""' "$cfg")"
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
@@ -170,7 +176,8 @@ jobs:
     needs: resolve
     if: ${{ github.ref == 'refs/heads/main' && needs.resolve.result == 'success' }}
     runs-on: ubuntu-latest
-    environment: drift-${{ matrix.env }}
+    # GitHub environment: environment_prefix + drift-<stage>; the stage itself stays the ledger key
+    environment: ${{ needs.resolve.outputs.environment-prefix }}drift-${{ matrix.env }}
     strategy:
       fail-fast: false
       matrix:
