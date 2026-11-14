@@ -164,7 +164,9 @@ NEW = "e" * 40
 
 
 def _upgrade(tmp_path, *args, ref=NEW):
-    return cli.main(["init", "--upgrade", "--dir", str(tmp_path), "--ref", ref, *args])
+    return cli.main(
+        ["init", "--upgrade", "--dir", str(tmp_path), "--ref", ref, "--unverified-ref", *args]
+    )
 
 
 def test_upgrade_moves_only_the_pin(tmp_path, capsys):
@@ -227,6 +229,24 @@ def test_upgrade_does_not_write_through_a_symlinked_directory(tmp_path, capsys):
     assert _upgrade(repo) == 1
     assert "outside the repository" in capsys.readouterr().err
     assert (outside / "workflows" / "iac-pr.yml").read_text() == text
+
+
+@respx.mock
+def test_upgrade_verifies_the_new_pin(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    _pin("0.0.1")  # NEW is the release commit of another version than these templates
+    rc = cli.main(["init", "--upgrade", "--dir", str(tmp_path), "--ref", SHA])
+    err = capsys.readouterr().err
+    assert rc == 1 and "release commit of 0.0.1" in err
+    assert SHA in (tmp_path / ".github/workflows/iac-pr.yml").read_text()  # untouched
+
+
+@respx.mock
+def test_upgrade_to_a_verified_release_commit(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--ref", "a" * 40, "--unverified-ref") == 0
+    _pin(scaffold.__version__)
+    assert cli.main(["init", "--upgrade", "--dir", str(tmp_path), "--ref", SHA]) == 0
+    assert f"@{SHA} #" in (tmp_path / ".github/workflows/iac-pr.yml").read_text()
 
 
 def test_upgrade_without_callers_refuses(tmp_path, capsys):
@@ -378,7 +398,7 @@ def test_ref_of_this_versions_release_commit_is_accepted(tmp_path):
     _pin(scaffold.__version__)
     rc = cli.main(["init", "--dir", str(tmp_path), "--profile", "cloudflare-s3", "--ref", SHA])
     assert rc == 0
-    assert f"@{SHA}" in (tmp_path / ".github/workflows/pr.yml").read_text()
+    assert f"@{SHA}" in (tmp_path / ".github/workflows/iac-pr.yml").read_text()
 
 
 @respx.mock
