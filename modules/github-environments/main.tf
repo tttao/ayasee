@@ -42,8 +42,9 @@ locals {
 
   main_only = { for k, v in local.environments : k => v if !contains(keys(local.pr_plan), k) }
 
-  # The environments that plan or apply prod hold the plan key: the pbkdf2 passphrase or the
-  # aws_kms key pair (plan_encryption.key_provider; ayasee doctor checks the same three).
+  # The environments that plan or apply prod hold the plan key: the pbkdf2 passphrase, the
+  # aws_kms key pair, the gcp_kms key file or the openbao token (plan_encryption.key_provider;
+  # ayasee doctor checks the same three).
   key_environments = ["prod-plan", "prod", "prod-breakglass"]
 
   # Plan-key secrets this module knows but does not create, with the value each needs.
@@ -55,6 +56,12 @@ locals {
     aws_kms = {
       AYASEE_KMS_ACCESS_KEY_ID     = "access key id of an IAM user whose only permissions are kms:GenerateDataKey and kms:Decrypt on the AYASEE_KMS_KEY_ID key"
       AYASEE_KMS_SECRET_ACCESS_KEY = "the secret access key of that IAM user"
+    }
+    gcp_kms = {
+      AYASEE_GCP_KMS_CREDENTIALS = "JSON key file of a service account whose only role is roles/cloudkms.cryptoKeyEncrypterDecrypter on the AYASEE_GCP_KMS_KEY_NAME key (gh secret set ... < key.json)"
+    }
+    openbao = {
+      AYASEE_OPENBAO_TOKEN = "OpenBao token whose only policy allows update on <transit mount>/datakey/plaintext/<key> and <transit mount>/decrypt/<key> of the AYASEE_OPENBAO_KEY_URL key, with a TTL longer than a plan waits for approval"
     }
   }
 

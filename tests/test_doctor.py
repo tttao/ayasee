@@ -480,3 +480,26 @@ def test_an_s3_ledger_url_needs_the_ledger_key(estate, capsys):
             for x in fails
         ), fails
     assert not any("pr.yml: ledger.url" in x for x in fails)
+
+
+def test_the_bootstrap_module_lists_the_plan_key_secrets_doctor_checks():
+    """issue #10: key_secret_scopes of modules/github-environments, per key provider, names the
+    same secrets as PLAN_KEY_SECRETS, and its key_provider validation the same providers."""
+    import re
+
+    from ayasee.config import KEY_PROVIDERS
+
+    module = Path(__file__).resolve().parents[1] / "modules" / "github-environments"
+    main = (module / "main.tf").read_text()
+    block = main[main.index("key_secret_scopes = {") : main.index("pending_secrets")]
+    found = {}
+    for provider in KEY_PROVIDERS:
+        m = re.search(
+            rf"^    {provider} = \{{\}}$|^    {provider} = (.*?)^    \}}", block, re.M | re.S
+        )
+        assert m, provider
+        found[provider] = set(re.findall(r"^\s+(AYASEE_[A-Z_]+)\s+=", m.group(0), re.M))
+    assert found == {p: set(doctor.PLAN_KEY_SECRETS.get(p, ())) for p in KEY_PROVIDERS}
+    variables = (module / "variables.tf").read_text()
+    listed = ", ".join(f'"{p}"' for p in KEY_PROVIDERS)
+    assert f"contains([{listed}], var.key_provider)" in variables

@@ -56,7 +56,8 @@ comment and never a value (print it with `tofu output -raw`; run the lines one a
   `identity: secrets`); an environment the module does not create fails the plan;
 - the plan-key secrets of `prod-plan`, `prod` and `prod-breakglass`, from `key_provider`
   (`plan_encryption.key_provider`): `AYASEE_PLAN_PASSPHRASE` for `pbkdf2`, `AYASEE_KMS_ACCESS_KEY_ID`
-  and `AYASEE_KMS_SECRET_ACCESS_KEY` for `aws_kms`, none for `azure_vault` (the default).
+  and `AYASEE_KMS_SECRET_ACCESS_KEY` for `aws_kms`, `AYASEE_GCP_KMS_CREDENTIALS` for `gcp_kms`,
+  `AYASEE_OPENBAO_TOKEN` for `openbao`, none for `azure_vault` (the default).
 
 These are the names `ayasee doctor` checks. `owner` adds `--repo <owner>/<repository>` to each
 command. `pending_secrets` is the same list as data.
