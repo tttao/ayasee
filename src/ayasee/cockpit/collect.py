@@ -179,20 +179,26 @@ def _drift(gh: GitHub, repo: str, env: str) -> dict[str, Any]:
     }
 
 
-def _labels(gh: GitHub, entry: RepoEntry, main: str | None) -> list[dict[str, str]] | None:
-    """The repository's opt-ins that weaken a compliant default; None when unknown."""
+def _read_config(gh: GitHub, entry: RepoEntry, main: str | None) -> config.Config | None:
+    """The repository's configuration at ``main`` (the defaults without a file); None when
+    unknown: no contents permission, not a file, or a file that does not load."""
     if main is None:
         return None
     try:
         text = gh.get_file(entry.repo, entry.config, main)
     except GitHubError:
-        return None  # no contents permission, or not a file: unknown, not a repo error
+        return None
     if text is None:
-        return []  # no configuration file: the compliant defaults
+        return config.Config()
     try:
-        return config.label_keys(config.parse_config_text(text))
+        return config.parse_config_text(text)
     except config.ConfigError:
         return None
+
+
+def _labels(cfg: config.Config | None) -> list[dict[str, str]] | None:
+    """The repository's opt-ins that weaken a compliant default; None when unknown."""
+    return None if cfg is None else config.label_keys(cfg)
 
 
 def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str, Any]:
@@ -210,6 +216,10 @@ def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str,
         "high": counts["high"] if counts else None,
         "url": f"{gh.web_url}/{repo}/security/code-scanning" if counts else None,
     }
+    cfg = _read_config(gh, entry, main)
+    # a pending gate is named by its GitHub environment (environment_prefix + stage, issue #31);
+    # the ledger, the drift issues and the stages stay keyed by the stage
+    prefix = cfg.environment_prefix if cfg is not None else ""
     envs: list[dict[str, Any]] = []
     prev_sha: str | None = main
     for name in entry.stages:
@@ -227,8 +237,8 @@ def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str,
         prev_sha = live
         if gates is None:
             e["gate"] = {"waiting": None, "since": None, "run_url": None}
-        elif name in gates:
-            e["gate"] = {"waiting": True, **gates[name]}
+        elif prefix + name in gates:
+            e["gate"] = {"waiting": True, **gates[prefix + name]}
         e["drift"] = _drift(gh, repo, name)
         e["health"] = {
             "last_result": _last_result(rec),
@@ -236,7 +246,7 @@ def _collect_repo(entry: RepoEntry, gh: GitHub, store: LedgerStore) -> dict[str,
         }
         envs.append(e)
     out: dict[str, Any] = {"repo": repo, "main_sha": main, "findings": findings, "envs": envs}
-    labels = _labels(gh, entry, main)
+    labels = _labels(cfg)
     if labels is not None:
         out["labels"] = labels
     return out

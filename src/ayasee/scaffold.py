@@ -33,7 +33,7 @@ from pathlib import Path
 import yaml
 
 from ayasee import __version__, cli
-from ayasee.config import ConfigError, parse_config_text, staged_layout
+from ayasee.config import ENVIRONMENT_PREFIX, ConfigError, parse_config_text, staged_layout
 from ayasee.github import DEFAULT_API_URL, GitHub, GitHubError
 from ayasee.maintip import _repo
 from ayasee.releasepin import NotARelease, release_version
@@ -47,6 +47,14 @@ _TF_SOURCE = re.compile(r'source(\s*)= "\.\./\.\./\.\./modules/([a-z0-9-]+)"')
 _USES = re.compile(r"OWNER/ayasee/(\.github/workflows/[a-z-]+\.yml)@0{40}( # [^\n]*)?")
 _PUSH_MAIN = "  push:\n    branches: [main]\n"
 STAGED_PATHS_CALLERS = ".github/workflows/iac-*.yml"
+_TF_PREFIX = re.compile(r'(variable "environment_prefix" \{[^}]*?default\s*=\s*)""')
+# in a monorepo the repository already deploys applications, whose environments are called test
+# and prod: ayasee's get a prefix of their own by default (issue #31)
+MONOREPO_PREFIX = "iac-"
+_PREFIX_NOTE = (
+    "\n\n# The GitHub environments are <prefix><stage>, so that ayasee's never share a name with\n"
+    "# an application's own test or prod. Keep it equal to environment_prefix in the bootstrap.\n"
+)
 
 
 class InitError(Exception):
@@ -143,6 +151,7 @@ def render(
     source: str,
     sha: str,
     label: str,
+    environment_prefix: str = "",
 ) -> dict[str, str]:
     """Repository-relative path -> content of every file to write."""
     src = templates / profile.name
@@ -156,6 +165,8 @@ def render(
         root_keys = f"iac_root: {iac_root}\n{root_keys}"
     cfg = _sub_once(re.compile(r"^units_root: stages$", re.M), root_keys, cfg, "units_root")
     cfg = re.sub(r"^shared_units: \[[^\]]*\]$", "shared_units: []", cfg, flags=re.M)
+    if environment_prefix:
+        cfg = cfg.rstrip("\n") + _PREFIX_NOTE + f"environment_prefix: {environment_prefix}\n"
     files[".ayasee.yaml"] = cfg
 
     for name in profile.workflows:
@@ -189,6 +200,8 @@ def render(
                 raise InitError("template: bootstrap: a module source was not pinned")
             # no shared unit yet: no read-only prod plan environment for pull requests
             text = text.replace("shared_units_pr_plan = true", "shared_units_pr_plan = false")
+        if environment_prefix:
+            text = _TF_PREFIX.sub(f'\\g<1>"{environment_prefix}"', text)
         files[f"{base}bootstrap/{name}"] = text
     for stage in stages:
         files[f"{units_root}/{stage}/.gitkeep"] = ""
@@ -340,6 +353,7 @@ def _upgrade(args: argparse.Namespace, dest: Path) -> int:
         ("--profile", args.profile),
         ("--stages", args.stages),
         ("--iac-root", args.iac_root),
+        ("--environment-prefix", args.environment_prefix),
         ("--force", args.force or None),
     ):
         if value:
@@ -390,6 +404,9 @@ def _run(args: argparse.Namespace) -> int:
         )
         iac_root = posixpath.normpath((args.iac_root or ".").strip("/") or ".")
         _check_args(profile, stages, iac_root)
+        prefix = args.environment_prefix
+        if prefix is None:
+            prefix = MONOREPO_PREFIX if iac_root != "." else ""
         templates, _ = templates_root()
         sha, label = _resolve_pin(args)
         files = render(
@@ -400,6 +417,7 @@ def _run(args: argparse.Namespace) -> int:
             source=args.source,
             sha=sha,
             label=label,
+            environment_prefix=prefix,
         )
         parse_config_text(files[".ayasee.yaml"])  # the written configuration must load
         todo, same, conflicts = plan_writes(dest, files)
@@ -435,6 +453,14 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prefix(value: str) -> str:
+    if value and not ENVIRONMENT_PREFIX.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "use at most 32 characters of [a-z0-9_-], starting with a letter or digit"
+        )
+    return value
+
+
 def _sha(value: str) -> str:
     if not _SHA.match(value):
         raise argparse.ArgumentTypeError("expected a full 40-character commit SHA")
@@ -448,6 +474,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--iac-root", help="directory of the estate in a monorepo (default: the root, .)"
+    )
+    parser.add_argument(
+        "--environment-prefix",
+        type=_prefix,
+        help="prefix of every GitHub environment (default: 'iac-' with --iac-root, none "
+        "otherwise; '' clears it)",
     )
     parser.add_argument("--dir", default=".", help="the repository checkout (default: .)")
     parser.add_argument(

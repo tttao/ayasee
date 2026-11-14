@@ -1,6 +1,7 @@
 """`ayasee init` (issue #11): a profile scaffold pinned to one release commit, no placeholder."""
 
 import base64
+import re
 import tomllib
 from pathlib import Path
 
@@ -478,3 +479,83 @@ def test_the_wheel_packages_exactly_the_files_the_profiles_read():
     assert templates == wanted
     for src in wanted:
         assert (ROOT / src).is_file(), src
+
+
+# ---- environment_prefix (issue #31) ------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_a_monorepo_gets_the_iac_prefix_in_the_config_and_the_bootstrap(tmp_path, profile):
+    assert _init(tmp_path, "--profile", profile, "--iac-root", "infra") == 0
+    cfg = parse_config_text((tmp_path / ".ayasee.yaml").read_text())
+    assert cfg.environment_prefix == "iac-"
+    boot = "".join(p.read_text() for p in (tmp_path / "infra/bootstrap").glob("*.tf"))
+    assert re.search(r'variable "environment_prefix" \{[^}]*default\s*=\s*"iac-"', boot, re.S)
+    assert re.search(
+        r'variable "adopt_existing_environments" \{[^}]*default\s*=\s*false', boot, re.S
+    )
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_a_repository_root_scaffold_keeps_todays_names(tmp_path, profile):
+    assert _init(tmp_path, "--profile", profile) == 0
+    assert "environment_prefix" not in (tmp_path / ".ayasee.yaml").read_text()
+    assert parse_config_text((tmp_path / ".ayasee.yaml").read_text()).environment_prefix == ""
+    boot = "".join(p.read_text() for p in (tmp_path / "bootstrap").glob("*.tf"))
+    assert re.search(r'variable "environment_prefix" \{[^}]*default\s*=\s*""', boot, re.S)
+
+
+def test_the_flag_sets_and_clears_the_prefix(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--environment-prefix", "ayasee_") == 0
+    assert (
+        parse_config_text((tmp_path / ".ayasee.yaml").read_text()).environment_prefix == "ayasee_"
+    )
+    other = tmp_path / "other"
+    assert (
+        _init(other, "--profile", "cloudflare-s3", "--iac-root", "infra", "--environment-prefix=")
+        == 0
+    )
+    assert "environment_prefix" not in (other / ".ayasee.yaml").read_text()
+    boot = (other / "infra/bootstrap/main.tf").read_text()
+    assert re.search(r'variable "environment_prefix" \{[^}]*default\s*=\s*""', boot, re.S)
+
+
+def test_a_bad_prefix_is_refused_and_nothing_is_written(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        _init(tmp_path, "--profile", "cloudflare-s3", "--environment-prefix", "Bad Prefix")
+    assert not (tmp_path / ".ayasee.yaml").exists()
+
+
+def test_the_prefixed_scaffold_passes_doctor_offline(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra") == 0
+    capsys.readouterr()
+    (tmp_path / "infra/stages/test").mkdir(parents=True, exist_ok=True)
+    assert cli.main(["doctor", "--root", str(tmp_path), "--repo", "acme/estate"]) in (0, 2)
+    assert "no other workflow uses iac-* environments" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_the_prefixed_bootstrap_validates_and_plans_prefixed_environment_names(tmp_path, profile):
+    """Scaffold with the default monorepo prefix, point the modules at this checkout, and let tofu
+    validate the result (the module sources are pinned to a release in the real output)."""
+    import shutil
+    import subprocess
+
+    tofu = shutil.which("tofu")
+    if not tofu:
+        pytest.skip("tofu is not installed")
+    assert _init(tmp_path, "--profile", profile, "--iac-root", "infra") == 0
+    boot = tmp_path / "infra" / "bootstrap"
+    main = boot / "main.tf"
+    text = re.sub(
+        r"git::https://github\.com/tttao/ayasee\.git//modules/([a-z-]+)\?ref=[0-9a-f]{40}",
+        lambda m: str(ROOT / "modules" / m.group(1)),
+        main.read_text(),
+    )
+    main.write_text(text)
+    for cmd in ([tofu, "init", "-backend=false", "-input=false"], [tofu, "validate"]):
+        done = subprocess.run(cmd, cwd=boot, capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+    assert 'default     = "iac-"' in "".join(p.read_text() for p in boot.glob("*.tf"))
