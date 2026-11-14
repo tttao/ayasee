@@ -599,3 +599,161 @@ def test_the_bootstrap_module_lists_the_plan_key_secrets_doctor_checks():
     variables = (module / "variables.tf").read_text()
     listed = ", ".join(f'"{p}"' for p in KEY_PROVIDERS)
     assert f"contains([{listed}], var.key_provider)" in variables
+
+
+# ---- environment_prefix (issue #31) ------------------------------------------------------
+
+
+def _prefixed(state, prefix):
+    """The same GitHub side under prefixed names, every environment marked as the bootstrap's."""
+    out = dict(state)
+    for key in ("envs", "policies", "secrets", "variables"):
+        out[key] = {prefix + k: v for k, v in state[key].items()}
+    for name, env in out["envs"].items():
+        env["name"] = name
+    out["variables"] = {k: {*v, "AYASEE_MANAGED"} for k, v in out["variables"].items()}
+    return out
+
+
+def _with_prefix(estate, prefix="iac-"):
+    cfg = estate / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text() + f"\nenvironment_prefix: {prefix}\n")
+
+
+@respx.mock
+def test_a_prefixed_repository_is_checked_under_the_prefixed_names(estate, capsys):
+    _with_prefix(estate)
+    _mock(_prefixed(_good_state(), "iac-"))
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    assert "environments present: iac-test, iac-prod-plan, iac-prod, iac-test-plan" in out
+    assert "not created by the ayasee bootstrap" not in out  # every environment is marked
+    assert "variable(s) in place" in out and "environment secret(s) in place" in out
+
+
+@respx.mock
+def test_the_application_environments_do_not_satisfy_a_prefixed_repository(estate, capsys):
+    """With a prefix, the unprefixed `prod` (with reviewers) is not iac-prod: it is missing."""
+    _with_prefix(estate)
+    _mock(_good_state())  # test, prod, prod-breakglass ... exist, no iac- ones
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    assert "environment iac-prod is missing (run the bootstrap)" in fails
+    assert "environment iac-prod-breakglass is missing (run the bootstrap)" in fails
+    assert not any(f.startswith("prod:") for f in fails)  # the unprefixed ones are not judged
+
+
+@respx.mock
+@pytest.mark.parametrize("gated", ["prod", "prod-breakglass", "prod-pr-plan"])
+def test_the_reviewer_checks_follow_the_prefix(estate, capsys, gated):
+    """The gate keyed on a literal name would pass iac-prod with no reviewers: it must not."""
+    _with_prefix(estate)
+    state = _prefixed(_good_state(), "iac-")
+    state["envs"][f"iac-{gated}"]["protection_rules"] = []
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    assert f"iac-{gated}: no required reviewers" in _fails(out)
+
+
+@respx.mock
+def test_the_main_only_and_pr_plan_rules_follow_the_prefix(estate, capsys):
+    _with_prefix(estate)
+    state = _prefixed(_good_state(), "iac-")
+    state["envs"]["iac-prod-plan"]["deployment_branch_policy"] = None
+    state["envs"]["iac-test-plan"]["deployment_branch_policy"] = {"custom_branch_policies": True}
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    assert "iac-prod-plan: not restricted to main (deployment branch policy)" in fails
+    assert "iac-test-plan: restricted branches; pull-request plans need any" in fails
+
+
+@respx.mock
+def test_a_solo_maintainer_prefixed_prod_that_prevents_self_review_warns(estate, capsys):
+    _with_prefix(estate)
+    cfg = estate / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text() + "solo_mode: true\n")
+    _mock(_prefixed(_good_state(), "iac-"))
+    _, out = _doctor(estate, capsys)
+    assert "iac-prod: prevents self-review, so a solo maintainer cannot approve" in out
+
+
+@respx.mock
+def test_secrets_and_variables_are_looked_up_on_the_prefixed_environment(estate, capsys):
+    _with_prefix(estate)
+    state = _prefixed(_good_state(), "iac-")
+    state["secrets"]["iac-prod"].discard("CLOUDFLARE_API_TOKEN")
+    state["variables"]["iac-prod-breakglass"].discard("AYASEE_LEDGER_URL")
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    fails = _fails(out)
+    assert any(f.startswith("iac-prod: secret CLOUDFLARE_API_TOKEN is missing") for f in fails)
+    assert any(f.startswith("iac-prod-breakglass: variable AYASEE_LEDGER_URL") for f in fails)
+
+
+@respx.mock
+def test_environments_without_the_marker_are_listed_once(estate, capsys):
+    state = _good_state()
+    state["variables"]["prod"].add("AYASEE_MANAGED")
+    _mock(state)
+    _, out = _doctor(estate, capsys)
+    line = next(ln for ln in out.splitlines() if "not created by the ayasee bootstrap" in ln)
+    assert line.strip().startswith("warn")
+    assert "AYASEE_MANAGED" in line and " prod," not in line and "test-plan" in line
+    assert out.count("not created by the ayasee bootstrap") == 1
+
+
+def _application_workflow(estate, name, env, job="deploy"):
+    (estate / ".github" / "workflows" / name).write_text(
+        f"name: {name}\non: push\njobs:\n  {job}:\n    runs-on: ubuntu-latest\n"
+        f"    environment: {env}\n    steps:\n      - run: echo deploy\n"
+    )
+
+
+def test_a_workflow_that_is_not_an_ayasee_caller_using_an_ayasee_environment_warns(estate, capsys):
+    _application_workflow(estate, "deploy-test.yml", "test")
+    _application_workflow(estate, "deploy-prod.yml", "{name: prod, url: https://x.example}")
+    _application_workflow(estate, "deploy-other.yml", "staging")
+    _application_workflow(estate, "deploy-dynamic.yml", "${{ inputs.target }}")
+    rc, out = _doctor(estate, capsys)
+    warns = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("warn")]
+    shared = [w for w in warns if "is also used by" in w]
+    assert len(shared) == 2, out
+    assert any(
+        w.startswith("warn  test is also used by .github/workflows/deploy-test.yml (job deploy)")
+        for w in shared
+    )
+    assert any(".github/workflows/deploy-prod.yml" in w for w in shared)
+    assert all("environment_prefix" in w for w in shared)
+    assert "staging" not in out and "deploy-dynamic" not in out
+
+
+def test_the_shared_environment_check_needs_no_token(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _application_workflow(estate, "deploy-test.yml", "test")
+    _, out = _doctor(estate, capsys)
+    assert "test is also used by .github/workflows/deploy-test.yml" in out
+
+
+def test_a_prefix_ends_the_sharing(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _application_workflow(estate, "deploy-test.yml", "test")
+    _application_workflow(estate, "deploy-prod.yml", "prod")
+    _with_prefix(estate)
+    _, out = _doctor(estate, capsys)
+    assert "is also used by" not in out
+    assert "no other workflow uses iac-* environments" in out
+
+
+def test_a_workflow_using_the_prefixed_environment_still_warns(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _with_prefix(estate)
+    _application_workflow(estate, "oops.yml", "iac-prod")
+    _, out = _doctor(estate, capsys)
+    assert "iac-prod is also used by .github/workflows/oops.yml (job deploy)" in out
+
+
+def test_the_ayasee_callers_themselves_are_not_reported(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _, out = _doctor(estate, capsys)
+    assert "is also used by" not in out

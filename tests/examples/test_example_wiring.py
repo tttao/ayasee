@@ -483,7 +483,7 @@ def test_cockpit_workflow_run_is_limited_to_main():
 
 @pytest.mark.parametrize("example", ["databricks-azure", "cloudflare-s3"])
 def test_bootstrap_passes_environment_prefix_and_adoption_to_the_module(example):
-    """issue #31: the bootstrap takes the prefix of .ayasee.yaml and refuses foreign environments."""
+    """issue #31: the bootstrap takes the prefix of .ayasee.yaml and refuses foreign ones."""
     text = (ROOT / "examples" / example / "bootstrap" / "main.tf").read_text()
     variables = text
     if example == "databricks-azure":
