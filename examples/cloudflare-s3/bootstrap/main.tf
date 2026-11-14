@@ -45,6 +45,18 @@ variable "generate_plan_passphrase" {
   default     = false
 }
 
+variable "environment_prefix" {
+  description = "environment_prefix of .ayasee.yaml; put in front of every GitHub environment name, for example \"iac-\" when the repository's application deploys already use test and prod. Keep it equal to the value in .ayasee.yaml."
+  type        = string
+  default     = ""
+}
+
+variable "adopt_existing_environments" {
+  description = "Take over GitHub environments that already exist and were not created by this bootstrap. Leave false: the plan then refuses, naming them, instead of rewriting their reviewers and branch policy."
+  type        = bool
+  default     = false
+}
+
 provider "github" {
   owner = var.github_owner
 }
@@ -96,6 +108,9 @@ module "environments" {
   prod_reviewers       = var.prod_reviewers
   breakglass_reviewers = var.breakglass_reviewers
   shared_units_pr_plan = local.shared_units_pr_plan
+  environment_prefix   = var.environment_prefix
+
+  adopt_existing_environments = var.adopt_existing_environments
 
   variables = { for env in local.ledger_envs : env => { AYASEE_LEDGER_URL = local.ledger_url } }
 

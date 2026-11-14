@@ -9,7 +9,7 @@ variable "repository" {
 }
 
 variable "environment" {
-  description = "GitHub environment the identity is for (<first stage>-plan such as dev-plan, drift-prod, prod-plan, prod, prod-breakglass, ...)."
+  description = "GitHub environment the identity is for, as GitHub names it, environment_prefix included (<prefix><first stage>-plan such as dev-plan, <prefix>drift-prod, <prefix>prod-plan, <prefix>prod, <prefix>prod-breakglass, ...)."
   type        = string
 }
 

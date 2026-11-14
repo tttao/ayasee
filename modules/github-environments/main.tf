@@ -14,6 +14,11 @@ terraform {
 }
 
 locals {
+  # Everything below is keyed by the logical environment name (dev, prod-plan, drift-prod, ...), the
+  # name the stages, the secrets and the variables of this module use. The GitHub environment is
+  # var.environment_prefix plus that name (issue #31); local.github_name maps one to the other.
+  github_name = { for k, _ in local.environments : k => "${var.environment_prefix}${k}" }
+
   # The environment iac-pr plans a pull request in: <first stage>-plan (dev-plan with the default
   # stages, test-plan with [test, prod]), the name `ayasee config pr-plan-environment` prints.
   pr_plan_environment = "${var.stages[0]}-plan"
@@ -89,7 +94,7 @@ locals {
   secret_commands = join("", [
     for k, s in local.pending_secrets : format(
       "gh secret set %s%s%s   # %s\n",
-      s.name, s.environment == "" ? "" : " --env ${s.environment}", local.repo_flag, s.scope,
+      s.name, s.environment == "" ? "" : " --env ${var.environment_prefix}${s.environment}", local.repo_flag, s.scope,
     )
   ])
 
@@ -104,11 +109,51 @@ locals {
   ]...)
 }
 
+# Environments that already exist in the repository, whoever created them. Creating a GitHub
+# environment is an upsert: without the check below, applying this module would silently rewrite the
+# reviewers and the deployment branch policy of an application's own `test` or `prod`.
+data "github_repository_environments" "existing" {
+  repository = var.repository
+}
+
+locals {
+  existing_environments = toset([for e in data.github_repository_environments.existing.environments : lower(e.name)])
+
+  # the environments this module would create that already exist
+  colliding = { for k, n in local.github_name : k => n if contains(local.existing_environments, lower(n)) }
+}
+
+# What tells an environment of ayasee from an application's: the marker variable this module sets
+# on every environment it creates (below). Only the environments that already exist are read.
+data "github_actions_environment_variables" "marker" {
+  for_each = local.colliding
+
+  name        = var.repository
+  environment = each.value
+}
+
+locals {
+  # existing environments without the marker: not created by this module
+  foreign = toset([
+    for k, n in local.colliding : n
+    if !contains([for v in data.github_actions_environment_variables.marker[k].variables : v.name], local.marker_name)
+  ])
+  marker_name = "AYASEE_MANAGED"
+}
+
 resource "github_repository_environment" "this" {
   for_each = local.environments
 
   repository  = var.repository
-  environment = each.key
+  environment = local.github_name[each.key]
+
+  lifecycle {
+    precondition {
+      condition     = var.adopt_existing_environments || !contains(local.foreign, local.github_name[each.key])
+      error_message = "The GitHub environment \"${local.github_name[each.key]}\" already exists and was not created by ayasee (it has no ${local.marker_name} variable). Applying would overwrite its reviewers and deployment branch policy, and its secrets would be shared with ayasee's jobs. Set environment_prefix (for example \"iac-\", and the same in .ayasee.yaml) so ayasee gets environments of its own, or, to take this one over deliberately, set adopt_existing_environments = true. `ayasee doctor` lists the workflows that reference it."
+    }
+  }
+
   # solo_mode (NON-COMPLIANT): the one maintainer approves their own prod change
   prevent_self_review = !(var.solo_mode && contains(local.self_reviewed, each.key))
   can_admins_bypass   = false
@@ -136,6 +181,17 @@ resource "github_repository_environment_deployment_policy" "main" {
   repository     = var.repository
   environment    = github_repository_environment.this[each.key].environment
   branch_pattern = "main"
+}
+
+# Marks an environment as created by this module: the check above refuses an existing environment
+# without it, and `ayasee doctor` reads it. A configuration variable, not a secret.
+resource "github_actions_environment_variable" "marker" {
+  for_each = local.environments
+
+  repository    = var.repository
+  environment   = github_repository_environment.this[each.key].environment
+  variable_name = local.marker_name
+  value         = "true"
 }
 
 resource "github_actions_environment_variable" "this" {

@@ -29,8 +29,10 @@ provider "github" {
 }
 
 locals {
-  # Every environment the ayasee workflows use, one identity each (never shared). A test keeps
-  # this list equal to the environments of the called workflows.
+  # Every environment the ayasee workflows use, one identity each (never shared), by the name the
+  # stages give it; the GitHub environment is var.environment_prefix plus that name (the same
+  # environment_prefix as .ayasee.yaml). A test keeps this list equal to the environments of the
+  # called workflows.
   stages = ["dev", "uat", "prod"]
   # pull requests plan the first stage in <first stage>-plan (dev-plan here)
   pr_plan_environment = "${local.stages[0]}-plan"
@@ -67,7 +69,7 @@ module "identity" {
   for_each = toset(local.environments)
 
   repository          = "${var.github_owner}/${var.github_repository}"
-  environment         = each.key
+  environment         = "${var.environment_prefix}${each.key}" # the GitHub environment, prefix included
   resource_group_name = var.resource_group_name
   location            = var.location
 }
@@ -80,6 +82,9 @@ module "environments" {
   prod_reviewers       = var.prod_reviewers
   breakglass_reviewers = var.breakglass_reviewers
   variables            = local.variables
+  environment_prefix   = var.environment_prefix
+
+  adopt_existing_environments = var.adopt_existing_environments
 
   owner        = var.github_owner
   key_provider = local.key_provider
@@ -92,7 +97,7 @@ module "environments" {
 # Fails the plan if the module and the identity list above ever disagree.
 check "environments_match" {
   assert {
-    condition     = toset(module.environments.environments) == toset(local.environments)
+    condition     = toset(module.environments.environments) == toset([for e in local.environments : "${var.environment_prefix}${e}"])
     error_message = "github-environments creates a different set of environments than the identities cover."
   }
 }

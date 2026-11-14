@@ -55,3 +55,15 @@ variable "key_vault_key_id" {
   type        = string
   default     = ""
 }
+
+variable "environment_prefix" {
+  description = "environment_prefix of .ayasee.yaml; put in front of every GitHub environment (and identity) name, for example \"iac-\" in a repository whose application deploys already use test and prod. Keep it equal to the value in .ayasee.yaml."
+  type        = string
+  default     = ""
+}
+
+variable "adopt_existing_environments" {
+  description = "Take over GitHub environments that already exist and were not created by this bootstrap. Leave false: the plan then refuses, naming them, instead of rewriting their reviewers and branch policy."
+  type        = bool
+  default     = false
+}
