@@ -173,19 +173,20 @@ Then:
   and stays green, so `iac-pr` can be a required check. Do not add a `paths:` filter to the caller:
   a skipped workflow cannot satisfy a required check.
 - give the `push` caller of `iac-staged` a `paths:` filter on the IaC, the configuration file and
-  the workflows:
+  the ayasee callers (not all of `.github/`: an application workflow is not the IaC):
 
   ```yaml
   on:
     push:
       branches: [main]
-      paths: ["<iac_root>/**", ".ayasee.yaml", ".github/**"]
+      paths: ["<iac_root>/**", ".ayasee.yaml", ".github/workflows/iac-*.yml"]
   ```
 
   A push that touches only application code then starts no staged run. `resolve` refuses a commit
   that is no longer the tip of `main` only when a later commit changes the IaC (R70, issue #15):
-  a change inside `iac_root` (documentation excepted), to the configuration file or under
-  `.github/`. An IaC commit followed quickly by an application commit is therefore still promoted
+  a change inside `iac_root` (documentation excepted), to the configuration file or to a caller
+  `.github/workflows/iac-*.yml`: the same set as the filter, so that a commit the filter skips never
+  supersedes a run that is waiting (it would start no run to promote the change). An IaC commit followed quickly by an application commit is therefore still promoted
   by its own run, which records its own SHA in the ledger (the commit it checked out, planned and
   applied; the cockpit counts the application commits after it as pending). The check compares
   the commit with the tip through the GitHub compare API and refuses on any doubt: an API error, a
@@ -199,7 +200,8 @@ Then:
   prod gate, the application push supersedes it: its pre-prod stage records the newer SHA, the
   guard of the waiting run then refuses the approved apply as `superseded`
   ([the supersession guard](staged-run.md#the-supersession-guard)), and reviewers approve the same
-  change again in the newer run. The filter avoids both.
+  change again in the newer run. The filter avoids both. For deploys that are manual, see
+  [deploys by hand only](staged-run.md#deploys-by-hand-only-workflow_dispatch).
 
 `units_root` is relative to the repository root, not to `iac_root`, and must be inside it. Setting
 `iac_root` alone fails every load of `.ayasee.yaml`, because the default `units_root`, `stages`, is

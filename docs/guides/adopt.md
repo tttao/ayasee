@@ -28,9 +28,12 @@ uvx ayasee@X.Y.Z init --profile cloudflare-s3 --iac-root infra/iac      # beside
 
 It writes `.ayasee.yaml`, the callers under `.github/workflows/`, `root.hcl`, the bootstrap root and
 one empty directory per stage, all pinned to the release commit of `X.Y.Z`: no placeholder to
-search, no `sed`. It never overwrites a file without `--force`. Fill the Cloudflare zone, account
-and tunnel IDs it leaves as placeholders. `--ref <SHA>` is accepted only for the release commit
-of `X.Y.Z`; `doctor` (step 5) fails callers pinned to an older release. Details:
+search, no `sed`. The callers are `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
+`iac-breakglass.yml`. It can be run again: a file with identical content is skipped, a file that
+differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. Fill
+the Cloudflare zone, account and tunnel IDs it leaves as placeholders. `--ref <SHA>` is accepted
+only for the release commit of `X.Y.Z`; `doctor` (step 5) fails callers pinned to an older
+release. Details:
 [start from the example](quickstart.md#1-start-from-the-example).
 
 ## 2. Bootstrap the environments
@@ -130,3 +133,20 @@ the person who merged. Wait until it is live in prod, then repeat steps 6 to 8 f
 the `imports.tf` files in a later pull request, once the objects are in state.
 
 When a step is red, see [if something is red](quickstart.md#if-something-is-red).
+
+## Upgrade the pin
+
+To move the callers and the bootstrap to another release, run `init --upgrade` at the root of the
+repository with the new version:
+
+```bash
+uvx ayasee@X.Y.Z init --upgrade           # add --source owner/name for a mirror
+```
+
+It rewrites only the 40-character release SHA (and the `# ayasee vX.Y.Z` comment after it) in the
+`uses: <source>/.github/workflows/iac-*.yml@<SHA>` lines of `.github/workflows/*.yml` and in the
+`?ref=<SHA>` of the bootstrap's module sources. Triggers, `paths:`, secrets and everything else you
+edited stay as they are; before writing it checks that the new text differs from the old one by
+the pins alone. References to another source, and other actions, are not touched. `--ref <SHA>`
+skips the release lookup. Read the release notes first: a new release may need changes the pin
+does not carry.

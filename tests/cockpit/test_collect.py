@@ -422,7 +422,7 @@ def test_compare_failure_makes_pending_null(tmp_path, status):
 def test_waiting_runs_filtered_by_workflow_path(tmp_path):
     url = _ledger(tmp_path, [])
     mine = {"id": 1, "created_at": "2026-11-06T08:00:00Z", "html_url": "https://r/1",
-            "path": ".github/workflows/main.yml@refs/heads/main"}  # fmt: skip
+            "path": ".github/workflows/iac-staged.yml@refs/heads/main"}  # fmt: skip
     other = {"id": 2, "created_at": "2026-11-06T07:00:00Z", "html_url": "https://r/2",
              "path": ".github/workflows/other.yml"}  # fmt: skip
     _mock_basics(waiting=[(mine, ["prod"]), (other, ["prod"])])
@@ -571,7 +571,7 @@ def test_load_repos_workflows_key(tmp_path):
     with pytest.raises(ReposFileError):
         load_repos(f)
     f.write_text("- repo: a/b\n  ledger: file:///x\n")
-    assert load_repos(f)[0].workflows == [".github/workflows/main.yml"]
+    assert load_repos(f)[0].workflows == [".github/workflows/iac-staged.yml"]
 
 
 def test_estate_repositories_includes_ledger_repos_and_checks_owner(tmp_path):

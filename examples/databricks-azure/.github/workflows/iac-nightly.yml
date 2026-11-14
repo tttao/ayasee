@@ -1,5 +1,5 @@
 # Nightly drift check of every stage, and a rescan of main.
-name: nightly
+name: iac-nightly
 
 on:
   schedule:

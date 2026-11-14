@@ -1,7 +1,8 @@
 # Pull-request checks: scans, the test plan, and a read-only prod plan of changed shared units.
-name: pr
+name: iac-pr
 
 on:
+  # no paths: filter on purpose: a skipped workflow cannot satisfy the required iac-pr check
   pull_request:
 
 permissions: {}

@@ -66,8 +66,14 @@ use). `--unverified-ref` skips that check (a mirror whose release commit was re-
 checkout ahead of its release); `--source owner/name` names a
 [mirror](releasing.md#mirrors-for-ghes-and-air-gapped-estates). It writes no unit and starts with
 `shared_units: []`. In a monorepo the `push` caller gets a `paths:` filter on `iac_root`, the
-configuration file and `.github/` ([monorepos](../concepts/pr-checks.md#monorepos)). It never
-overwrites a file without `--force`, and on a refusal it writes nothing. From a source checkout of
+configuration file and the ayasee callers `.github/workflows/iac-*.yml`
+([monorepos](../concepts/pr-checks.md#monorepos)); the callers are named `iac-pr.yml`,
+`iac-staged.yml`, `iac-nightly.yml` and `iac-breakglass.yml`, so they do not collide with the
+workflows of the applications. It can be run again on a repository that is partly prepared: it
+skips a file whose content is identical (and never refuses over an empty `.gitkeep`), and for a
+file that differs it prints a diff (for `.ayasee.yaml`, also the keys that differ) and writes
+nothing unless you pass `--force`. To move to another release, run
+`uvx ayasee@X.Y.Z init --upgrade` (see [adopt](adopt.md#upgrade-the-pin)). From a source checkout of
 ayasee it needs `--ref`, because its templates may differ from any release. The placeholders that
 only you can fill (subscription and tenant GUIDs, storage account names, the Cloudflare IDs) stay,
 and step 2 below is then already done.
@@ -250,7 +256,7 @@ find at repository level is a warning, not a failure.
 
 ## 6. The first pull request
 
-Open a pull request that changes a file under `stages/dev/`. `pr.yml` runs `iac-pr`: formatting and
+Open a pull request that changes a file under `stages/dev/`. `iac-pr.yml` runs `iac-pr`: formatting and
 validation, Trivy and Checkov, the Rego pack, and a read-only plan of the changed dev units in the
 `dev-plan` environment. It posts one comment with the change set. **Nothing is applied.** It is green
 when the checks pass. See [pull-request checks](../concepts/pr-checks.md).
@@ -268,7 +274,7 @@ for the Cloudflare example).
 2. Merge 2: `unity-catalog` in dev, uat and prod. Wait until it is live in prod.
 3. Merge 3: `grants` in dev, uat and prod.
 
-Each merge starts `main.yml`, which runs `iac-staged`:
+Each merge starts `iac-staged.yml`, which runs `iac-staged`:
 
 1. `dev` and `uat` plan and apply each unit and converge-check it.
 2. `prod-plan` plans prod, scans it, encrypts the plans and writes the manifest. The job summary shows
@@ -285,9 +291,9 @@ ayasee ledger show --store "azure-blob://<account>.blob.core.windows.net/<contai
 
 ## 8. What runs afterwards
 
-- `nightly.yml` plans every stage at its live SHA and opens a drift issue per environment, see
+- `iac-nightly.yml` plans every stage at its live SHA and opens a drift issue per environment, see
   [drift](../concepts/drift.md).
-- `breakglass.yml` is the emergency path, see [the DORA mapping](../compliance/dora-art17.md).
+- `iac-breakglass.yml` is the emergency path, see [the DORA mapping](../compliance/dora-art17.md).
 - Optional: `cockpit.yml`, the estate view. Follow [cockpit setup](../cockpit/setup.md).
 
 ## Without Azure
@@ -328,7 +334,7 @@ when no approved prod plan is waiting, since a plan encrypted with the old passp
 be applied (re-run `main` to plan it again).
 
 ```yaml
-# .github/workflows/iac.yml and breakglass.yml
+# .github/workflows/iac-staged.yml and iac-breakglass.yml
     secrets:
       AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}
 ```

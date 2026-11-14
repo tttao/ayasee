@@ -106,7 +106,7 @@ Renovate keeps the digests current (`renovate.json`).
 
 ### 6. First pull request
 
-Open a pull request that changes a `stages/dev/*` file. `pr.yml` runs the checks and scans, plans
+Open a pull request that changes a `stages/dev/*` file. `iac-pr.yml` runs the checks and scans, plans
 the changed dev units in the `dev-plan` environment and comments the change summary. Nothing is
 applied. A change to `shared/`, `root.hcl` or `.ayasee.yaml` plans every dev unit.
 
@@ -136,9 +136,9 @@ Setting `allow_cascade: true` is not the way to bootstrap: it switches the refus
 plan wrong for the dependents. Keep it `false`.
 
 
-Merging to `main` starts `main.yml`: `dev`, `uat`, then `prod-plan`, which encrypts and scans the
+Merging to `main` starts `iac-staged.yml`: `dev`, `uat`, then `prod-plan`, which encrypts and scans the
 prod plan and waits at the `prod` environment for a reviewer who is not the author. The reviewer
-approves, and the exact approved plan is applied. Each stage writes the ledger. Nightly, `nightly.yml`
+approves, and the exact approved plan is applied. Each stage writes the ledger. Nightly, `iac-nightly.yml`
 plans every stage for drift and opens an issue per environment.
 
 **Landing dependent changes (R52).** `allow_cascade` is `false`. `unity-catalog` reads `workspace`
@@ -160,10 +160,10 @@ cannot show this repository, so move the ledger to a branch first if you want it
 
 | Caller | Reusable workflow | Trigger | What it does |
 |---|---|---|---|
-| `pr.yml` | `iac-pr` | pull request | Static checks, Trivy and Checkov scans (SARIF), dev-only plan with risk comment. Never applies. |
-| `main.yml` | `iac-staged` | push to `main` | dev, uat, prod-plan, gated prod apply of the approved encrypted plan, ledger writes. |
-| `nightly.yml` | `iac-nightly` | cron | Drift plan per stage in `drift-<stage>` (plan identity), issues, rescan of `main`. |
-| `breakglass.yml` | `iac-breakglass` | manual | Emergency prod change: incident reference, `prod-breakglass` reviewers, post-approval issue. |
+| `iac-pr.yml` | `iac-pr` | pull request | Static checks, Trivy and Checkov scans (SARIF), dev-only plan with risk comment. Never applies. |
+| `iac-staged.yml` | `iac-staged` | push to `main` | dev, uat, prod-plan, gated prod apply of the approved encrypted plan, ledger writes. |
+| `iac-nightly.yml` | `iac-nightly` | cron | Drift plan per stage in `drift-<stage>` (plan identity), issues, rescan of `main`. |
+| `iac-breakglass.yml` | `iac-breakglass` | manual | Emergency prod change: incident reference, `prod-breakglass` reviewers, post-approval issue. |
 | `cockpit.yml` | `cockpit-collect` | `main` runs and cron | Estate snapshot and its renderer. Optional. |
 
 See [docs/concepts](../../docs/concepts/staged-run.md) for the details and

@@ -1,5 +1,5 @@
 # Emergency prod deployment of a given SHA behind its own reviewers (R44).
-name: breakglass
+name: iac-breakglass
 
 on:
   workflow_dispatch:

@@ -1,8 +1,9 @@
 # Pull-request checks: static checks and scans, and a dev-only plan with a risk comment.
 # The reusable workflow needs `pull_request`, never `pull_request_target`.
-name: pr
+name: iac-pr
 
 on:
+  # no paths: filter on purpose: a skipped workflow cannot satisfy the required iac-pr check
   pull_request:
 
 permissions: {}

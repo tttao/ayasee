@@ -253,17 +253,21 @@ to `iac_root`, and the first job of every workflow stops on it. The units find `
 `find_in_parent_folders`, and `root.hcl` takes the stage and the unit from the last two directories,
 so neither changes.
 
-Do not add a `paths:` filter to `pr.yml`: a pull request that touches only application code gets
+Do not add a `paths:` filter to `iac-pr.yml`: a pull request that touches only application code gets
 "No IaC changes" and a green `iac-pr`, which can then stay a required check, and a filter would
-skip it. Do add one to `main.yml`, so that a push of application code to `main` starts no staged
+skip it. Do add one to `iac-staged.yml`, so that a push of application code to `main` starts no staged
 run and does not supersede an IaC change waiting at the prod gate:
 
 ```yaml
 on:
   push:
     branches: [main]
-    paths: ["infra/iac/**", ".ayasee.yaml", ".github/**"]
+    paths: ["infra/iac/**", ".ayasee.yaml", ".github/workflows/iac-*.yml"]
 ```
+
+`ayasee init --iac-root` writes exactly this. For deploys that are manual, make the caller
+`workflow_dispatch`-only
+([deploys by hand only](../../docs/concepts/staged-run.md#deploys-by-hand-only-workflow_dispatch)).
 
 The run of an IaC commit followed by an application commit still goes on: `resolve` refuses it as
 superseded only when a later commit changes the IaC (see

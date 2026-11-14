@@ -1,6 +1,6 @@
 # Emergency prod change: needs an incident reference and the separate prod-breakglass reviewers.
 # Start it from main (Actions tab, "Run workflow").
-name: breakglass
+name: iac-breakglass
 
 on:
   workflow_dispatch:

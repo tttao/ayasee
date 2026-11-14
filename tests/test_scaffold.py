@@ -31,13 +31,18 @@ def test_cloudflare_in_a_monorepo(tmp_path, capsys):
     for stage in ("test", "prod"):
         assert (tmp_path / f"infra/iac/stages/{stage}/.gitkeep").is_file()
     assert (tmp_path / "infra/iac/root.hcl").is_file()
-    main = yaml.safe_load((tmp_path / ".github/workflows/main.yml").read_text())
-    assert main[True]["push"]["paths"] == ["infra/iac/**", ".ayasee.yaml", ".github/**"]
-    for name in ("pr", "main", "nightly", "breakglass"):
-        text = (tmp_path / f".github/workflows/{name}.yml").read_text()
+    main = yaml.safe_load((tmp_path / ".github/workflows/iac-staged.yml").read_text())
+    assert main[True]["push"]["paths"] == [
+        "infra/iac/**",
+        ".ayasee.yaml",
+        ".github/workflows/iac-*.yml",
+    ]
+    for name in ("pr", "staged", "nightly", "breakglass"):
+        text = (tmp_path / f".github/workflows/iac-{name}.yml").read_text()
+        assert f"\nname: iac-{name}\n" in text
         assert "tttao/ayasee/.github/workflows/iac-" in text and f"@{SHA} #" in text
         assert "OWNER" not in text and "0" * 40 not in text
-    pr = yaml.safe_load((tmp_path / ".github/workflows/pr.yml").read_text())
+    pr = yaml.safe_load((tmp_path / ".github/workflows/iac-pr.yml").read_text())
     assert "paths" not in (pr[True]["pull_request"] or {})
     boot = (tmp_path / "infra/iac/bootstrap/main.tf").read_text()
     assert 'stages     = ["test", "prod"]' in boot
@@ -53,7 +58,7 @@ def test_at_the_repository_root_no_paths_filter(tmp_path):
     cfg = parse_config_text((tmp_path / ".ayasee.yaml").read_text())
     assert cfg.stages == ["dev", "staging", "prod"] and cfg.units_root == "stages"
     assert "iac_root" not in (tmp_path / ".ayasee.yaml").read_text()
-    main = yaml.safe_load((tmp_path / ".github/workflows/main.yml").read_text())
+    main = yaml.safe_load((tmp_path / ".github/workflows/iac-staged.yml").read_text())
     assert "paths" not in main[True]["push"]
     assert 'stages     = ["dev", "staging", "prod"]' in (tmp_path / "bootstrap/main.tf").read_text()
 
@@ -71,7 +76,7 @@ def test_databricks(tmp_path):
     for name in ("variables.tf", "outputs.tf"):
         assert (tmp_path / "bootstrap" / name).is_file()
     assert not (tmp_path / ".github/workflows/cockpit.yml").exists()
-    text = (tmp_path / ".github/workflows/main.yml").read_text()
+    text = (tmp_path / ".github/workflows/iac-staged.yml").read_text()
     assert f"acme/ayasee-mirror/.github/workflows/iac-staged.yml@{SHA}" in text
 
 
@@ -84,15 +89,170 @@ def test_the_scaffold_passes_doctor_offline(tmp_path, capsys, monkeypatch):
     assert "0 failed" in out
 
 
-def test_existing_files_are_kept(tmp_path, capsys):
-    (tmp_path / ".ayasee.yaml").write_text("mine\n")
+def test_a_file_that_differs_is_kept_and_diffed(tmp_path, capsys):
+    (tmp_path / ".ayasee.yaml").write_text("stages: [test, prod]\nmine: 1\n")
     assert _init(tmp_path, "--profile", "cloudflare-s3") == 1
     err = capsys.readouterr().err
-    assert "these files exist" in err and ".ayasee.yaml" in err
-    assert (tmp_path / ".ayasee.yaml").read_text() == "mine\n"
+    assert "exist and differ" in err and ".ayasee.yaml" in err
+    assert "key only in the scaffold: units_root" in err
+    assert "key only in your file (--force drops it): mine" in err
+    assert "--- a/.ayasee.yaml (yours)" in err and "+++ b/.ayasee.yaml (scaffold)" in err
+    assert (tmp_path / ".ayasee.yaml").read_text() == "stages: [test, prod]\nmine: 1\n"
     assert not (tmp_path / ".github").exists()  # nothing written
     assert _init(tmp_path, "--profile", "cloudflare-s3", "--force") == 0
-    assert (tmp_path / ".ayasee.yaml").read_text() != "mine\n"
+    assert "mine" not in (tmp_path / ".ayasee.yaml").read_text()
+
+
+def test_init_can_run_twice(tmp_path, capsys):
+    args = ("--profile", "cloudflare-s3", "--iac-root", "infra/iac")
+    assert _init(tmp_path, *args) == 0
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    capsys.readouterr()
+    assert _init(tmp_path, *args) == 0
+    out = capsys.readouterr().out
+    assert "wrote " not in out and "unchanged .ayasee.yaml" in out
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+
+def test_a_gitkeep_with_content_or_a_missing_file_does_not_refuse(tmp_path, capsys):
+    keep = tmp_path / "stages/test/.gitkeep"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("kept by the team\n")
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    assert keep.read_text() == "kept by the team\n"
+    assert (tmp_path / "stages/prod/.gitkeep").is_file()
+
+
+def test_a_partly_prepared_repository_only_gets_the_missing_files(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    (tmp_path / ".github/workflows/iac-nightly.yml").unlink()
+    (tmp_path / "root.hcl").unlink()
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    assert (tmp_path / ".github/workflows/iac-nightly.yml").is_file()
+    assert (tmp_path / "root.hcl").is_file()
+
+
+def test_existing_application_workflows_are_not_in_the_way(tmp_path):
+    wf = tmp_path / ".github/workflows"
+    wf.mkdir(parents=True)
+    for name in ("pr.yml", "main.yml", "nightly.yml"):
+        (wf / name).write_text("name: app\n")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra/iac") == 0
+    assert (wf / "main.yml").read_text() == "name: app\n"
+
+
+def test_a_symlink_out_of_the_repository_is_refused(tmp_path, capsys):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".github").symlink_to(outside)
+    assert _init(repo, "--profile", "cloudflare-s3") == 1
+    assert "outside the repository" in capsys.readouterr().err
+    assert not any(outside.iterdir())
+
+
+def test_the_pr_caller_says_why_it_has_no_paths_filter(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra") == 0
+    text = (tmp_path / ".github/workflows/iac-pr.yml").read_text()
+    assert "no paths: filter on purpose" in text
+
+
+# ---- --upgrade ---------------------------------------------------------------------------------
+
+NEW = "e" * 40
+
+
+def _upgrade(tmp_path, *args, ref=NEW):
+    return cli.main(["init", "--upgrade", "--dir", str(tmp_path), "--ref", ref, *args])
+
+
+def test_upgrade_moves_only_the_pin(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra/iac") == 0
+    staged = tmp_path / ".github/workflows/iac-staged.yml"
+    edited = staged.read_text().replace(
+        'paths: ["infra/iac/**", ".ayasee.yaml", ".github/workflows/iac-*.yml"]',
+        'paths: ["infra/iac/**"]\n    tags-ignore: ["x"]',
+    )
+    staged.write_text(edited)
+    cfg = (tmp_path / ".ayasee.yaml").read_text()
+    capsys.readouterr()
+    assert _upgrade(tmp_path) == 0
+    assert SHA not in staged.read_text() and NEW in staged.read_text()
+    assert staged.read_text() == edited.replace(SHA, NEW)  # nothing else moved
+    assert (tmp_path / ".ayasee.yaml").read_text() == cfg
+    boot = (tmp_path / "infra/iac/bootstrap/main.tf").read_text()
+    assert f"?ref={NEW}" in boot and SHA not in boot
+    for name in ("pr", "nightly", "breakglass"):
+        assert f"@{NEW} #" in (tmp_path / f".github/workflows/iac-{name}.yml").read_text()
+    assert "triggers untouched" in capsys.readouterr().out
+
+
+def test_upgrade_twice_changes_nothing(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    assert _upgrade(tmp_path, ref=SHA) == 0
+    assert "nothing changed" in capsys.readouterr().out
+
+
+def test_upgrade_leaves_other_sources_and_other_actions_alone(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    other = tmp_path / ".github/workflows/deploy.yml"
+    text = (
+        "jobs:\n  a:\n    uses: acme/ayasee/.github/workflows/iac-pr.yml@" + SHA + "\n"
+        "  b:\n    uses: actions/checkout@" + SHA + " # v6\n"
+    )
+    other.write_text(text)
+    assert _upgrade(tmp_path) == 0
+    assert other.read_text() == text
+
+
+def test_upgrade_of_a_mirror_needs_its_source(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--source", "acme/mirror") == 0
+    assert _upgrade(tmp_path) == 1
+    assert "nothing to upgrade" in capsys.readouterr().err
+    assert _upgrade(tmp_path, "--source", "acme/mirror") == 0
+    assert NEW in (tmp_path / ".github/workflows/iac-pr.yml").read_text()
+
+
+def test_upgrade_does_not_write_through_a_symlinked_directory(tmp_path, capsys):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    text = "uses: tttao/ayasee/.github/workflows/iac-pr.yml@" + SHA + "\n"
+    (outside / "x.yml").write_text(text)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".github").symlink_to(outside.parent / "outside")
+    (outside / "workflows").mkdir()
+    (outside / "workflows" / "iac-pr.yml").write_text(text)
+    assert _upgrade(repo) == 1
+    assert "outside the repository" in capsys.readouterr().err
+    assert (outside / "workflows" / "iac-pr.yml").read_text() == text
+
+
+def test_upgrade_without_callers_refuses(tmp_path, capsys):
+    assert _upgrade(tmp_path) == 1
+    assert "nothing to upgrade" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", [["--profile", "cloudflare-s3"], ["--force"], ["--stages", "a"]])
+def test_upgrade_takes_no_scaffold_options(tmp_path, capsys, flag):
+    assert _upgrade(tmp_path, *flag) == 1
+    assert "only moves the release pin" in capsys.readouterr().err
+
+
+def test_upgrade_with_a_source_checkout_needs_ref(tmp_path, capsys):
+    assert cli.main(["init", "--upgrade", "--dir", str(tmp_path)]) == 1
+    assert "pass --ref" in capsys.readouterr().err
+
+
+def test_a_pin_cannot_carry_text(tmp_path):
+    with pytest.raises(SystemExit):
+        _upgrade(tmp_path, ref=NEW[:39] + "\n; rm")
+
+
+def test_init_requires_a_profile(tmp_path, capsys):
+    assert _init(tmp_path) == 1
+    assert "--profile is required" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
