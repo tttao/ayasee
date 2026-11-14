@@ -559,3 +559,13 @@ def test_the_prefixed_bootstrap_validates_and_plans_prefixed_environment_names(t
         done = subprocess.run(cmd, cwd=boot, capture_output=True, text=True, check=False)
         assert done.returncode == 0, done.stdout + done.stderr
     assert 'default     = "iac-"' in "".join(p.read_text() for p in boot.glob("*.tf"))
+
+
+def test_a_prefixed_init_is_rerunnable_and_upgrade_leaves_the_prefix_alone(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra") == 0
+    capsys.readouterr()
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--iac-root", "infra") == 0  # unchanged
+    assert "environment_prefix: iac-" in (tmp_path / ".ayasee.yaml").read_text()
+    # --upgrade moves the pin only: it refuses the flag instead of ignoring it
+    assert _init(tmp_path, "--upgrade", "--environment-prefix", "other-") == 1
+    assert "environment_prefix: iac-" in (tmp_path / ".ayasee.yaml").read_text()
