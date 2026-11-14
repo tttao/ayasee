@@ -1,5 +1,5 @@
 # Staged promotion on every merge to main: dev, uat, then a gated prod apply of the approved plan.
-name: main
+name: iac-staged
 
 on:
   push:

@@ -4,10 +4,10 @@ Without ``--check`` it prints the tip of ``main``.
 
 With ``--check SHA`` it decides whether the staged run started for ``SHA`` may go on (issue #15).
 The run goes on when ``SHA`` is the tip, or when every commit after it leaves the IaC alone: no
-change inside ``iac_root`` (documentation excepted, R38), to the configuration file or under
-``.github/``. The change then has no newer run to carry it (a ``paths:`` filter on the caller
-skips the application-only push), so this run promotes it, and the ledger records ``SHA``, the
-commit that was actually checked out, planned and applied.
+change inside ``iac_root`` (documentation excepted, R38), to the configuration file or to a
+caller workflow ``.github/workflows/iac-*.yml``. The change then has no newer run to carry it
+(a ``paths:`` filter on the caller skips the application-only push), so this run promotes it,
+and the ledger records ``SHA``, the commit that was actually checked out, planned and applied.
 
 It refuses with ``superseded`` when a later commit touches the IaC, when the tip does not descend
 from ``SHA``, and when the list of changed files may be incomplete. Any error refuses too."""
@@ -18,6 +18,7 @@ import argparse
 import posixpath
 import re
 import sys
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from ayasee import cli
@@ -27,8 +28,10 @@ from ayasee.github import GitHub, GitHubError
 
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-# Workflows and local actions decide what a run does: a change there always supersedes.
-_ALWAYS = PurePosixPath(".github")
+# The ayasee callers decide what a run does: a change there always supersedes. It is the same set
+# as the ``paths:`` filter that ``ayasee init`` writes on the staged caller (issue #33): a commit
+# the filter skips starts no run, so it must not supersede one that is waiting.
+_CALLERS_DIR = PurePosixPath(".github/workflows")
 
 
 class Superseded(Exception):
@@ -50,7 +53,9 @@ def _sha(value: str) -> str:
 def touches_iac(path: str, iac_root: str, config_path: str) -> bool:
     """Whether a change to ``path`` (repository-relative) can change what a staged run does."""
     p = PurePosixPath(posixpath.normpath(path))
-    if p == PurePosixPath(posixpath.normpath(config_path)) or p.is_relative_to(_ALWAYS):
+    if p == PurePosixPath(posixpath.normpath(config_path)) or (
+        p.parent == _CALLERS_DIR and fnmatchcase(p.name, "iac-*.yml")
+    ):
         return True
     if _ignorable(path):
         return False

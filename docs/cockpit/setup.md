@@ -66,7 +66,7 @@ A YAML list of `{repo, ledger, stages?, workflows?, config?}`. `config` (default
 - repo: acme/platform
   ledger: github-branch://acme/platform?branch=ayasee-ledger
   stages: [dev, uat, prod]
-  workflows: [.github/workflows/main.yml]   # callers of iac-staged; their waiting runs count as gates
+  workflows: [.github/workflows/iac-staged.yml]   # callers of iac-staged; their waiting runs count as gates
 - repo: acme/edge
   ledger: s3://acme-ledger?region=auto&endpoint=https://<account>.r2.cloudflarestorage.com
 ```
@@ -115,7 +115,7 @@ The format, defaults and error handling are described in the docstring of `src/a
 name: cockpit
 on:
   workflow_run:
-    workflows: [main]            # the callers of iac-staged / iac-nightly in THIS repository
+    workflows: [iac-staged, iac-nightly]            # the callers of iac-staged / iac-nightly in THIS repository
     types: [completed]
   schedule:
     - cron: "*/30 * * * *"       # fallback, and the only trigger for other repositories

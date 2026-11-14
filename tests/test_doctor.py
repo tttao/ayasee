@@ -162,28 +162,28 @@ def test_without_a_token_github_is_skipped(estate, capsys, monkeypatch):
 
 def test_placeholders_and_unpinned_refs_fail(estate, capsys, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN")
-    main = estate / ".github/workflows/main.yml"
+    main = estate / ".github/workflows/iac-staged.yml"
     main.write_text(main.read_text().replace(f"@{PIN}", "@v0.1.0"))
-    pr = estate / ".github/workflows/pr.yml"
+    pr = estate / ".github/workflows/iac-pr.yml"
     pr.write_text(
         pr.read_text().replace(
             f"tttao/ayasee/.github/workflows/iac-pr.yml@{PIN}",
             "OWNER/ayasee/.github/workflows/iac-pr.yml@" + "0" * 40,
         )
     )
-    nightly = estate / ".github/workflows/nightly.yml"
+    nightly = estate / ".github/workflows/iac-nightly.yml"
     nightly.write_text(nightly.read_text().replace(PIN, "2" * 40))
     rc, out = _doctor(estate, capsys)
     fails = _fails(out)
     assert rc == 1
     assert any("@v0.1.0 is not a full commit SHA" in f for f in fails)
-    assert any("pr.yml" in f and "placeholder" in f for f in fails)
+    assert any("iac-pr.yml" in f and "placeholder" in f for f in fails)
     assert any("pin different releases" in f for f in fails)
 
 
 def test_a_paths_filter_on_the_pull_request_caller_fails(estate, capsys, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN")
-    pr = estate / ".github/workflows/pr.yml"
+    pr = estate / ".github/workflows/iac-pr.yml"
     pr.write_text(pr.read_text().replace("  pull_request:\n", "  pull_request:\n    paths: [x]\n"))
     _, out = _doctor(estate, capsys)
     assert any("paths: filter on pull_request" in f for f in _fails(out))
@@ -191,8 +191,8 @@ def test_a_paths_filter_on_the_pull_request_caller_fails(estate, capsys, monkeyp
 
 def test_missing_callers(estate, capsys, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN")
-    (estate / ".github/workflows/main.yml").unlink()
-    (estate / ".github/workflows/nightly.yml").unlink()
+    (estate / ".github/workflows/iac-staged.yml").unlink()
+    (estate / ".github/workflows/iac-nightly.yml").unlink()
     rc, out = _doctor(estate, capsys)
     assert rc == 1 and "no workflow calls iac-staged" in _fails(out)
     assert "warn  no workflow calls iac-nightly" in out
@@ -277,7 +277,7 @@ def test_secrets(estate, capsys):
 
 @respx.mock
 def test_the_passphrase_must_be_passed(estate, capsys):
-    main = estate / ".github/workflows/main.yml"
+    main = estate / ".github/workflows/iac-staged.yml"
     main.write_text(
         main.read_text().replace(
             "      AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}\n", ""
@@ -292,7 +292,7 @@ def _switch_key_provider(estate, provider: str, secret: str) -> None:
     """Make the example use another key provider, passing its secret instead of the passphrase."""
     cfg = estate / ".ayasee.yaml"
     cfg.write_text(cfg.read_text().replace("key_provider: pbkdf2", f"key_provider: {provider}"))
-    for name in ("main.yml", "breakglass.yml"):
+    for name in ("iac-staged.yml", "iac-breakglass.yml"):
         wf = estate / ".github/workflows" / name
         wf.write_text(
             wf.read_text().replace(
@@ -338,7 +338,7 @@ def test_kms_key_providers(estate, capsys, provider, secret, variable):
 @respx.mock
 def test_a_kms_key_credential_must_be_passed(estate, capsys):
     _switch_key_provider(estate, "openbao", "AYASEE_OPENBAO_TOKEN")
-    main = estate / ".github/workflows/main.yml"
+    main = estate / ".github/workflows/iac-staged.yml"
     main.write_text(
         main.read_text().replace(
             "      AYASEE_OPENBAO_TOKEN: ${{ secrets.AYASEE_OPENBAO_TOKEN }}\n", ""
@@ -514,7 +514,9 @@ def test_lock_check_bad_url(aws, capsys):
 LEDGER_KEY = ("AYASEE_LEDGER_AWS_ACCESS_KEY_ID", "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
 
 
-def _pass_ledger_key(estate, files=("main.yml", "nightly.yml", "breakglass.yml"), names=LEDGER_KEY):
+def _pass_ledger_key(
+    estate, files=("iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml"), names=LEDGER_KEY
+):
     for f in files:
         wf = estate / ".github/workflows" / f
         extra = "".join(f"      {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
@@ -549,14 +551,14 @@ def test_the_s3_ledger_key_is_an_environment_secret_of_each_ledger_environment(e
 
 @respx.mock
 def test_the_s3_ledger_key_goes_in_pairs(estate, capsys):
-    _pass_ledger_key(estate, files=("main.yml",), names=LEDGER_KEY[:1])
+    _pass_ledger_key(estate, files=("iac-staged.yml",), names=LEDGER_KEY[:1])
     state = _good_state()
     for env in ("test", "prod-plan", "prod"):
         state["secrets"][env].add(LEDGER_KEY[0])
     _mock(state)
     _, out = _doctor(estate, capsys)
     assert (
-        f".github/workflows/main.yml: {LEDGER_KEY[0]} is passed without {LEDGER_KEY[1]}"
+        f".github/workflows/iac-staged.yml: {LEDGER_KEY[0]} is passed without {LEDGER_KEY[1]}"
         in _fails(out)
     )
 
@@ -568,12 +570,12 @@ def test_an_s3_ledger_url_needs_the_ledger_key(estate, capsys):
     _mock(_good_state())
     _, out = _doctor(estate, capsys)
     fails = _fails(out)
-    for f in ("main.yml", "nightly.yml", "breakglass.yml"):
+    for f in ("iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml"):
         assert any(
             x.startswith(f".github/workflows/{f}: ledger.url is s3://, but the ledger key")
             for x in fails
         ), fails
-    assert not any("pr.yml: ledger.url" in x for x in fails)
+    assert not any("iac-pr.yml: ledger.url" in x for x in fails)
 
 
 def test_the_bootstrap_module_lists_the_plan_key_secrets_doctor_checks():

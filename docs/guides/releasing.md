@@ -176,6 +176,11 @@ An estate whose runners cannot reach github.com keeps a mirror and pins the mirr
    SHA.
 4. Follow ayasee releases on your own cadence; each update repeats steps 1 to 3.
 
+The re-pin commit of step 3 is not a release commit (it is not the head of `release/<tag>` with one
+parent on the tag), so `ayasee init --ref <that commit>` and `ayasee init --upgrade --ref <that
+commit>` need `--unverified-ref`, and `ayasee doctor`'s release-pin check will fail for callers
+pinned to it. Both are expected for a mirror; the check cannot tell it from a wrong pin.
+
 ## If something fails
 
 - **Provenance gate fails**: the confirmation is incomplete. Nothing was built.

@@ -21,10 +21,10 @@ FIXTURES = ROOT / "tests" / "fixtures" / "policy"
 
 # caller file -> reusable workflow it calls
 CALLS = {
-    "pr.yml": "iac-pr.yml",
-    "main.yml": "iac-staged.yml",
-    "nightly.yml": "iac-nightly.yml",
-    "breakglass.yml": "iac-breakglass.yml",
+    "iac-pr.yml": "iac-pr.yml",
+    "iac-staged.yml": "iac-staged.yml",
+    "iac-nightly.yml": "iac-nightly.yml",
+    "iac-breakglass.yml": "iac-breakglass.yml",
     "cockpit.yml": "cockpit-collect.yml",
 }
 PLACEHOLDER = "@0000000000000000000000000000000000000000 # replace with an ayasee release SHA"
@@ -104,10 +104,10 @@ def test_callers_pass_only_declared_secrets_and_inputs_and_all_required_ones():
 
 
 def test_the_stage_callers_pass_the_teams_webhook_and_nothing_else_secret():
-    for caller in ("main.yml", "nightly.yml", "breakglass.yml"):
+    for caller in ("iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml"):
         (job,) = _yaml(CALLERS / caller)["jobs"].values()
         assert set(job["secrets"]) == {"teams-webhook"}, caller
-    (job,) = _yaml(CALLERS / "pr.yml")["jobs"].values()
+    (job,) = _yaml(CALLERS / "iac-pr.yml")["jobs"].values()
     assert "secrets" not in job
 
 
@@ -125,11 +125,11 @@ def test_caller_permissions_are_the_minimum_the_called_jobs_need():
 
 def test_caller_permissions_match_the_documented_scopes():
     docs = {
-        "pr.yml": (
+        "iac-pr.yml": (
             "docs/concepts/pr-checks.md",
             ["contents: read", "id-token: write", "pull-requests: write", "security-events: write"],
         ),
-        "nightly.yml": (
+        "iac-nightly.yml": (
             "docs/concepts/drift.md",
             [
                 "id-token: write",
@@ -154,11 +154,11 @@ def test_caller_permissions_match_the_documented_scopes():
 
 
 def test_triggers():
-    assert set(_on(_yaml(CALLERS / "pr.yml"))) == {"pull_request"}
-    assert _on(_yaml(CALLERS / "main.yml")) == {"push": {"branches": ["main"]}}
-    nightly = _on(_yaml(CALLERS / "nightly.yml"))
+    assert set(_on(_yaml(CALLERS / "iac-pr.yml"))) == {"pull_request"}
+    assert _on(_yaml(CALLERS / "iac-staged.yml")) == {"push": {"branches": ["main"]}}
+    nightly = _on(_yaml(CALLERS / "iac-nightly.yml"))
     assert len(nightly["schedule"]) == 1 and nightly["schedule"][0]["cron"]
-    bg = _on(_yaml(CALLERS / "breakglass.yml"))
+    bg = _on(_yaml(CALLERS / "iac-breakglass.yml"))
     assert set(bg) == {"workflow_dispatch"}
     # R71: no units input, break-glass always plans the whole prod tree
     assert set(bg["workflow_dispatch"]["inputs"]) == {"incident", "sha", "allow-rollback"}

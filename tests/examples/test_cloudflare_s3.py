@@ -19,10 +19,10 @@ REUSABLE = ROOT / ".github" / "workflows"
 TOOLS = ROOT / ".tools" / "bin"
 PLACEHOLDER = "@0000000000000000000000000000000000000000 # replace with an ayasee release SHA"
 CALLS = {
-    "pr.yml": "iac-pr.yml",
-    "main.yml": "iac-staged.yml",
-    "nightly.yml": "iac-nightly.yml",
-    "breakglass.yml": "iac-breakglass.yml",
+    "iac-pr.yml": "iac-pr.yml",
+    "iac-staged.yml": "iac-staged.yml",
+    "iac-nightly.yml": "iac-nightly.yml",
+    "iac-breakglass.yml": "iac-breakglass.yml",
 }
 TOKENS = ("CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
 UNITS = {"test": {"dns"}, "prod": {"dns", "tunnel", "access"}}

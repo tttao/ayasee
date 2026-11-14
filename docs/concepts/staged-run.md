@@ -68,7 +68,7 @@ two-stage, four-stage or five-stage run has been executed on GitHub yet.
 
 | Job | Needs | Runs when | What it does |
 |---|---|---|---|
-| `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` and a later commit changes the IaC: a file inside `iac_root` (documentation excepted), the configuration file or anything under `.github/` (R70, `ayasee main-tip --check`: the run of the newer commit promotes the change; a redrive dispatches on the tip). Later commits that leave the IaC alone let the run go on at its own SHA (issue #15); any doubt (an API error, a tip that does not descend from the SHA, 300 changed files or more) refuses, refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `stages` and `start-stage` (`ayasee config staged`: empty for the first stage, a pre-prod stage name, or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`, `identity`). |
+| `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` and a later commit changes the IaC: a file inside `iac_root` (documentation excepted), the configuration file or a caller `.github/workflows/iac-*.yml` (R70, `ayasee main-tip --check`: the run of the newer commit promotes the change; a redrive dispatches on the tip). Later commits that leave the IaC alone let the run go on at its own SHA (issue #15); any doubt (an API error, a tip that does not descend from the SHA, 300 changed files or more) refuses, refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `stages` and `start-stage` (`ayasee config staged`: empty for the first stage, a pre-prod stage name, or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`, `identity`). |
 | `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. |
 | `stage-2`, `stage-3` | the slot before | its stage is in the list and not before `start-stage`; the slot before succeeded, or was skipped (by `start-stage` or as unused) | Same as `stage-1`. |
 | `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
@@ -420,6 +420,36 @@ example after fixing a prod-plan failure with `uat` already live at the SHA). Ea
 skipped but the guard still runs in `prod-plan`, so the run is refused unless the preceding stage
 has this SHA live in the ledger. Re-running failed jobs of an existing run reuses its artifact for
 7 days.
+
+## Deploys by hand only (`workflow_dispatch`)
+
+An estate whose rule is "deploys are manual" gives the `iac-staged.yml` caller a manual trigger
+instead of the `push`; the reusable workflow does not care how it was started:
+
+```yaml
+on:
+  workflow_dispatch:   # run it on the branch `main`, from the Actions tab or `gh workflow run`
+```
+
+Run it on `main`: every job has `github.ref == 'refs/heads/main'` in its `if:`, so a dispatch on
+another branch skips them all. The run is for the commit at the tip of `main` when it starts, plans
+the whole tree at that commit, and so promotes every IaC change merged since the last promotion.
+
+What R70 (`ayasee main-tip --check`, the first step of `resolve`) does then, from the code:
+
+- it compares `github.sha` with the tip of `main` once, when `resolve` starts. A run dispatched on
+  the tip goes on, whatever was merged before; nothing waits to be superseded by a push, because a
+  push starts no run;
+- it refuses the run as `superseded` only when a commit lands on `main` between the dispatch and
+  that step, and that commit changes the IaC (see [the table above](#flow)). In `workflow_dispatch`
+  mode no newer run starts to promote it, although the message says the run of the newer commit
+  does: dispatch again. This was read from the code, not exercised on GitHub;
+- the guard still refuses the approved apply of a run when a newer commit has reached the stage
+  before prod ([the supersession guard](#the-supersession-guard)): with dispatches, that means
+  somebody dispatched again while a run waited at the prod gate. Approve the newer run.
+
+Keep `iac-pr.yml` as it is (no `paths:` filter, a required check) and keep `iac-nightly.yml` on its
+schedule: only the promotion becomes manual.
 
 ## The supersession guard
 

@@ -7,7 +7,7 @@ Degraded per environment instead: HTTP 403 on pending deployments gives ``gate.w
 null; 404/422 on compare gives ``pending_commits`` null.
 
 Repos file: a YAML list of ``{repo, ledger, stages?, workflows?, config?}``. ``workflows``
-(default ``[".github/workflows/main.yml"]``, the caller of iac-staged) lists the workflow files
+(default ``[".github/workflows/iac-staged.yml"]``, the iac-staged caller) lists the workflow files
 whose waiting runs count as gates. ``config`` (default ``.ayasee.yaml``) is the repository's ayasee
 configuration, read at the ``main`` SHA for its ``labels``: the opt-ins that weaken a compliant
 default (``solo_mode``, ``identity: secrets``). A missing file means the defaults (no labels); an
@@ -50,7 +50,7 @@ from ayasee.ledger import LedgerError, LedgerRecord, LedgerStore, S3Store, open_
 
 SCHEMA = "ayasee.snapshot/v1"
 DEFAULT_STAGES = ["dev", "uat", "prod"]
-DEFAULT_WORKFLOWS = [".github/workflows/main.yml"]
+DEFAULT_WORKFLOWS = [".github/workflows/iac-staged.yml"]
 DEFAULT_CONFIG = ".ayasee.yaml"
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 

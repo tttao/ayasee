@@ -16,6 +16,27 @@ released version into the GitHub release notes.
 - `ayasee doctor` has a "release pin" check: the callers' pinned commit must be a release commit
   of a version at least the running CLI's; an API error is "could not check" (exit 2) (#32).
 
+### Changed
+
+- `ayasee init` scaffolds the callers as `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
+  `iac-breakglass.yml` (`name:` to match), in the examples too, so they do not collide with the
+  workflows of an application repository (#33). The cockpit's default `workflows:` is now
+  `.github/workflows/iac-staged.yml`; an estate that kept `main.yml` names it in its repos file.
+- With `--iac-root`, the `paths:` filter of `iac-staged.yml` lists the ayasee callers
+  (`.github/workflows/iac-*.yml`), not all of `.github/**`; `ayasee main-tip --check` (R70) now
+  counts the same set as a change of the IaC, so a commit the filter skips never supersedes a
+  waiting run.
+- `ayasee init` can be run again: it skips identical files, ignores empty `.gitkeep` files, and
+  prints a diff (and the differing keys of `.ayasee.yaml`) for files that differ, which `--force`
+  overwrites.
+
+### Added
+
+- `ayasee init --upgrade` moves only the release SHA pinned in the callers and the bootstrap
+  sources (#33).
+- Docs: why `iac-pr.yml` has no `paths:` filter (a comment in the file), and how to run the staged
+  workflow by `workflow_dispatch` only, with what R70 does then.
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of

@@ -127,13 +127,13 @@ commit SHA, and describes its stages in one file.
       uat/   workspace/  unity-catalog/  grants/
       prod/  workspace/  unity-catalog/  grants/
     .github/workflows/
-      pr.yml  main.yml  nightly.yml  breakglass.yml
+      iac-pr.yml  iac-staged.yml  iac-nightly.yml  iac-breakglass.yml
     ```
 
-=== ".github/workflows/main.yml"
+=== ".github/workflows/iac-staged.yml"
 
     ```yaml
-    name: main
+    name: iac-staged
     on:
       push:
         branches: [main]

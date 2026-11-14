@@ -9,7 +9,7 @@ name: cockpit
 
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] only calls the pinned reusable workflow; no checkout or run of the triggering run's code
-    workflows: [main]
+    workflows: [iac-staged, iac-nightly]
     types: [completed]
     branches: [main]
   schedule:

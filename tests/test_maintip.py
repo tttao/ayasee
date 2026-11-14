@@ -100,10 +100,9 @@ def test_check_goes_on_when_later_commits_leave_the_iac_alone(tmp_path, monkeypa
         ["infra/stages/prod/dns/terragrunt.hcl"],
         ["infra/root.hcl", "app/main.py"],
         [".ayasee.yaml"],
-        [".github/workflows/main.yml"],
-        [".github/actions/x/action.yml"],
+        [".github/workflows/iac-staged.yml"],
     ],
-    ids=["unit", "root-hcl", "config", "workflow", "local-action"],
+    ids=["unit", "root-hcl", "config", "caller"],
 )
 def test_check_refuses_when_a_later_commit_touches_the_iac(tmp_path, monkeypatch, capsys, files):
     _tip()
@@ -113,6 +112,30 @@ def test_check_refuses_when_a_later_commit_touches_the_iac(tmp_path, monkeypatch
     assert _check(tmp_path, monkeypatch) == 1
     captured = capsys.readouterr()
     assert captured.out == "" and "main-tip: superseded:" in captured.err
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "files",
+    [
+        [".github/workflows/deploy.yml"],
+        [".github/actions/x/action.yml"],
+        ["app/iac-pr.yml"],
+        ["x/.github/workflows/iac-pr.yml"],
+    ],
+    ids=["app-workflow", "local-action", "not-under-workflows", "nested"],
+)
+def test_check_lets_the_run_go_on_for_changes_the_paths_filter_skips(
+    tmp_path, monkeypatch, capsys, files
+):
+    """The staged caller's paths: filter names the ayasee callers only; a commit it skips starts
+    no run, so it must not supersede the one waiting (issue #33)."""
+    _tip()
+    respx.get(f"{API}/repos/acme/infra/compare/{SHA}...{TIP}").mock(
+        return_value=_compare(files=files)
+    )
+    assert _check(tmp_path, monkeypatch) == 0
+    assert "no later commit changes the IaC" in capsys.readouterr().out
 
 
 @respx.mock

@@ -62,8 +62,8 @@ Exit: the SHAs are identical, no promotion pull request is open, and no apply is
 
 One pull request to `main` that:
 
-- adds the caller workflows (`pr.yml`, `main.yml`, `nightly.yml`, `breakglass.yml`) pinned to a
-  ayasee release **by full SHA**, using [the example](../../examples/databricks-azure/.github/workflows/main.yml)
+- adds the caller workflows (`iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml`, `iac-breakglass.yml`) pinned to a
+  ayasee release **by full SHA**, using [the example](../../examples/databricks-azure/.github/workflows/iac-staged.yml)
   as the template and never `secrets: inherit`,
 - adds `.ayasee.yaml` (`stages: [dev, uat, prod]`, the ledger URL, `allow_cascade: false`),
 - removes or disables the old workflows that fire on the `uat` and `prod` branches,
