@@ -13,3 +13,10 @@ This product includes third-party software, redistributed unmodified under its o
   Licence text: website/javascripts/vendor/mermaid-11.17.2.LICENSE.txt. The bundle carries the
   licence notices of the libraries it includes in its own comments.
   It is served by the documentation site only, so diagrams render without a CDN.
+
+  html-demo step window (https://github.com/MengTo/Skills, agent-skills/web-design/html-demo/scripts),
+  MIT License, Copyright (c) 2026 Meng To. Taken from commit 07274a3b3dba5f6a311186ddaf65765d94f78cec.
+  Files: website/demo/vendor/step-window.js (SHA-256 8086eea441ce6d7d507a53dd0c6342cfcedba67feca9b11d3108a872c2bba0d3)
+  and website/demo/vendor/step-window.css (SHA-256 c981bb1314c9c5f6abb73d9bfd55c8dd7a1a46b9fe9d7213723658899ab2dd8d).
+  Licence text: website/demo/vendor/step-window.LICENSE.txt. It draws the window of the animated demo
+  and is served by the documentation site only, from the site itself.

@@ -39,6 +39,8 @@ WEBSITE = {"website/index.md": "index.md", "website/stylesheets/extra.css": "sty
 # The site's own scripts and the vendored third-party ones (see NOTICE): served from the site
 # itself, never from a CDN.
 SCRIPTS = "website/javascripts/**/*"
+# The animated demo (website/demo): its own page, script and style, plus the vendored window engine.
+DEMO = "website/demo/**/*"
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _INLINE = re.compile(r"(\]\()([^)\s]+)((?:\s+\"[^\"]*\")?\))")
@@ -58,9 +60,10 @@ def collect() -> dict[str, Path]:
         out[rel] = ROOT / rel
     for src, dest in WEBSITE.items():
         out[dest] = ROOT / src
-    for path in sorted(ROOT.glob(SCRIPTS)):
-        if path.is_file():
-            out[path.relative_to(ROOT / "website").as_posix()] = path
+    for pattern in (SCRIPTS, DEMO):
+        for path in sorted(ROOT.glob(pattern)):
+            if path.is_file():
+                out[path.relative_to(ROOT / "website").as_posix()] = path
     return out
 
 
