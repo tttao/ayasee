@@ -34,6 +34,10 @@ inputs:
     description: "Set to true to also post a GitHub deployment."
     required: false
     default: "false"
+  environment-prefix:
+    description: environment_prefix of .ayasee.yaml. The deployment mirror posts to the GitHub environment <prefix><env>; the ledger record stays keyed by env.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -49,10 +53,12 @@ runs:
         SG_APPROVER: ${{ inputs.approver }}
         SG_BREAKGLASS_INCIDENT: ${{ inputs.breakglass-incident }}
         SG_MIRROR: ${{ inputs.mirror-deployments }}
+        SG_ENV_PREFIX: ${{ inputs.environment-prefix }}
       run: |
         args=(--store "$SG_STORE" --repo "$SG_REPO" --env "$SG_ENV" --sha "$SG_SHA"
           --run-id "$SG_RUN_ID" --run-attempt "$SG_RUN_ATTEMPT" --units-json "$SG_UNITS_JSON")
         [ -z "$SG_APPROVER" ] || args+=(--approver "$SG_APPROVER")
         [ -z "$SG_BREAKGLASS_INCIDENT" ] || args+=(--breakglass-incident "$SG_BREAKGLASS_INCIDENT")
         [ "$SG_MIRROR" != true ] || args+=(--mirror-deployments)
+        [ -z "$SG_ENV_PREFIX" ] || args+=(--environment-prefix "$SG_ENV_PREFIX")
         ayasee ledger write "${args[@]}"

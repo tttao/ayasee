@@ -75,10 +75,11 @@ def test_validate_checks_sha(wf):
 
 def test_uses_breakglass_environment(wf):
     job = wf["jobs"][JOB]
-    assert job["environment"] == "prod-breakglass"
+    env_name = "${{ needs.validate.outputs.environment-prefix }}prod-breakglass"
+    assert job["environment"] == env_name
     for name, j in wf["jobs"].items():
         env = j.get("environment")
-        assert env in (None, "prod-breakglass"), name
+        assert env in (None, env_name), name
     assert "environment: prod\n" not in TEXT
     assert job["concurrency"] == {
         "group": "ayasee-${{ github.repository }}-prod",
@@ -230,7 +231,10 @@ def test_ancestor_check_precedes_the_plan(wf):
 def test_approvers_precede_the_plan_and_apply(wf):
     steps = _steps(wf, JOB)
     i = _idx(wf, lambda s: "ayasee approvals list" in _run(s))
-    assert "--env prod-breakglass" in _run(steps[i])
+    assert '--env "$BREAKGLASS_ENV"' in _run(steps[i])
+    assert steps[i]["env"]["BREAKGLASS_ENV"] == (
+        "${{ needs.validate.outputs.environment-prefix }}prod-breakglass"
+    )
     assert steps[i]["id"] == "approver"
     assert i < _idx(wf, _ayasee("plan")) < _idx(wf, _ayasee("apply"))
     assert "if" not in steps[i]  # fail closed: no condition can skip it

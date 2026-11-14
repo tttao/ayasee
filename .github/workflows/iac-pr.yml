@@ -268,7 +268,8 @@ jobs:
     # Fork pull requests get no OIDC token; the event check keeps a pull_request_target caller out.
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.resolve.outputs.pr-plan-environment != '' }}
     runs-on: ubuntu-latest
-    # <first-stage>-plan: dev-plan with the default stages, test-plan with [test, prod]
+    # <environment_prefix><first-stage>-plan: dev-plan with the default stages, test-plan with
+    # [test, prod], iac-test-plan with environment_prefix: iac-
     environment: ${{ needs.resolve.outputs.pr-plan-environment }}
     permissions:
       contents: read # check out the code
@@ -428,6 +429,7 @@ jobs:
       engine: ${{ steps.shared.outputs.engine }}
       identity: ${{ steps.shared.outputs.identity }}
       provider-env-names: ${{ steps.shared.outputs.provider-env-names }}
+      environment-prefix: ${{ steps.shared.outputs.environment-prefix }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -460,6 +462,7 @@ jobs:
             echo "engine=$(jq -r '.engine' "$cfg")"
             echo "identity=$(jq -er '.identity' "$cfg")"
             echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
           } >>"$GITHUB_OUTPUT"
 
   plan-shared:
@@ -470,7 +473,7 @@ jobs:
     needs: shared-changes
     if: ${{ needs.shared-changes.outputs.units != '' }}
     runs-on: ubuntu-latest
-    environment: prod-pr-plan
+    environment: ${{ needs.shared-changes.outputs.environment-prefix }}prod-pr-plan
     permissions:
       contents: read # check out the code
       id-token: write # OIDC login with the read-only prod identity

@@ -40,6 +40,13 @@ STAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # prod-pr is reserved because, as a first stage, its PR plan environment would be prod-pr-plan.
 RESERVED_ENVIRONMENTS = frozenset({"prod", "prod-pr", "prod-breakglass"})
 PLAN_SUFFIX = "-plan"
+# The prefix of every GitHub environment ayasee derives (issue #31): lowercase letters, digits,
+# - and _, starting with a letter or digit, at most 32 characters. Lowercase only because GitHub
+# compares environment names case-insensitively; the set is also what a shell, a workflow
+# expression, a URL path and a regular expression all take literally.
+ENVIRONMENT_PREFIX = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+# GitHub refuses an environment name longer than this.
+MAX_ENVIRONMENT_NAME = 255
 # a unit name as the plan action writes it: the path below <units_root>/<stage>, / written __
 _UNIT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 
@@ -81,6 +88,7 @@ class Config:
     identity: str = "oidc"
     plan_encryption: PlanEncryptionConfig = field(default_factory=PlanEncryptionConfig)
     provider_env: list[str] = field(default_factory=list)
+    environment_prefix: str = ""
 
     @property
     def binding_mode(self) -> str:
@@ -132,6 +140,17 @@ def _rel_dir(value: Any, where: str) -> str:
     if norm == ".." or norm.startswith("../"):
         raise ConfigError(f"{where}: must stay inside the repository, got {text!r}")
     return norm
+
+
+def _environment_prefix(value: Any) -> str:
+    """The GitHub environment prefix: empty (today's names) or ENVIRONMENT_PREFIX."""
+    text = _str(value, "environment_prefix")
+    if text and not ENVIRONMENT_PREFIX.fullmatch(text):
+        raise ConfigError(
+            "environment_prefix: use at most 32 characters of [a-z0-9_-], starting with a letter "
+            f"or digit (for example 'iac-'); got {text!r}"
+        )
+    return text
 
 
 def _inside(path: str, root: str) -> bool:
@@ -234,6 +253,8 @@ def _parse(raw: Any) -> Config:
                 "provider secret)"
             )
         cfg.provider_env = names
+    if "environment_prefix" in top:
+        cfg.environment_prefix = _environment_prefix(top["environment_prefix"])
     return cfg
 
 
@@ -284,6 +305,35 @@ def pr_plan_environment(stages: list[str]) -> str:
     return stages[0] + PLAN_SUFFIX
 
 
+def environment_names(cfg: Config) -> dict[str, str]:
+    """Every GitHub environment ayasee derives from ``cfg``, as ``{logical name: GitHub name}``.
+
+    The logical name is what the stages, the guard order, the ledger and the drift issues use;
+    the GitHub name is ``environment_prefix`` plus the logical name and is what ``environment:``,
+    the OIDC subject, the deployment mirror, the approvals API and the environment secrets use
+    (issue #31). The mapping is injective, so a prefix can never make two of them collide.
+    Raises ConfigError when the stages do not allow a pull-request plan environment.
+    """
+    pre_plan = pr_plan_environment(cfg.stages)
+    logical = [
+        *cfg.stages,
+        pre_plan,
+        "prod-plan",
+        "prod-breakglass",
+        *(f"drift-{s}" for s in cfg.stages),
+        *(["prod-pr-plan"] if cfg.shared_units else []),
+    ]
+    names: dict[str, str] = {}
+    for name in logical:
+        full = cfg.environment_prefix + name
+        if len(full) > MAX_ENVIRONMENT_NAME:
+            raise ConfigError(
+                f"environment {full!r}: longer than {MAX_ENVIRONMENT_NAME} characters"
+            )
+        names[name] = full
+    return names
+
+
 def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
     """Map ``stages`` onto the fixed jobs of ``iac-staged`` (issues #1, #10), or raise ConfigError.
 
@@ -318,6 +368,22 @@ def staged_layout(stages: list[str], start_stage: str) -> dict[str, str]:
     }
     out.update({f"stage-{i}": name for i, name in enumerate(slots, 1)})
     out["order"] = ",".join(stages)
+    return out
+
+
+def staged_environments(layout: dict[str, str], prefix: str) -> dict[str, str]:
+    """The GitHub environment of each job of ``iac-staged``: ``env-stage-<i>`` (empty for an
+    unused slot), ``env-prod-plan`` and ``env-prod``, each ``prefix`` plus the logical name.
+
+    ``stage-<i>`` and ``order`` stay logical (units, ledger, guard); only what a workflow hands
+    to ``environment:`` is prefixed (issue #31).
+    """
+    out = {
+        f"env-stage-{i}": prefix + layout[f"stage-{i}"] if layout[f"stage-{i}"] else ""
+        for i in range(1, PRE_PROD_SLOTS + 1)
+    }
+    out["env-prod-plan"] = prefix + "prod-plan"
+    out["env-prod"] = prefix + "prod"
     return out
 
 
@@ -374,7 +440,7 @@ def _staged(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"ayasee: config error: {exc}", file=sys.stderr)
         return 1
-    for key, value in layout.items():
+    for key, value in {**layout, **staged_environments(layout, cfg.environment_prefix)}.items():
         print(f"{key}={value}")
     return 0
 
@@ -386,7 +452,23 @@ def _pr_plan_environment(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"ayasee: config error: {exc}", file=sys.stderr)
         return 1
-    print(name)
+    # the GitHub environment (prefixed); --logical prints the stage-level name
+    print(name if args.logical else cfg.environment_prefix + name)
+    return 0
+
+
+def _environments(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_config(Path(args.path))
+        names = environment_names(cfg)
+    except ConfigError as exc:
+        print(f"ayasee: config error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(names, indent=2))
+    else:
+        for logical, full in names.items():
+            print(f"{logical}={full}")
     return 0
 
 
@@ -396,7 +478,12 @@ def _run(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"ayasee: config error: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps({**asdict(cfg), "binding_mode": cfg.binding_mode}, indent=2))
+    try:
+        envs: dict[str, str] | None = environment_names(cfg)
+    except ConfigError:
+        envs = None  # the stages allow no pull-request plan; the staged run reports why
+    out = {**asdict(cfg), "binding_mode": cfg.binding_mode, "environments": envs}
+    print(json.dumps(out, indent=2))
     return 0
 
 
@@ -488,10 +575,20 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     staged.set_defaults(handler=_staged)
     prplan = sub.add_parser(
         "pr-plan-environment",
-        help="print the environment of the pull-request plan (<first stage>-plan) or exit 1",
+        help="print the GitHub environment of the pull-request plan (<prefix><first stage>-plan)",
     )
     prplan.add_argument("--path", default=str(DEFAULT_PATH))
+    prplan.add_argument(
+        "--logical", action="store_true", help="print the name without environment_prefix"
+    )
     prplan.set_defaults(handler=_pr_plan_environment)
+    envs = sub.add_parser(
+        "environments",
+        help="print every GitHub environment ayasee derives (logical=github lines, or --json)",
+    )
+    envs.add_argument("--path", default=str(DEFAULT_PATH))
+    envs.add_argument("--json", action="store_true")
+    envs.set_defaults(handler=_environments)
     lab = sub.add_parser(
         "labels",
         help="print one line per opt-in that weakens a compliant default (solo_mode, identity)",

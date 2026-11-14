@@ -434,6 +434,36 @@ def test_mirror_posts_deployment(tmp_path, monkeypatch, converged, state):
 
 
 @respx.mock
+def test_mirror_prefixes_the_github_environment_only(tmp_path, monkeypatch):
+    """issue #31: the deployment is GitHub-facing (prefixed); the record stays keyed by stage."""
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+    monkeypatch.setenv("GITHUB_API_URL", "https://api.example")
+    p = tmp_path / "u.json"
+    p.write_text(json.dumps({"a": {"status": "applied", "converged": True}}))
+    dep = respx.post("https://api.example/repos/acme/infra/deployments").mock(
+        return_value=httpx.Response(201, json={"id": 5})
+    )
+    respx.post("https://api.example/repos/acme/infra/deployments/5/statuses").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    args = _write_args(tmp_path, p, "--mirror-deployments", "--environment-prefix", "iac-")
+    assert cli.main(args) == 0
+    body = json.loads(dep.calls[0].request.content)
+    # the production flag keys on the stage, not on the prefixed name
+    assert body["environment"] == "iac-prod" and body["production_environment"] is True
+    assert (
+        cli.main(["ledger", "show", "--store", args[3], "--repo", "acme/infra", "--env", "prod"])
+        == 0
+    )
+
+
+def test_environment_prefix_flag_is_validated(tmp_path, units_file, capsys):
+    with pytest.raises(SystemExit):
+        cli.main(_write_args(tmp_path, units_file, "--environment-prefix", "Bad Prefix"))
+
+
+@respx.mock
 def test_mirror_non_prod_and_allow_ref(tmp_path, units_file, monkeypatch):
     monkeypatch.delenv("GITHUB_REF", raising=False)
     monkeypatch.setenv("GITHUB_TOKEN", "t")

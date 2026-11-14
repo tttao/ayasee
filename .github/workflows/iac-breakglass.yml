@@ -178,6 +178,7 @@ jobs:
       incident: ${{ steps.validate.outputs.incident }}
       sha: ${{ steps.validate.outputs.sha }}
       allow-rollback: ${{ steps.validate.outputs.allow-rollback }}
+      environment-prefix: ${{ steps.prefix.outputs.environment-prefix }}
     steps:
       - name: Require the main branch
         env:
@@ -212,13 +213,29 @@ jobs:
             echo "incident=$INCIDENT"
             echo "sha=$SHA"
           } >>"$GITHUB_OUTPUT"
+      # The environment of the break-glass job is named before that job can check anything out, so
+      # it comes from the configuration of main (this run's ref), not from the commit to deploy: an
+      # old commit predating environment_prefix must still run in the environment that exists now.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: prefix
+        name: Read environment_prefix from main
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
+          echo "environment-prefix=$(jq -r '.environment_prefix' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
 
   breakglass:
     # plan and apply in one job behind the prod-breakglass reviewers
     name: breakglass
     needs: validate
     runs-on: ubuntu-latest
-    environment: prod-breakglass
+    environment: ${{ needs.validate.outputs.environment-prefix }}prod-breakglass
     permissions:
       id-token: write # OIDC login to Azure and Databricks
       contents: read # check out the code
@@ -235,7 +252,7 @@ jobs:
       - name: Require a ledger URL
         run: |
           [ -n "$AYASEE_LEDGER_URL" ] || {
-            echo "::error::no ledger URL: set AYASEE_LEDGER_URL as a variable on the prod-breakglass environment"
+            echo "::error::no ledger URL: set AYASEE_LEDGER_URL as a variable on the prod-breakglass environment (with its environment_prefix)"
             exit 1
           }
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -286,6 +303,7 @@ jobs:
         name: Read the configuration
         env:
           CONFIG_PATH: ${{ inputs.config-path }}
+          MAIN_PREFIX: ${{ needs.validate.outputs.environment-prefix }}
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
           cfg="$RUNNER_TEMP/ayasee-config.json"
@@ -296,7 +314,11 @@ jobs:
             echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
             echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
             echo "shared-units=$(jq -r '.shared_units | join(",")' "$cfg")"
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
           } >>"$GITHUB_OUTPUT"
+          if [ "$(jq -r '.environment_prefix' "$cfg")" != "$MAIN_PREFIX" ]; then
+            echo "::warning::environment_prefix of this commit differs from main's; the job runs in main's environments (${MAIN_PREFIX}prod-breakglass)"
+          fi
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         if: ${{ steps.cfg.outputs.identity == 'oidc' }}
         with:
@@ -354,8 +376,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          BREAKGLASS_ENV: ${{ needs.validate.outputs.environment-prefix }}prod-breakglass
         run: |
-          login="$(ayasee approvals list --repo "$REPO" --run-id "$RUN_ID" --env prod-breakglass)"
+          login="$(ayasee approvals list --repo "$REPO" --run-id "$RUN_ID" --env "$BREAKGLASS_ENV")"
           echo "login=$login" >>"$GITHUB_OUTPUT"
       - id: plan
         uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
@@ -458,6 +481,7 @@ jobs:
           approver: ${{ steps.approver.outputs.login }}
           breakglass-incident: ${{ needs.validate.outputs.incident }}
           mirror-deployments: "true"
+          environment-prefix: ${{ needs.validate.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
         if: ${{ failure() && steps.apply.outcome == 'failure' && steps.units.outputs.units-json != '' }}
         env:

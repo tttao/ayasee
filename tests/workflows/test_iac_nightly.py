@@ -56,10 +56,11 @@ def test_drift_concurrency_is_separate_from_apply_and_never_cancels(wf):
 
 
 def test_every_job_uses_drift_environment_and_no_prod_environment(wf):
-    assert wf["jobs"]["drift"]["environment"] == "drift-${{ matrix.env }}"
+    drift_env = "${{ needs.resolve.outputs.environment-prefix }}drift-${{ matrix.env }}"
+    assert wf["jobs"]["drift"]["environment"] == drift_env
     for name, job in wf["jobs"].items():
         env = job.get("environment")
-        assert env is None or env == "drift-${{ matrix.env }}", name
+        assert env is None or env == drift_env, name
     for forbidden in ("environment: prod", "environment: uat", "environment: dev\n"):
         assert forbidden not in TEXT
     assert "prod-breakglass" not in TEXT

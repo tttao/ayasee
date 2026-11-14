@@ -55,8 +55,9 @@ def test_pr_plan_uses_the_first_stage_plan_environment_only(wf):
     envs = [j.get("environment") for j in wf["jobs"].values() if j.get("environment")]
     # never an environment that can apply or holds the plan key; prod-pr-plan is the read-only
     # identity of the shared-units plan (#5)
-    assert sorted(envs) == [env, "prod-pr-plan"]
-    assert wf["jobs"]["plan-shared"]["environment"] == "prod-pr-plan"
+    shared = "${{ needs.shared-changes.outputs.environment-prefix }}prod-pr-plan"
+    assert sorted(envs) == sorted([env, shared])
+    assert wf["jobs"]["plan-shared"]["environment"] == shared
     plans = [s for s in _steps(wf, "plan-first-stage") if "/actions/plan@" in _uses(s)]
     assert len(plans) == 1
     with_ = plans[0]["with"]

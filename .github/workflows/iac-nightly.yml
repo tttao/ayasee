@@ -106,6 +106,7 @@ jobs:
       engine: ${{ steps.resolve.outputs.engine }}
       identity: ${{ steps.resolve.outputs.identity }}
       provider-env-names: ${{ steps.resolve.outputs.provider-env-names }}
+      environment-prefix: ${{ steps.resolve.outputs.environment-prefix }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -157,6 +158,7 @@ jobs:
           {
             # every configured stage; prod-plan is a step of the staged run, not an environment
             echo "envs=$(jq -c '[.stages[] | select(. != "prod-plan")]' "$cfg")"
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
             echo "ledger-url=$(jq -r '.ledger.url // ""' "$cfg")"
             echo "units-root=$(jq -r '.units_root' "$cfg")"
             echo "engine=$(jq -r '.engine' "$cfg")"
@@ -170,7 +172,8 @@ jobs:
     needs: resolve
     if: ${{ github.ref == 'refs/heads/main' && needs.resolve.result == 'success' }}
     runs-on: ubuntu-latest
-    environment: drift-${{ matrix.env }}
+    # GitHub environment: environment_prefix + drift-<stage>; the stage itself stays the ledger key
+    environment: ${{ needs.resolve.outputs.environment-prefix }}drift-${{ matrix.env }}
     strategy:
       fail-fast: false
       matrix:

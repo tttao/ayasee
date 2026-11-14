@@ -177,14 +177,23 @@ def _called_environments() -> set[str]:
                 env = env["name"]
             if env is None:
                 continue
+            # the example sets no environment_prefix, so every prefix expression is empty here
+            env = re.sub(r"\$\{\{ needs\.[a-z-]+\.outputs\.environment-prefix \}\}", "", env)
             if "${{" in env:
                 layout = staged_layout(stages, "")
                 if env == "drift-${{ matrix.env }}":
                     found |= {f"drift-{s}" for s in stages}
                 elif env == "${{ needs.resolve.outputs.pr-plan-environment }}":
                     found.add(pr_plan_environment(stages))
+                elif env in (
+                    "${{ needs.resolve.outputs.env-prod-plan }}",
+                    "${{ needs.resolve.outputs.env-prod }}",
+                ):
+                    found.add(
+                        env.removeprefix("${{ needs.resolve.outputs.env-").removesuffix(" }}")
+                    )
                 else:
-                    m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.(stage-\d+) \}\}", env)
+                    m = re.fullmatch(r"\$\{\{ needs\.resolve\.outputs\.env-(stage-\d+) \}\}", env)
                     assert m, env
                     found |= {layout[m.group(1)]} - {""}
             else:
