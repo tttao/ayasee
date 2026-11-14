@@ -7,6 +7,15 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ayasee init --ref <SHA>` refuses a commit that is not the release commit of the version whose
+  templates it writes (the head of `release/v<version>`, one commit on top of the tag, with that
+  `__version__`), so an rc.2 SHA can no longer sit under rc.3 templates; `--unverified-ref` skips
+  the check (#32).
+- `ayasee doctor` has a "release pin" check: the callers' pinned commit must be a release commit
+  of a version at least the running CLI's; an API error is "could not check" (exit 2) (#32).
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of

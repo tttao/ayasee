@@ -29,7 +29,8 @@ uvx ayasee@X.Y.Z init --profile cloudflare-s3 --iac-root infra/iac      # beside
 It writes `.ayasee.yaml`, the callers under `.github/workflows/`, `root.hcl`, the bootstrap root and
 one empty directory per stage, all pinned to the release commit of `X.Y.Z`: no placeholder to
 search, no `sed`. It never overwrites a file without `--force`. Fill the Cloudflare zone, account
-and tunnel IDs it leaves as placeholders. Details:
+and tunnel IDs it leaves as placeholders. `--ref <SHA>` is accepted only for the release commit
+of `X.Y.Z`; `doctor` (step 5) fails callers pinned to an older release. Details:
 [start from the example](quickstart.md#1-start-from-the-example).
 
 ## 2. Bootstrap the environments

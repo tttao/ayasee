@@ -54,6 +54,7 @@ from ayasee.config import (
 )
 from ayasee.github import GitHub, GitHubError
 from ayasee.maintip import _repo
+from ayasee.releasepin import NotARelease, release_version, version_key
 
 OK, WARN, FAIL, SKIP = "ok", "warn", "FAIL", "skip"
 
@@ -246,6 +247,41 @@ def check_callers(report: Report, callers: list[Caller]) -> None:
     if len(pins) > 1:
         shown = ", ".join(f"{s}@{r[:12]}" for s, r in sorted(pins))
         report.add(FAIL, sec, f"the callers pin different releases: {shown}")
+
+
+def check_pin(report: Report, gh: GitHub, callers: list[Caller]) -> None:
+    """The pinned commit must be a release commit of a version at least this CLI's (issue #32).
+
+    Chosen over comparing ``.ayasee.yaml`` keys with the pinned release: the CLI that scaffolded
+    the callers writes templates for its own version, and the workflow inputs, secrets and
+    environment names are not all configuration keys, so only the release version bounds them.
+    A newer pin is fine (the callers are older than the workflows); an older one is a failure.
+    An API failure is SKIP ("could not check"), never a pass."""
+    from ayasee import __version__
+
+    sec = "release pin"
+    for source, sha in sorted({(c.source, c.ref) for c in callers if _SHA.match(c.ref)}):
+        where = f"{source}@{sha[:12]}"
+        try:
+            pinned = release_version(gh, source, sha)
+            ok = version_key(pinned) >= version_key(__version__)
+        except NotARelease as exc:
+            report.add(FAIL, sec, f"{exc}; pin a release commit of {__version__} or newer")
+        except GitHubError as exc:
+            report.add(SKIP, sec, f"{where}: could not check the release: {exc}")
+        else:
+            if ok:
+                report.add(
+                    OK, sec, f"{where} is the release commit of {pinned} (CLI {__version__})"
+                )
+            else:
+                report.add(
+                    FAIL,
+                    sec,
+                    f"{where} is the release commit of {pinned}, older than this CLI "
+                    f"({__version__}): its workflows lack what the callers use; re-run "
+                    f"`ayasee init --ref <release commit of {__version__}>` or pin that commit",
+                )
 
 
 # ---- GitHub ----------------------------------------------------------------------------------
@@ -565,6 +601,15 @@ def run(args: argparse.Namespace) -> Report:
             check_github(report, gh, repo, cfg, callers)
         finally:
             gh.close()
+    pinned = [c for c in callers if _SHA.match(c.ref)]
+    if pinned and os.environ.get("GITHUB_TOKEN"):
+        gh = GitHub.from_env()
+        try:
+            check_pin(report, gh, pinned)
+        finally:
+            gh.close()
+    elif pinned:
+        report.add(SKIP, "release pin", "set GITHUB_TOKEN to check the pinned release")
     if args.lock_check:
         check_lock(report, args.lock_check)
     else:
