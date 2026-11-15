@@ -1,4 +1,6 @@
 # One run per push to main: pre-prod stages -> prod-plan -> gated prod. See docs/concepts/staged-run.md.
+# With gate_mechanism: workflow (D15) the run stops after prod-plan and opens an approval issue;
+# iac-approve.yml applies the plan once a reviewer that ayasee checks starts it.
 # The jobs stage-1 .. stage-4 are the pre-prod slots, each after the one before: they run the
 # pre-prod stages named in `stages`, right-aligned (stage-4 runs the stage just before prod) and
 # unused slots skipped (issues #1, #10). A matrix would not do: GitHub does not order matrix jobs.
@@ -161,6 +163,7 @@ jobs:
       provider-env-names: ${{ steps.resolve.outputs.provider-env-names }}
       key-provider: ${{ steps.resolve.outputs.key-provider }}
       shared-units: ${{ steps.resolve.outputs.shared-units }}
+      gate-mechanism: ${{ steps.resolve.outputs.gate-mechanism }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -238,6 +241,12 @@ jobs:
             exit 1
           fi
           identity="$(jq -er '.identity' "$cfg")"
+          # D15: environment (GitHub's reviewers hold the prod gate) or workflow (iac-approve)
+          gate="$(jq -er '.gate_mechanism' "$cfg")"
+          case "$gate" in environment | workflow) ;; *)
+            echo "::error::unknown gate_mechanism"
+            exit 1 ;;
+          esac
           {
             echo "$layout"
             echo run-prod-plan=true
@@ -250,6 +259,7 @@ jobs:
             echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
             echo "key-provider=$(jq -r '.plan_encryption.key_provider' "$cfg")"
             echo "shared-units=$(jq -r '.shared_units | join(",")' "$cfg")"
+            echo "gate-mechanism=$gate"
           } >>"$GITHUB_OUTPUT"
           # shared units (#5) live under prod only: a copy in another stage is refused
           if ! problems="$(ayasee config check-shared --path "$CONFIG_PATH" 2>&1)"; then
@@ -818,6 +828,8 @@ jobs:
     # without them (none set, not created yet, or a plan that ignores them on a private
     # repository) would apply without an approval, so prod-plan hands it no plan. Beside the
     # pre-prod stages, which need no approval; no environment, so no secret reaches this job.
+    # gate_mechanism: workflow (D15) holds the gate in iac-approve instead, which checks the prod
+    # environment itself; anything but workflow gets the reviewers check.
     name: prod-gate
     needs: resolve
     if: ${{ github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-prod-plan == 'true' }}
@@ -829,6 +841,7 @@ jobs:
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse a prod environment without required reviewers
+        if: ${{ needs.resolve.outputs.gate-mechanism != 'workflow' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -851,6 +864,8 @@ jobs:
       critical: ${{ steps.summary.outputs.critical }}
       high: ${{ steps.summary.outputs.high }}
       units: ${{ steps.summary.outputs.units }}
+      changes: ${{ steps.summary.outputs.changes }}
+      manifest-digest: ${{ steps.summary.outputs.manifest-digest }}
     needs: [resolve, prod-gate, stage-1, stage-2, stage-3, stage-4]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.resolve.result == 'success' && needs.resolve.outputs.run-prod-plan == 'true' && needs.prod-gate.result == 'success' && (needs.stage-1.result == 'success' || (needs.resolve.outputs.run-stage-1 == 'false' && needs.stage-1.result == 'skipped')) && (needs.stage-2.result == 'success' || (needs.resolve.outputs.run-stage-2 == 'false' && needs.stage-2.result == 'skipped')) && (needs.stage-3.result == 'success' || (needs.resolve.outputs.run-stage-3 == 'false' && needs.stage-3.result == 'skipped')) && (needs.stage-4.result == 'success' || (needs.resolve.outputs.run-stage-4 == 'false' && needs.stage-4.result == 'skipped')) }}
     runs-on: ubuntu-latest
@@ -964,10 +979,16 @@ jobs:
           critical="$(jq -e '.risk.critical' "$CHANGESET")"
           high="$(jq -e '.risk.high' "$CHANGESET")"
           units="$(jq -ec '.units | keys' "$MANIFEST")"
+          # counts and the manifest's SHA-256 only (D15: an approval names this digest)
+          changes="$(jq -e '.items | length' "$CHANGESET")"
+          digest="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::cannot hash the manifest"; exit 1; }
           {
             echo "critical=$critical"
             echo "high=$high"
             echo "units=$units"
+            echo "changes=$changes"
+            echo "manifest-digest=$digest"
           } >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -999,9 +1020,10 @@ jobs:
 
   prod:
     # apply the approved encrypted plan; the prod environment holds the reviewers
+    # (gate_mechanism: workflow, D15: prod-approval and iac-approve.yml instead)
     name: prod
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' && needs.resolve.outputs.gate-mechanism != 'workflow' }}
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.env-prod }}
     permissions:
@@ -1157,6 +1179,47 @@ jobs:
           run-url: ${{ env.RUN_URL }}
           detail: ${{ steps.apply.outcome == 'failure' && steps.units.outputs.units-json == '' && 'replan_needed' || '' }}
           teams-webhook: ${{ secrets.teams-webhook }}
+
+  prod-approval:
+    # gate_mechanism: workflow (D15): no job waits for a reviewer. The run ends here with an
+    # approval issue naming the commit and the manifest digest; a reviewer that ayasee checks
+    # applies exactly that plan with iac-approve.yml. No environment and no secret: identifiers,
+    # counts and links only reach the issue.
+    name: prod-approval
+    needs: [resolve, prod-plan]
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' && needs.resolve.outputs.gate-mechanism == 'workflow' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code (in-repo actions)
+      issues: write # the approval issue
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - name: Open the prod approval issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          DIGEST: ${{ needs.prod-plan.outputs.manifest-digest }}
+          CHANGES: ${{ needs.prod-plan.outputs.changes }}
+          CRITICAL: ${{ needs.prod-plan.outputs.critical }}
+          HIGH: ${{ needs.prod-plan.outputs.high }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ayasee approve issue --repo "$REPO" --sha "$SHA" --digest "$DIGEST" --run-url "$RUN_URL" \
+            --changes "$CHANGES" --critical "$CRITICAL" --high "$HIGH"
+          {
+            echo "### Prod waits for approval (gate_mechanism: workflow)"
+            echo
+            echo "A reviewer listed in reviewers.prod starts **iac-approve** on main with:"
+            echo
+            echo "- sha: \`$SHA\`"
+            echo "- manifest-digest: \`$DIGEST\`"
+          } >>"$GITHUB_STEP_SUMMARY"
 
   prod-in-sync:
     # empty prod plan: no reviewers, record every unit as converged at this SHA

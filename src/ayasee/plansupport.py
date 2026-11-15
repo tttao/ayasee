@@ -18,9 +18,10 @@ Actions read, and the owner's plan is visible only to an owner of the organizati
 to the user themself (``/user``); a call that fails is evidence of nothing.
 
 Callers decide what a verdict means: ``ayasee doctor`` fails on ``UNSUPPORTED`` and ``UNKNOWN``,
-``ayasee init`` warns, ``ayasee require-reviewers`` refuses a definite ``UNSUPPORTED``. A gate
-that does not rest on environment reviewers (issue #40) would turn the doctor failure into a
-recommendation; it reads the same result."""
+``ayasee init`` warns, ``ayasee require-reviewers`` refuses a definite ``UNSUPPORTED``. With
+``gate_mechanism: workflow`` (D15, issue #40), which does not rest on environment reviewers, the
+doctor reads the same result to say what that gate keeps, and ``ayasee approve`` reads it to tell
+a plan without branch policies from a prod environment left open."""
 
 from __future__ import annotations
 
@@ -110,8 +111,8 @@ class PlanSupport:
                 lines.append(f"- no {name} (a private repository has them on {plans}): {falls}")
             lines.append(
                 "ayasee does not support such a repository with its default gate: make it public "
-                "or move it to GitHub Enterprise; a gate that does not need these features is "
-                "tracked in issue #40"
+                "or move it to GitHub Enterprise, or set gate_mechanism: workflow (D15, issue "
+                "#40), a gate that ayasee enforces without these features, labelled a DEVIATION"
             )
             return lines
         return [
@@ -121,7 +122,7 @@ class PlanSupport:
             "before prod",
             "an organization owner's token shows the plan, and once the bootstrap has set the "
             "reviewers they are seen; on another plan ayasee does not support the repository with "
-            "its default gate (issue #40 tracks one that does not need them)",
+            "its default gate; gate_mechanism: workflow (D15, issue #40) does not need them",
         ]
 
 

@@ -869,3 +869,141 @@ def test_the_upgrade_403_on_the_rules_of_main_is_said_in_ayasee_words(estate, ca
     _, out = _doctor(estate, capsys)
     assert "HTTP 403" not in out
     assert any("this repository's plan has no rulesets" in f for f in _fails(out))
+
+
+# ---- gate_mechanism: workflow (issue #40, D15) -------------------------------------------------
+
+APPROVE_CALLER = f"""name: iac-approve
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+      manifest-digest:
+        required: true
+permissions: {{}}
+jobs:
+  approve:
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+      issues: write
+      actions: read
+      pull-requests: read
+    uses: tttao/ayasee/.github/workflows/iac-approve.yml@{PIN}
+    with:
+      sha: ${{{{ inputs.sha }}}}
+      manifest-digest: ${{{{ inputs.manifest-digest }}}}
+    secrets:
+      teams-webhook: ${{{{ secrets.TEAMS_WEBHOOK }}}}
+      ledger-token: ${{{{ secrets.AYASEE_LEDGER_TOKEN }}}}
+      AYASEE_PLAN_PASSPHRASE: ${{{{ secrets.AYASEE_PLAN_PASSPHRASE }}}}
+      CLOUDFLARE_API_TOKEN: ${{{{ secrets.CLOUDFLARE_API_TOKEN }}}}
+      AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}
+      AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}
+"""
+
+
+def _workflow_gate(estate, approve_caller=True):
+    cfg = estate / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text() + "\ngate_mechanism: workflow\nreviewers:\n  prod: [rita]\n")
+    (estate / ".github" / "workflows" / "iac-breakglass.yml").unlink()
+    if approve_caller:
+        (estate / ".github" / "workflows" / "iac-approve.yml").write_text(APPROVE_CALLER)
+
+
+def _workflow_state():
+    state = _good_state()
+    for env in state["envs"].values():
+        env["protection_rules"] = []  # no environment carries reviewers in this mode
+    for name in ("prod-pr-plan", "prod-breakglass"):
+        del state["envs"][name]
+    state["visibility"] = "private"
+    return state
+
+
+def _permission(perm="write", status=200):
+    respx.get(f"{API}/repos/{REPO}/collaborators/rita/permission").mock(
+        return_value=httpx.Response(status, json={"permission": perm})
+    )
+
+
+def _org_plan(name):
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": name}})
+    )
+
+
+@respx.mock
+def test_the_workflow_gate_on_team_has_no_failure(estate, capsys):
+    _workflow_gate(estate)
+    _mock(_workflow_state())
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    plan = _plan_lines(out)[0]
+    assert plan.startswith("ok") and "gate_mechanism: workflow holds the gate" in plan
+    assert "reviewers.prod: rita has write access" in out
+    assert "gate_mechanism: workflow: DEVIATION" in out
+    assert "prod-pr-plan" not in out and "prod-breakglass" not in out
+
+
+@respx.mock
+def test_the_workflow_gate_on_free_warns_and_reads_repository_secrets(estate, capsys):
+    _workflow_gate(estate)
+    state = _workflow_state()
+    for env in state["envs"].values():
+        env["deployment_branch_policy"] = None
+    state["secrets"] = {}
+    state["variables"] = {}
+    state["repo_secrets"] |= {*PROVIDER, "AYASEE_PLAN_PASSPHRASE"}
+    state["repo_variables"] = {"AYASEE_LEDGER_URL"}
+    _mock(state)
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/repos/{REPO}/rulesets").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    respx.get(f"{API}/repos/{REPO}/rules/branches/main").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    plan = _plan_lines(out)[0]
+    assert plan.startswith("warn") and "any collaborator with write access" in plan
+    assert "not a collaborator who means harm" in plan
+    assert "every stage reads the same repository secrets" in out
+    assert "not restricted to main (deployment" not in out
+    assert "make it an environment secret" not in out
+
+
+@respx.mock
+@pytest.mark.parametrize("perm, status", [("read", 200), ("none", 200), ("write", 500)])
+def test_a_reviewer_without_write_access_fails(estate, capsys, perm, status):
+    _workflow_gate(estate)
+    _mock(_workflow_state())
+    _org_plan("team")
+    _permission(perm, status)
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    assert any(f.startswith("reviewers.prod:") for f in _fails(out)), out
+
+
+@respx.mock
+def test_the_workflow_gate_needs_the_approve_caller(estate, capsys):
+    _workflow_gate(estate, approve_caller=False)
+    _mock(_workflow_state())
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert "gate_mechanism: workflow, but no workflow calls iac-approve" in "\n".join(_fails(out))
+
+
+@respx.mock
+def test_the_environment_gate_on_free_points_to_the_workflow_gate(estate, capsys):
+    _free_private()
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    assert "gate_mechanism: workflow (D15" in "\n".join(_plan_lines(out))

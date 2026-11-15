@@ -39,7 +39,7 @@ export interface Repo {
   };
   envs: Env[];
   /**
-   * Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets: deviation). Absent when unknown, empty when none.
+   * Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets and gate_mechanism: workflow: deviation). Absent when unknown, empty when none.
    */
   labels?: Label[];
 }

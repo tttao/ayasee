@@ -179,7 +179,15 @@ def test_prod_plan_scans_before_upload(wf):
 
 
 def test_prod_plan_outputs(wf):
-    assert set(wf["jobs"]["prod-plan"]["outputs"]) == {"has-changes", "critical", "high", "units"}
+    # changes and manifest-digest: the approval issue of gate_mechanism: workflow (D15)
+    assert set(wf["jobs"]["prod-plan"]["outputs"]) == {
+        "has-changes",
+        "critical",
+        "high",
+        "units",
+        "changes",
+        "manifest-digest",
+    }
 
 
 def test_start_stage_validated_in_resolve(wf):

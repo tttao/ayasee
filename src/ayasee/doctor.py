@@ -5,9 +5,12 @@ instead of failed jobs found one at a time:
 
 - **GitHub plan** (first, with ``GITHUB_TOKEN``): the repository can carry required reviewers on
   environments, deployment branch policies and rulesets (issue #39, :mod:`ayasee.plansupport`): a
-  public repository, or a private one on a plan that has them. A plan that lacks them is one
-  failure that names the missing features and the guarantees that fall with them, and the GitHub
-  settings below are then not checked one by one; a plan that cannot be confirmed fails too;
+  public repository, or a private one on a plan that has them. With the environment gate, a plan
+  that lacks them is one failure that names the missing features and the guarantees that fall with
+  them and points to ``gate_mechanism: workflow`` (D15), and the GitHub settings below are then
+  not checked one by one; a plan that cannot be confirmed fails too. With ``gate_mechanism:
+  workflow`` the plan decides what the gate keeps: Pro or Team keep the main-only environments and
+  their secrets (ok), Free keeps neither (a warning that says so);
 - **configuration**: ``.ayasee.yaml`` loads, uses only supported settings, fits the staged job
   slots, matches ``shared_units`` on disk, and has a directory per stage under ``units_root``;
 - **callers**: the workflows under ``.github/workflows`` that call the ayasee reusable workflows
@@ -19,7 +22,9 @@ instead of failed jobs found one at a time:
   its ``environment_prefix`` name, and carries the ``AYASEE_MANAGED`` marker of the bootstrap (a
   warning when not); prod,
   prod-breakglass and prod-pr-plan have required reviewers and prevent self-review (unless
-  ``solo_mode``); the environments are restricted to ``main`` except the pull-request plan ones;
+  ``solo_mode``), or, with ``gate_mechanism: workflow``, every login of ``reviewers.prod`` has
+  write access to the repository; the environments are restricted to ``main`` except the
+  pull-request plan ones (not checked on GitHub Free with the workflow gate, which has none);
   each secret a caller passes exists where its jobs read it (provider, plan-key and ``s3://``
   ledger-key secrets as environment secrets of each environment that reads them, never at
   repository level); the variables the
@@ -64,14 +69,21 @@ from ayasee.config import (
 )
 from ayasee.github import GitHub, GitHubError
 from ayasee.maintip import _repo
-from ayasee.plansupport import SUPPORTED, UNSUPPORTED, PlanSupport, detect, is_plan_error
+from ayasee.plansupport import (
+    BRANCH_POLICIES,
+    SUPPORTED,
+    UNSUPPORTED,
+    PlanSupport,
+    detect,
+    is_plan_error,
+)
 from ayasee.releasepin import NotARelease, release_version, version_key
 
 OK, WARN, FAIL, SKIP = "ok", "warn", "FAIL", "skip"
 
 _CALLER = re.compile(
     r"^(?P<repo>[^/@\s]+/[^/@\s]+)/\.github/workflows/"
-    r"(?P<kind>iac-(?:staged|pr|nightly|breakglass))\.ya?ml@(?P<ref>\S+)$"
+    r"(?P<kind>iac-(?:staged|pr|nightly|breakglass|approve))\.ya?ml@(?P<ref>\S+)$"
 )
 _SECRET_REF = re.compile(r"^\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -97,7 +109,7 @@ PLAN_KEY_VARIABLES = {
 # the dedicated key of an s3:// ledger (issue #10): environment secrets of every environment whose
 # guard and ledger steps read or write the ledger, never the state key; both or neither
 LEDGER_KEY_SECRETS = ("AYASEE_LEDGER_AWS_ACCESS_KEY_ID", "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
-LEDGER_KEY_KINDS = frozenset({"iac-staged", "iac-nightly", "iac-breakglass"})
+LEDGER_KEY_KINDS = frozenset({"iac-staged", "iac-nightly", "iac-breakglass", "iac-approve"})
 OIDC_VARIABLES = ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID")
 GATED = ("prod", "prod-breakglass", "prod-pr-plan")
 LOCK_KEY = "ayasee-doctor-lock-check.tflock"
@@ -171,6 +183,13 @@ def check_config(report: Report, config_path: str, root: Path) -> Config | None:
         report.add(WARN, sec, "solo_mode: NON-COMPLIANT, the maintainer approves their own change")
     if cfg.identity == "secrets":
         report.add(WARN, sec, "identity: secrets: DEVIATION, stage isolation rests on token scopes")
+    if cfg.gate_mechanism == "workflow":
+        report.add(
+            WARN,
+            sec,
+            "gate_mechanism: workflow: DEVIATION, ayasee enforces the prod gate, not GitHub "
+            f"(reviewers.prod: {', '.join(cfg.reviewers.prod)})",
+        )
     return cfg
 
 
@@ -223,17 +242,34 @@ def find_callers(report: Report, root: Path) -> list[Caller]:
     return callers
 
 
-def check_callers(report: Report, callers: list[Caller]) -> None:
+def check_callers(report: Report, callers: list[Caller], cfg: Config | None = None) -> None:
     sec = "callers"
     kinds = {c.kind for c in callers}
+    workflow_gate = cfg is not None and cfg.gate_mechanism == "workflow"
     for kind, level in (
         ("iac-staged", FAIL),
         ("iac-pr", FAIL),
         ("iac-nightly", WARN),
         ("iac-breakglass", WARN),
     ):
-        if kind not in kinds:
+        if kind not in kinds and not (workflow_gate and kind == "iac-breakglass"):
             report.add(level, sec, f"no workflow calls {kind}")
+    if workflow_gate and "iac-approve" not in kinds:
+        report.add(
+            FAIL,
+            sec,
+            "gate_mechanism: workflow, but no workflow calls iac-approve: nothing can apply prod",
+        )
+    if workflow_gate and "iac-breakglass" in kinds:
+        report.add(
+            WARN, sec, "iac-breakglass refuses to run with gate_mechanism: workflow (not built yet)"
+        )
+    if not workflow_gate and cfg is not None and "iac-approve" in kinds:
+        report.add(
+            WARN,
+            sec,
+            "iac-approve is called, but it refuses to run with gate_mechanism: environment",
+        )
     for c in callers:
         where = f"{c.file} ({c.job} -> {c.kind})"
         if c.source.split("/")[0] == "OWNER" or set(c.ref) == {"0"}:
@@ -355,9 +391,12 @@ def _logical_environments_of(kind: str, cfg: Config) -> list[str]:
     if kind == "iac-staged":
         return [*pre, "prod-plan", "prod"]
     if kind == "iac-pr":
-        return [pr_plan_environment(cfg.stages)] + (["prod-pr-plan"] if cfg.shared_units else [])
+        shared = cfg.shared_units and cfg.gate_mechanism == "environment"
+        return [pr_plan_environment(cfg.stages)] + (["prod-pr-plan"] if shared else [])
     if kind == "iac-nightly":
         return [f"drift-{s}" for s in cfg.stages]
+    if kind == "iac-approve":
+        return ["prod"]
     return ["prod-breakglass"]
 
 
@@ -368,7 +407,11 @@ def environments_of(kind: str, cfg: Config) -> list[str]:
 
 
 def _plan_key_envs(kind: str, cfg: Config) -> list[str]:
-    logical = {"iac-staged": ["prod-plan", "prod"], "iac-breakglass": ["prod-breakglass"]}
+    logical = {
+        "iac-staged": ["prod-plan", "prod"],
+        "iac-breakglass": ["prod-breakglass"],
+        "iac-approve": ["prod"],
+    }
     return [cfg.environment_prefix + e for e in logical.get(kind, [])]
 
 
@@ -382,17 +425,31 @@ def _reviewers(env: dict[str, Any]) -> tuple[int, bool | None]:
     return 0, None
 
 
-def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: list[Caller]) -> None:
+def check_github(
+    report: Report,
+    gh: GitHub,
+    repo: str,
+    cfg: Config,
+    callers: list[Caller],
+    bare: bool = False,
+) -> None:
+    """``bare``: ``gate_mechanism: workflow`` on a plan without deployment branch policies,
+    environment secrets or environment variables (GitHub Free, private): the environments carry
+    nothing, so the branch policies are not checked and secrets and variables are read at
+    repository level (D15)."""
     sec = f"GitHub ({repo})"
     # every decision below is keyed on the GitHub name, prefix included: a literal "prod" here
     # would check the application's own environment and skip the gate of the prefixed one
     pfx = cfg.environment_prefix
-    gated = {pfx + e for e in GATED}
+    workflow_gate = cfg.gate_mechanism == "workflow"
+    gated = set() if workflow_gate else {pfx + e for e in GATED}
     prod_env = pfx + "prod"
     pr_plan = pfx + "prod-pr-plan"
     pr_envs = {pfx + pr_plan_environment(cfg.stages), pr_plan}
     wanted: dict[str, None] = {}  # ordered set
     for kind in ("iac-staged", "iac-pr", *sorted({c.kind for c in callers})):
+        if workflow_gate and kind == "iac-breakglass":
+            continue  # refused in this mode; its environment is not needed
         for env in environments_of(kind, cfg):
             wanted[env] = None
     try:
@@ -406,6 +463,16 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
             report.add(FAIL, sec, f"environment {env} is missing (run the bootstrap)")
     if present:
         report.add(OK, sec, f"environments present: {', '.join(present)}")
+    if workflow_gate:
+        _check_reviewer_access(report, gh, repo, cfg, sec)
+    if bare:
+        report.add(
+            WARN,
+            sec,
+            "no deployment branch policies on this plan: the environments are not restricted to "
+            "main, and the secrets are repository secrets that any collaborator with write access "
+            "can read from any branch (D15)",
+        )
 
     for env in present:
         data = found[env]
@@ -421,6 +488,8 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
                 )
             else:
                 report.add(OK, sec, f"{env}: {n} required reviewer(s)")
+        if bare:
+            continue
         policy = data.get("deployment_branch_policy")
         if env in pr_envs and env != pr_plan:
             if policy:
@@ -439,8 +508,9 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
         if names != ["main"]:
             report.add(FAIL, sec, f"{env}: deploys from {names or 'no branch'}, expected [main]")
 
-    _check_ownership(report, gh, repo, present, sec)
-    _check_secrets_and_variables(report, gh, repo, cfg, callers, present, sec)
+    if not bare:  # no environment variable, so no marker, on GitHub Free
+        _check_ownership(report, gh, repo, present, sec)
+    _check_secrets_and_variables(report, gh, repo, cfg, callers, present, sec, bare)
 
     if any(c.secrets and c.secrets.get("ledger-token") for c in callers):
         try:
@@ -448,7 +518,7 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
         except GitHubError as exc:
             if is_plan_error(exc):
                 report.add(
-                    FAIL,
+                    WARN if bare else FAIL,
                     sec,
                     "this repository's plan has no rulesets, so nothing stops the ledger token "
                     "from pushing to main (see the GitHub plan above)",
@@ -469,6 +539,25 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
                     "a ledger-token is passed but no ruleset requires pull requests on main: "
                     "the token could push to main",
                 )
+
+
+def _check_reviewer_access(report: Report, gh: GitHub, repo: str, cfg: Config, sec: str) -> None:
+    """Every login of ``reviewers.prod`` can approve: write access or more (D15)."""
+    for login in cfg.reviewers.prod:
+        try:
+            perm = gh.collaborator_permission(repo, login)
+        except GitHubError as exc:
+            report.add(FAIL, sec, f"reviewers.prod: cannot read the access of {login}: {exc}")
+            continue
+        if perm in ("admin", "write"):
+            report.add(OK, sec, f"reviewers.prod: {login} has {perm} access")
+        else:
+            report.add(
+                FAIL,
+                sec,
+                f"reviewers.prod: {login} has {perm} access; iac-approve refuses a reviewer "
+                "without write access",
+            )
 
 
 MARKER = "AYASEE_MANAGED"
@@ -507,6 +596,7 @@ def _check_secrets_and_variables(
     callers: list[Caller],
     present: list[str],
     sec: str,
+    bare: bool = False,
 ) -> None:
     secrets: dict[str | None, set[str]] = {}
     variables: dict[str | None, set[str]] = {}
@@ -545,13 +635,16 @@ def _check_secrets_and_variables(
             else:
                 need_repo.setdefault(src, f"{c.file}: {name}")
                 continue
+            if bare:  # no environment secrets on this plan: one repository secret
+                need_repo.setdefault(src, f"{c.file}: {name}")
+                continue
             for env in envs:
                 need_env.setdefault((env, src), f"{c.kind}: {name}")
     for c in callers:
         if c.kind == "iac-staged" and c.secrets is not None and cfg.identity == "secrets":
             if not PROVIDER_SECRETS & {n for n, s in c.secrets.items() if s}:
                 report.add(FAIL, sec, f"{c.file}: identity: secrets, but no provider secret passed")
-        if c.kind in ("iac-staged", "iac-breakglass") and c.secrets is not None:
+        if c.kind in ("iac-staged", "iac-breakglass", "iac-approve") and c.secrets is not None:
             for name in PLAN_KEY_SECRETS.get(cfg.plan_encryption.key_provider, ()):
                 if not c.secrets.get(name):
                     report.add(FAIL, sec, f"{c.file}: the plan key needs {name}; pass it")
@@ -592,6 +685,14 @@ def _check_secrets_and_variables(
                 f"secret {src} is not a repository secret ({why}); fine if it is an "
                 "organization secret",
             )
+    if bare and need_repo:
+        report.add(
+            WARN,
+            sec,
+            "every stage reads the same repository secrets on this plan: a provider token for "
+            "prod is also handed to the pre-prod jobs, so stage isolation rests on nothing but "
+            "the token scopes (D15)",
+        )
     if checked and not missing:
         report.add(OK, sec, f"{checked} environment secret(s) in place")
 
@@ -622,7 +723,8 @@ def _check_secrets_and_variables(
         if env not in present:
             continue  # reported as a missing environment
         checked += 1
-        have = names(variables, env, gh.variable_names)
+        # no environment variables on GitHub Free: the repository's are the ones read
+        have = set() if bare else names(variables, env, gh.variable_names)
         if have is None or var in have or var in repo_vars:
             continue
         missing += 1
@@ -636,14 +738,22 @@ def _check_secrets_and_variables(
 PLAN_SECTION = "GitHub plan"
 
 
-def check_plan(report: Report, gh: GitHub, repo: str) -> PlanSupport:
+def check_plan(report: Report, gh: GitHub, repo: str, gate: str = "environment") -> PlanSupport:
     """Can the repository's plan hold the gate? One line, first in the report.
 
-    ``UNSUPPORTED`` and ``UNKNOWN`` fail: the default gate rests on environment reviewers, and a
-    plan that is not confirmed is not taken for one that has them. A plan inferred from reviewers
-    already in place (the token cannot read the owner's plan) warns. A gate that does not need
-    these features (issue #40) would make the failure a recommendation here."""
+    With the environment gate (``gate``), ``UNSUPPORTED`` and ``UNKNOWN`` fail: the default gate
+    rests on environment reviewers, and a plan that is not confirmed is not taken for one that has
+    them; the failure (:meth:`PlanSupport.explain`) points to ``gate_mechanism: workflow`` (D15).
+    A plan inferred from reviewers already in place (the token cannot read the owner's plan)
+    warns.
+
+    With ``gate_mechanism: workflow`` nothing fails here: Pro or Team (no reviewers) is the case
+    the mode exists for; Free warns that the prod secrets and ``main`` are open to every writer;
+    a plan with reviewers warns that the environment gate would be stronger."""
     support = detect(gh, repo)
+    if gate == "workflow":
+        report.add(*_workflow_plan_line(support))
+        return support
     lines = support.explain()
     if support.verdict == SUPPORTED:
         level = WARN if support.inferred else OK
@@ -656,6 +766,54 @@ def check_plan(report: Report, gh: GitHub, repo: str) -> PlanSupport:
         level = FAIL
     report.add(level, PLAN_SECTION, "\n        ".join(lines))
     return support
+
+
+def is_bare(support: PlanSupport | None) -> bool:
+    """A plan known to have no deployment branch policies (GitHub Free, private)."""
+    return (
+        support is not None
+        and support.verdict == UNSUPPORTED
+        and BRANCH_POLICIES in support.missing
+    )
+
+
+def _workflow_plan_line(support: PlanSupport) -> tuple[str, str, str]:
+    where = f"a {support.visibility} repository" if support.visibility else "this repository"
+    plan = f" on the GitHub {support.plan.capitalize()} plan" if support.plan else ""
+    if support.verdict == SUPPORTED:
+        return (
+            WARN,
+            PLAN_SECTION,
+            f"{where}{plan} has required reviewers on environments: gate_mechanism: environment "
+            "is the stronger gate (GitHub enforces it); the workflow gate works here too",
+        )
+    if is_bare(support):
+        return (
+            WARN,
+            PLAN_SECTION,
+            f"{where}{plan} has no environment reviewers, branch policies, environment secrets or "
+            "rulesets. gate_mechanism: workflow still makes every prod apply wait for a reviewer "
+            "of reviewers.prod and apply only the approved plan, but the prod secrets are "
+            "repository secrets any collaborator with write access can read from any branch, "
+            "and anyone with write access can push to main: the gate stops mistakes and "
+            "unreviewed applies, not a collaborator who means harm (D15). Keep the collaborators "
+            "with write access to the reviewers",
+        )
+    if support.verdict == UNSUPPORTED:
+        return (
+            OK,
+            PLAN_SECTION,
+            f"{where}{plan} has no environment reviewers; gate_mechanism: workflow holds the "
+            "gate, and the prod environment keeps its main-only branch policy and its secrets "
+            "(D15)",
+        )
+    return (
+        WARN,
+        PLAN_SECTION,
+        f"cannot confirm the plan of {where} ({'; '.join(support.evidence) or 'no evidence'}); "
+        "iac-approve checks at run time that prod deploys from main only, or that the plan has "
+        "no branch policies at all",
+    )
 
 
 # ---- lock ------------------------------------------------------------------------------------
@@ -706,6 +864,17 @@ def check_lock(report: Report, urls: Iterable[str]) -> None:
 # ---- command ---------------------------------------------------------------------------------
 
 
+def _quiet_gate(path: Path) -> str:
+    """gate_mechanism of the configuration, read before the report starts; the configuration
+    check reports a file that does not load (the environment gate is then assumed)."""
+    try:
+        return (
+            parse_config_text(path.read_text()).gate_mechanism if path.is_file() else "environment"
+        )
+    except (ConfigError, OSError, UnicodeDecodeError):
+        return "environment"
+
+
 def _origin_repo(root: Path) -> str | None:
     try:
         proc = subprocess.run(
@@ -725,6 +894,7 @@ def run(args: argparse.Namespace) -> Report:
     report = Report()
     repo = args.repo or _origin_repo(root)
     support: PlanSupport | None = None
+    gate = _quiet_gate(root / args.config_path)
     if repo is None:
         report.add(SKIP, PLAN_SECTION, "no --repo and no github.com origin remote")
     elif not os.environ.get("GITHUB_TOKEN"):
@@ -732,18 +902,18 @@ def run(args: argparse.Namespace) -> Report:
     else:
         gh = GitHub.from_env()
         try:
-            support = check_plan(report, gh, repo)
+            support = check_plan(report, gh, repo, gate)
         finally:
             gh.close()
     cfg = check_config(report, args.config_path, root)
     callers = find_callers(report, root)
-    check_callers(report, callers)
+    check_callers(report, callers, cfg)
     if cfg is not None:
         check_shared_environments(report, cfg, root)
     sec = "GitHub"
     if cfg is None:
         report.add(SKIP, sec, "the configuration does not load")
-    elif support is not None and support.verdict == UNSUPPORTED:
+    elif support is not None and support.verdict == UNSUPPORTED and gate != "workflow":
         report.add(
             SKIP,
             sec,
@@ -757,7 +927,8 @@ def run(args: argparse.Namespace) -> Report:
     else:
         gh = GitHub.from_env()
         try:
-            check_github(report, gh, repo, cfg, callers)
+            bare = cfg.gate_mechanism == "workflow" and is_bare(support)
+            check_github(report, gh, repo, cfg, callers, bare)
         finally:
             gh.close()
     pinned = [c for c in callers if _SHA.match(c.ref)]

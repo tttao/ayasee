@@ -46,6 +46,18 @@ What it keeps and what it drops, for a single maintainer:
 
 The e2e scenario `solo` checks this path end to end. Do not use it for regulated workloads.
 
+## The workflow gate is a deviation
+
+`gate_mechanism: workflow` ([D15](../governance/decisions.md#d15-the-workflow-gate)) keeps an
+independent approval of every prod change (points (1)(b) and (1)(c)): a listed reviewer, who did
+not push, write or merge the change, starts `iac-approve`, and the ledger records them. What
+changes is who enforces it: ayasee's own workflow, not GitHub's environment protection, and on
+GitHub Free a collaborator with write access can reach the prod secrets outside it. An auditor
+should weigh it as a compensating control, which is why every run prints
+`DEVIATION: gate enforced by ayasee, not by GitHub environment protection` and the cockpit tags
+the repository `workflow gate · deviation`. Break-glass (point (1)(g)) is not available in this
+mode yet.
+
 ## Break-glass in practice
 
 Start `iac-breakglass` with `workflow_dispatch` (or call it with `workflow_call`) from `main` (a

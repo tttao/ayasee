@@ -131,7 +131,11 @@ def _cell(env: Env) -> str:
     return text
 
 
-LABEL_NAMES = {"solo_mode": "solo mode", "identity": "secrets identity"}
+LABEL_NAMES = {
+    "solo_mode": "solo mode",
+    "identity": "secrets identity",
+    "gate_mechanism": "workflow gate",
+}
 
 
 def _label(item: dict[str, Any]) -> str:

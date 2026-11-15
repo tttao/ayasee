@@ -218,4 +218,13 @@ describe("waiting without a since timestamp", () => {
     // no labels field (unknown) and an empty list both render nothing
     expect(root.querySelectorAll(`tr[data-repo="${s.repos[2]!.repo}"] .repo-label`)).toHaveLength(0);
   });
+
+  it("labels the workflow gate (D15)", () => {
+    const s = clone();
+    s.repos[0]!.labels = [{ kind: "deviation", setting: "gate_mechanism" }];
+    renderMatrix(s, root, NOW);
+    const tag = root.querySelector<HTMLElement>(`tr[data-repo="${s.repos[0]!.repo}"] th .repo-label`)!;
+    expect(tag.textContent).toBe("workflow gate · deviation");
+    expect(tag.title).toContain("D15");
+  });
 });

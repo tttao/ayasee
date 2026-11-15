@@ -72,9 +72,10 @@ two-stage, four-stage or five-stage run has been executed on GitHub yet.
 | `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. |
 | `stage-2`, `stage-3` | the slot before | its stage is in the list and not before `start-stage`; the slot before succeeded, or was skipped (by `start-stage` or as unused) | Same as `stage-1`. |
 | `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
-| `prod-gate` | `resolve` | `resolve` succeeded and runs `prod-plan` | `ayasee require-reviewers` on the `prod` environment (its GitHub name, `environment_prefix` included): refuses when it has no required reviewers, does not exist yet (GitHub would create it unprotected on first use), or the repository's plan ignores them (a private repository on GitHub Free, seen from the 403 of the rulesets API), and when the API cannot be read. No environment, so no secret; its token holds `actions: read` only. It runs beside the pre-prod stages, which need no approval (issue #39). |
+| `prod-gate` | `resolve` | `resolve` succeeded and runs `prod-plan` | `ayasee require-reviewers` on the `prod` environment (its GitHub name, `environment_prefix` included): refuses when it has no required reviewers, does not exist yet (GitHub would create it unprotected on first use), or the repository's plan ignores them (a private repository on GitHub Free, seen from the 403 of the rulesets API), and when the API cannot be read. No environment, so no secret; its token holds `actions: read` only. It runs beside the pre-prod stages, which need no approval (issue #39). With `gate_mechanism: workflow` the check is skipped: `iac-approve` checks the prod environment itself. |
 | `prod-plan` | `prod-gate`, `stage-1` to `stage-4` | `prod-gate` succeeded; after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
-| `prod` | `prod-plan` | `has-changes == 'true'` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
+| `prod` | `prod-plan` | `has-changes == 'true'`, and `gate_mechanism` is not `workflow` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
+| `prod-approval` | `prod-plan` | `has-changes == 'true'` and `gate_mechanism: workflow` | No environment, no secret (`contents: read`, `issues: write`): opens or rewrites the prod approval issue and ends the run. `iac-approve` applies the plan ([the workflow gate](#the-workflow-gate)). |
 | `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
 
 Every stage job has `environment: <name>`, an `ayasee-<repo>-<env>` concurrency group with
@@ -417,6 +418,99 @@ are never listed. The API has no attempt field, so approvals from earlier attemp
 may be included: the recorded approver string is a superset of the people who approved this
 attempt. It is stored in the ledger with `--approver`. The ledger in the backend is the source of
 truth for what is live; the GitHub deployment is a projection written with `--mirror-deployments`.
+
+## The workflow gate
+
+`gate_mechanism: workflow` in `.ayasee.yaml` (decision
+[D15](../governance/decisions.md#d15-the-workflow-gate), issue #40) is for a private repository
+below GitHub Enterprise, where GitHub has no required reviewers on environments. It is labelled
+`DEVIATION: gate enforced by ayasee, not by GitHub environment protection` on every run and in
+the cockpit. The default, `environment`, is unchanged.
+
+1. **The staged run stops after `prod-plan`.** The plan, its manifest and the change set are made
+   and scanned as always, and the encrypted plan and manifest are kept as the run's
+   `ayasee-prod-plan` artifact (7 days). Instead of `prod`, the `prod-approval` job opens one issue
+   labelled `ayasee:prod-approval` (or rewrites the open one: only the newest plan can be applied)
+   with the commit SHA, the SHA-256 of `manifest.json` (`manifest-digest`), the change counts and
+   the run link. No value of the plan goes there. An empty plan still takes the
+   [empty-plan path](#the-empty-plan-path) and needs no approval.
+2. **A reviewer starts `iac-approve` on `main`** with `sha` and `manifest-digest` from the issue
+   (`gh workflow run iac-approve.yml --ref main -f sha=... -f manifest-digest=...`). The `verify`
+   job has no environment and receives no secret; with `github.token` (`contents: read`,
+   `actions: read`, `pull-requests: read`) it refuses unless:
+   - the run is a `workflow_dispatch` on `refs/heads/main`, and `github.actor` (who chose the
+     inputs) is `github.triggering_actor` (who started this attempt): an approval is never re-run
+     by someone else;
+   - the configuration **of `main`** (never of the commit to apply) has `gate_mechanism: workflow`
+     and lists the actor in `reviewers.prod` (GitHub logins, case ignored), and GitHub gives the
+     actor write access now;
+   - the commit is in the history of `main`;
+   - the newest unexpired `ayasee-prod-plan` artifact of that commit comes from a run on `main`
+     (a push or a dispatch) that completed successfully and calls ayasee's `iac-staged.yml`, and
+     its `manifest.json` has exactly the given digest and binds `prod` at that commit. A re-planned
+     commit is approved by its new digest only;
+   - the actor did not push the change (the actor and triggering actor of that run), author or
+     commit it, or open or merge its pull request into `main`, unless `solo_mode` (NON-COMPLIANT);
+   - the `prod` environment deploys from `main` only, or the repository's plan has no deployment
+     branch policies at all (GitHub Free), which is printed as a DEVIATION.
+3. **The `apply` job** runs in the `prod` environment, in the `prod` concurrency group of the
+   staged runs, only after `verify` succeeded and only on `main`. It checks out the commit, checks
+   that it is on `main`, runs the [guard](#the-supersession-guard) (the commit must be the one live
+   and converged in the stage before prod, and no stop-the-line issue open), then
+   `ayasee approve baseline` against the ledger: the commit is not already live in prod; the actor
+   was already in `reviewers.prod` at the commit live in prod, so a change cannot add its own
+   approver (before the first prod record, or when that commit predates the mode, `main`'s list
+   alone decides and a notice says so); and, unless `solo_mode` is on at both commits, no commit
+   since the one live in prod has the actor as author or committer. It then downloads the artifact
+   again, checks the digest again, applies it with `binding-mode: encrypted_plan` (D1: hashes,
+   engine version, lock files, and OpenTofu's own stale-plan check), writes the ledger with the
+   actor as approver, closes the approval issue and notifies. No step before the apply step
+   receives a provider or plan-key secret; the guard and the ledger steps get the ledger
+   credentials only.
+
+What the mode guarantees depends on the plan: see
+[D15](../governance/decisions.md#d15-the-workflow-gate). On GitHub Pro or Team the environments
+stay restricted to `main` and keep their own secrets; on GitHub Free there are no environment
+secrets or branch policies, so the secrets are repository secrets that any collaborator with
+write access can read from any branch, and every stage reads the same ones.
+
+Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request plan of
+[shared units](#units-that-serve-every-stage), which needs a reviewer before pull-request code
+runs with a prod identity (`iac-pr` skips it with a warning when the configuration of the pull
+request or of its base commit says `workflow`). `ayasee init` does not scaffold the caller yet;
+add it by hand, with the same secrets as the `iac-staged` caller:
+
+```yaml
+# .github/workflows/iac-approve.yml
+name: iac-approve
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA from the prod approval issue.
+        required: true
+      manifest-digest:
+        description: manifest-digest from the prod approval issue.
+        required: true
+permissions: {}
+jobs:
+  approve:
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+      issues: write
+      actions: read
+      pull-requests: read
+    uses: tttao/ayasee/.github/workflows/iac-approve.yml@<release SHA>
+    with:
+      sha: ${{ inputs.sha }}
+      manifest-digest: ${{ inputs.manifest-digest }}
+    secrets:
+      ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}
+      AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}
+      # and the provider secrets the iac-staged caller passes
+```
 
 ## The empty-plan path
 

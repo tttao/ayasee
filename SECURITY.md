@@ -97,6 +97,14 @@ credentials go (`LD_*`, `BASH_ENV`, `GITHUB_*`, `TF_CLI_ARGS`, `AWS_*`, `CLOUDFL
   `superseded` by the guard at apply time.
 - Break-glass uses a separate environment and reviewers, requires an incident reference and a commit
   that is an ancestor of `main`, runs the policy pack, and always opens a post-approval issue.
+- **`gate_mechanism: workflow` (D15, a DEVIATION)** replaces the `prod` reviewers with a second
+  run, `iac-approve`, that ayasee checks before any secret is used: dispatched on `main` and not
+  re-run by another person, by a login of `reviewers.prod` read from `main` (and already listed at
+  the commit live in prod), with write access, who did not push, write or merge the change; for
+  the newest plan of that commit from a successful `iac-staged` run on `main`, bound by the
+  SHA-256 of its manifest; then the guard. What it protects depends on the plan: on GitHub Free
+  the prod secrets are repository secrets that any collaborator with write access can read
+  ([D15](docs/governance/decisions.md#d15-the-workflow-gate)).
 
 **Supply chain.** Third-party actions are pinned by commit SHA; callers pin ayasee by SHA; callers
 never use `secrets: inherit`. Tools downloaded by the actions are verified by SHA-256. CI runs
@@ -115,6 +123,10 @@ token is limited to the data repository (R62). Hosting is a confidentiality deci
   federated credential subject.
 - A workflow is only as safe as the repository settings behind it. Environment protection, branch
   policy and the reviewer sets must be created (the `github-environments` module does).
+- With `gate_mechanism: workflow` the gate is ayasee's own code in the callers on `main`: a change
+  to them can remove it, and only a ruleset on `main` (GitHub Pro, Team or Enterprise for a private
+  repository) makes such a change need a review. On GitHub Free there is none, and a collaborator
+  with write access can read every secret from a branch.
 - GitHub Enterprise Server behaviour is unverified, and the end-to-end sandbox scenarios have not run
   against a real repository ([known limitations](docs/concepts/architecture.md#known-limitations)).
 - The Databricks policy pack and risk rules are a defence in depth, not a complete model of every

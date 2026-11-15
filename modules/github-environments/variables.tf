@@ -33,34 +33,47 @@ variable "stages" {
 }
 
 variable "prod_reviewers" {
-  description = "Required reviewers of the prod environment (GitHub team and user IDs). Must not be empty."
+  description = "Required reviewers of the prod environment (GitHub team and user IDs). Must not be empty with gate_mechanism = \"environment\"; must be left unset (null) with \"workflow\", whose reviewers are reviewers.prod of .ayasee.yaml."
   type = object({
     teams = list(number)
     users = list(number)
   })
+  default = null
 
   validation {
-    condition     = length(var.prod_reviewers.teams) + length(var.prod_reviewers.users) > 0
+    condition     = var.gate_mechanism == "workflow" || try(length(var.prod_reviewers.teams) + length(var.prod_reviewers.users), 0) > 0
     error_message = "prod_reviewers must contain at least one team or user (DORA RTS 2024/1774 Art. 17(1)(b))."
+  }
+
+  validation {
+    condition     = var.gate_mechanism != "workflow" || var.prod_reviewers == null
+    error_message = "gate_mechanism = \"workflow\" sets no reviewers on prod: leave prod_reviewers unset and list the reviewers in reviewers.prod of .ayasee.yaml (D15)."
   }
 }
 
 variable "breakglass_reviewers" {
-  description = "Required reviewers of prod-breakglass. Must not be empty and must differ from prod_reviewers."
+  description = "Required reviewers of prod-breakglass. Must not be empty and must differ from prod_reviewers. Left unset (null) with gate_mechanism = \"workflow\", whose break-glass path is not available yet."
   type = object({
     teams = list(number)
     users = list(number)
   })
+  default = null
 
   validation {
-    condition     = length(var.breakglass_reviewers.teams) + length(var.breakglass_reviewers.users) > 0
+    condition     = var.gate_mechanism == "workflow" || try(length(var.breakglass_reviewers.teams) + length(var.breakglass_reviewers.users), 0) > 0
     error_message = "breakglass_reviewers must contain at least one team or user."
   }
 
   validation {
-    condition = var.solo_mode || !(
+    condition     = var.gate_mechanism != "workflow" || var.breakglass_reviewers == null
+    error_message = "gate_mechanism = \"workflow\" sets no reviewers on prod-breakglass: leave breakglass_reviewers unset (D15)."
+  }
+
+  validation {
+    condition = var.solo_mode || var.gate_mechanism == "workflow" || !try(
       toset(var.breakglass_reviewers.teams) == toset(var.prod_reviewers.teams) &&
-      toset(var.breakglass_reviewers.users) == toset(var.prod_reviewers.users)
+      toset(var.breakglass_reviewers.users) == toset(var.prod_reviewers.users),
+      false
     )
     error_message = "breakglass_reviewers must differ from prod_reviewers (unless solo_mode)."
   }
@@ -72,10 +85,26 @@ variable "variables" {
   default     = {}
 }
 
+variable "gate_mechanism" {
+  description = "gate_mechanism of .ayasee.yaml (keep the two equal). \"environment\" (the default): prod and prod-breakglass carry required reviewers, which GitHub enforces. \"workflow\" (D15, a DEVIATION): no environment carries reviewers; ayasee's iac-approve workflow checks reviewers.prod of .ayasee.yaml instead. The environments keep their main-only deployment branch policy where the plan has one; a private repository on GitHub Free (private_repository_plan = \"free\") has neither branch policies nor environment secrets and variables, so its environments are created bare and its secrets are repository secrets."
+  type        = string
+  default     = "environment"
+
+  validation {
+    condition     = contains(["environment", "workflow"], var.gate_mechanism)
+    error_message = "gate_mechanism is environment or workflow."
+  }
+}
+
 variable "shared_units_pr_plan" {
   description = "Create prod-pr-plan: the environment of the iac-pr job that plans shared prod units (shared_units in .ayasee.yaml) read-only. It accepts pull-request branches and carries prod_reviewers, so a prod reviewer approves before PR code runs with the read-only prod identity."
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.shared_units_pr_plan || var.gate_mechanism == "environment"
+    error_message = "gate_mechanism = \"workflow\" has no prod-pr-plan: the pull-request plan of shared units needs a reviewer that GitHub enforces (D15)."
+  }
 }
 
 variable "solo_mode" {

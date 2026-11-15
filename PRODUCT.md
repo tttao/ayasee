@@ -68,7 +68,7 @@ all runs in the adopter's own GitHub Actions. There is no SaaS, no backend and n
 ## Evidence on Hand
 
 - Comparison matrix with dated, sourced claims: `docs/comparison.md`.
-- Design decisions D1 to D14: `docs/governance/decisions.md`.
+- Design decisions D1 to D15: `docs/governance/decisions.md`.
 - DORA Art. 17 compliance mapping: `docs/compliance/dora-art17.md`.
 - Snapshot fixture for the cockpit: `cockpit-site/test/fixtures/snapshot.json`.
 - **Absent, never to be invented:** adopters, customer logos, testimonials, usage numbers,

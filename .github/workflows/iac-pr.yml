@@ -454,6 +454,23 @@ jobs:
           ayasee config show --path "$CONFIG_PATH" >"$cfg"
           shared="$(jq -r '.shared_units | join(",")' "$cfg")"
           units=""
+          # gate_mechanism: workflow (D15) has no prod-pr-plan environment, so no reviewer would
+          # stand between PR code and a prod identity: the shared-unit plan is off. The base
+          # commit's configuration counts too, so a pull request cannot switch the plan back on.
+          gate="$(jq -er '.gate_mechanism' "$cfg")"
+          if [ -n "$shared" ] && [ "$gate" = environment ]; then
+            base_cfg="$RUNNER_TEMP/ayasee-base.yaml"
+            if git cat-file -e "$BASE_SHA:$CONFIG_PATH" 2>/dev/null; then
+              git show "$BASE_SHA:$CONFIG_PATH" >"$base_cfg"
+              gate="$(ayasee config show --path "$base_cfg" | jq -er '.gate_mechanism')"
+            fi
+          fi
+          if [ -n "$shared" ] && [ "$gate" != environment ]; then
+            msg="gate_mechanism: workflow: the shared prod units are not planned in pull requests (no prod-pr-plan reviewers); prod-plan plans them after the merge and a reviewer approves them with iac-approve"
+            echo "::warning::$msg"
+            echo "> **$msg**" >>"$GITHUB_STEP_SUMMARY"
+            shared=""
+          fi
           if [ -n "$shared" ]; then
             units="$(ayasee changed-units --base "$BASE_SHA" --head "$HEAD_SHA" \
               --units-root "$(jq -r '.units_root' "$cfg")" --iac-root "$(jq -r '.iac_root' "$cfg")" \
