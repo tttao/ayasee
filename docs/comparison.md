@@ -154,8 +154,9 @@ and have no ordered promotion.
   policies and rulesets. A private repository has the reviewers on GitHub Enterprise only, so a
   **private repository on GitHub Free, Pro or Team is not supported today**; ayasee refuses to
   run ungated there and says so ([what the plan must allow](guides/adopt.md#what-the-github-plan-must-allow)).
-  A gate that does not depend on the plan is tracked in
-  [issue #40](https://github.com/tttao/ayasee/issues/40).
+  Such a repository can opt into `gate_mechanism: workflow`, where ayasee enforces the gate
+  itself: weaker than GitHub's protection, and on GitHub Free it does not protect the prod
+  secrets from a collaborator with write access ([D15](governance/decisions.md#d15-the-workflow-gate)).
 - It is **pre-alpha** with a single maintainer.
   Established tools have users, support and years of bug reports. See [governance](../GOVERNANCE.md).
 - The wired path is **OpenTofu, Terragrunt and Azure** (identities, Key Vault plan encryption, blob

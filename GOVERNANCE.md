@@ -13,7 +13,7 @@ The licence is Apache-2.0 and the copyright is held by the ayasee authors: see
 
 ## How decisions are made
 
-- The design decisions D1 to D14, with the options considered and the default taken, are in
+- The design decisions D1 to D15, with the options considered and the default taken, are in
   [`docs/governance/decisions.md`](docs/governance/decisions.md). Their effect on behaviour is
   described in [the docs](docs/README.md).
 - A change to a safety default (plan binding, independent approval, the guard, what may leave a job,

@@ -56,6 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def entrypoint() -> None:
     import ayasee.approvals  # noqa: F401  (registers its subcommand)
+    import ayasee.approve  # noqa: F401  (registers its subcommand)
     import ayasee.binding  # noqa: F401  (registers its subcommand)
     import ayasee.cascade  # noqa: F401  (registers its subcommand)
     import ayasee.changed  # noqa: F401  (registers its subcommand)

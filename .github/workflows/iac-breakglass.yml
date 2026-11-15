@@ -234,6 +234,13 @@ jobs:
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
           echo "environment-prefix=$(jq -r '.environment_prefix' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
+          # D15: break-glass rests on the reviewers of prod-breakglass; with gate_mechanism:
+          # workflow there are none, and the break-glass path of that mode is not built yet
+          gate="$(jq -er '.gate_mechanism' "$RUNNER_TEMP/ayasee-config.json")"
+          [ "$gate" = environment ] || {
+            echo "::error::break-glass is not available with gate_mechanism: workflow yet (issue #40); apply prod through the staged run and iac-approve"
+            exit 1
+          }
       # issue #39: the break-glass job is gated only by the reviewers of its environment; without
       # them (none set, not created yet, or a plan that ignores them) it would apply unapproved
       - name: Refuse a break-glass environment without required reviewers

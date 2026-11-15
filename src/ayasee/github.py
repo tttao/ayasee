@@ -303,9 +303,12 @@ class GitHub:
         state: str | None = None,
         labels: list[str] | None = None,
         body: str | None = None,
+        title: str | None = None,
     ) -> None:
         """PATCH an issue; only the fields given are sent (``state`` is open or closed)."""
         fields: dict[str, Any] = {}
+        if title is not None:
+            fields["title"] = title
         if body is not None:
             fields["body"] = body
         if state is not None:
@@ -736,6 +739,53 @@ class GitHub:
         if workflows is None:
             return runs
         return [r for r in runs if "path" not in r or str(r["path"]).split("@")[0] in workflows]
+
+    # ---- the workflow gate (issue #40, D15; read-only) --------------------------------------
+
+    def list_artifacts(self, repo: str, name: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/actions/artifacts?name=`` (Actions: read): the newest 100
+        artifacts called ``name`` across the repository's runs, each with its ``workflow_run``."""
+        data = self._get(f"/repos/{repo}/actions/artifacts", "artifacts", name=name, per_page=100)
+        items = data.get("artifacts") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise GitHubError(0, "unexpected artifacts response")
+        return [a for a in items if isinstance(a, dict)]
+
+    def collaborator_permission(self, repo: str, login: str) -> str:
+        """``permission`` of ``GET /repos/{repo}/collaborators/{login}/permission`` (Metadata:
+        read): admin, write, read or none (maintain counts as write, triage as read)."""
+        data = self._get(
+            f"/repos/{repo}/collaborators/{quote(login, safe='')}/permission", "permission"
+        )
+        perm = data.get("permission") if isinstance(data, dict) else None
+        if not isinstance(perm, str) or not perm:
+            raise GitHubError(0, "unexpected permission response")
+        return perm
+
+    def commit(self, repo: str, sha: str) -> dict[str, Any]:
+        """``GET /repos/{repo}/commits/{sha}`` (Contents: read)."""
+        data = self._get(f"/repos/{repo}/commits/{sha}", "commit", per_page=1)
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected commit response")
+        return data
+
+    def commit_pulls(self, repo: str, sha: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/commits/{sha}/pulls`` (Pull requests: read): the pull requests
+        that contain the commit (the merged one first, for a commit on the default branch)."""
+        return self._paginate(f"/repos/{repo}/commits/{sha}/pulls", {"per_page": 100}, "pulls")
+
+    def pull_request(self, repo: str, number: int) -> dict[str, Any]:
+        """``GET /repos/{repo}/pulls/{number}`` (Pull requests: read), with ``merged_by``."""
+        data = self._get(f"/repos/{repo}/pulls/{number}", "pull request")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected pull request response")
+        return data
+
+    def compare_commits(self, repo: str, base: str, head: str) -> list[dict[str, Any]]:
+        """Every commit of ``base...head`` (Contents: read), following the pagination."""
+        return self._paginate(
+            f"/repos/{repo}/compare/{base}...{head}", {"per_page": 100}, "compare", "commits"
+        )
 
     def code_scanning_counts(self, repo: str) -> dict[str, int] | None:
         """Open alert counts ``{"critical": n, "high": n}``; None when code scanning is not

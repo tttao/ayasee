@@ -789,3 +789,62 @@ def test_cli_environments_and_show(tmp_path, monkeypatch, capsys):
     shown = json.loads(capsys.readouterr().out)
     assert shown["environment_prefix"] == "iac-"
     assert shown["environments"]["prod"] == "iac-prod"
+
+
+# ---- gate_mechanism: workflow (issue #40, D15) -------------------------------------------------
+
+WORKFLOW_GATE = "gate_mechanism: workflow\nreviewers: {prod: [alice]}\n"
+
+
+def test_gate_mechanism_defaults_to_the_environment_gate():
+    cfg = Config()
+    assert cfg.gate_mechanism == "environment" and cfg.reviewers.prod == []
+    assert config.label_keys(cfg) == []
+
+
+def test_the_workflow_gate_needs_prod_reviewers():
+    cfg = config.parse_config_text("gate_mechanism: workflow\nreviewers:\n  prod: [alice, bob]\n")
+    assert cfg.gate_mechanism == "workflow" and cfg.reviewers.prod == ["alice", "bob"]
+    for text in ("gate_mechanism: workflow\n", "gate_mechanism: workflow\nreviewers: {prod: []}\n"):
+        with pytest.raises(ConfigError, match="reviewers.prod"):
+            config.parse_config_text(text)
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("gate_mechanism: github\n", "gate_mechanism: must be one of environment, workflow"),
+        ("reviewers: {prod: [alice]}\n", "only with gate_mechanism: workflow"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [-bad]}\n", "not a GitHub login"),
+        ("gate_mechanism: workflow\nreviewers: {prod: ['a b']}\n", "not a GitHub login"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [Alice, alice]}\n", "unique"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [alice], breakglass: [bob]}\n", "unknown"),
+        ("gate_mechanism: workflow\nreviewers: [alice]\n", "expected a mapping"),
+    ],
+)
+def test_the_workflow_gate_refuses_a_bad_reviewer_list(text, message):
+    with pytest.raises(ConfigError, match=message):
+        config.parse_config_text(text)
+
+
+def test_the_workflow_gate_is_labelled_as_a_deviation():
+    cfg = config.parse_config_text(WORKFLOW_GATE)
+    assert config.label_keys(cfg) == [{"kind": "deviation", "setting": "gate_mechanism"}]
+    assert config.labels(cfg) == [config.DEVIATION_GATE]
+    assert config.DEVIATION_GATE.startswith(
+        "DEVIATION: gate enforced by ayasee, not by GitHub environment protection"
+    )
+
+
+def test_the_workflow_gate_has_no_prod_pr_plan_environment():
+    text = "shared_units: [edge]\n"
+    assert "prod-pr-plan" in config.environment_names(config.parse_config_text(text))
+    cfg = config.parse_config_text(text + WORKFLOW_GATE)
+    assert "prod-pr-plan" not in config.environment_names(cfg)
+
+
+def test_config_show_carries_the_gate(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, WORKFLOW_GATE)
+    assert _cli(monkeypatch, "show", "--path", str(p)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["gate_mechanism"] == "workflow" and out["reviewers"] == {"prod": ["alice"]}

@@ -34,7 +34,7 @@
         },
         "envs": { "type": "array", "items": { "$ref": "#/$defs/env" } },
         "labels": {
-          "description": "Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets: deviation). Absent when unknown, empty when none.",
+          "description": "Opt-ins that weaken a compliant default, from the repository's ayasee configuration at main (solo_mode: non-compliant; identity: secrets and gate_mechanism: workflow: deviation). Absent when unknown, empty when none.",
           "type": "array",
           "items": { "$ref": "#/$defs/label" }
         }

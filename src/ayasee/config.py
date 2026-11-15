@@ -27,9 +27,20 @@ DEVIATION_SECRETS = (
     "(a pre-prod token whose scope covers prod objects, e.g. a shared DNS zone, can change them "
     "without the prod gate)"
 )
+DEVIATION_GATE = (
+    "DEVIATION: gate enforced by ayasee, not by GitHub environment protection "
+    "(gate_mechanism: workflow, D15): no job waits for a reviewer; prod is applied by a separate "
+    "iac-approve run that ayasee checks, and the prod secrets are only as protected as the "
+    "repository's plan allows (without deployment branch policies, any collaborator with write "
+    "access can read them)"
+)
 ENGINES = ("opentofu", "terraform")
 GATES = ("always", "risky")
 IDENTITIES = ("oidc", "secrets")
+# D15 (issue #40): who holds the prod gate, the reviewers of the GitHub environment or ayasee
+GATE_MECHANISMS = ("environment", "workflow")
+# a GitHub login: letters, digits and single hyphens, not at either end, at most 39 characters
+GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 # Wired plan-encryption key providers (D1, issue #10).
 KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms", "gcp_kms", "openbao")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
@@ -71,6 +82,14 @@ class PlanEncryptionConfig:
 
 
 @dataclass
+class ReviewersConfig:
+    """The reviewers ayasee checks itself with ``gate_mechanism: workflow`` (D15). Read from the
+    configuration of ``main``, never from the commit being approved."""
+
+    prod: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Config:
     stages: list[str] = field(default_factory=lambda: ["dev", "uat", "prod"])
     engine: str = "opentofu"
@@ -89,6 +108,8 @@ class Config:
     plan_encryption: PlanEncryptionConfig = field(default_factory=PlanEncryptionConfig)
     provider_env: list[str] = field(default_factory=list)
     environment_prefix: str = ""
+    gate_mechanism: str = "environment"
+    reviewers: ReviewersConfig = field(default_factory=ReviewersConfig)
 
     @property
     def binding_mode(self) -> str:
@@ -255,7 +276,33 @@ def _parse(raw: Any) -> Config:
         cfg.provider_env = names
     if "environment_prefix" in top:
         cfg.environment_prefix = _environment_prefix(top["environment_prefix"])
+    if "gate_mechanism" in top:
+        cfg.gate_mechanism = _literal(top["gate_mechanism"], "gate_mechanism", GATE_MECHANISMS)
+    if "reviewers" in top:
+        if cfg.gate_mechanism != "workflow":
+            raise ConfigError(
+                "reviewers: only with gate_mechanism: workflow (with the environment gate the "
+                "reviewers are those of the prod environment, set by the bootstrap)"
+            )
+        section = _mapping(top["reviewers"], "reviewers", {"prod"})
+        if "prod" in section:
+            cfg.reviewers.prod = _logins(section["prod"], "reviewers.prod")
+    if cfg.gate_mechanism == "workflow" and not cfg.reviewers.prod:
+        raise ConfigError(
+            "reviewers.prod: gate_mechanism: workflow needs at least one GitHub login that may "
+            "approve a prod apply"
+        )
     return cfg
+
+
+def _logins(value: Any, where: str) -> list[str]:
+    logins = _str_list(value, where)
+    for login in logins:
+        if not GITHUB_LOGIN.fullmatch(login):
+            raise ConfigError(f"{where}: {login!r} is not a GitHub login")
+    if len({x.lower() for x in logins}) != len(logins):
+        raise ConfigError(f"{where}: logins must be unique (GitHub ignores case)")
+    return logins
 
 
 def load_config(path: Path = DEFAULT_PATH) -> Config:
@@ -321,7 +368,8 @@ def environment_names(cfg: Config) -> dict[str, str]:
         "prod-plan",
         "prod-breakglass",
         *(f"drift-{s}" for s in cfg.stages),
-        *(["prod-pr-plan"] if cfg.shared_units else []),
+        # the workflow gate (D15) switches the pull-request plan of shared units off
+        *(["prod-pr-plan"] if cfg.shared_units and cfg.gate_mechanism == "environment" else []),
     ]
     names: dict[str, str] = {}
     for name in logical:
@@ -390,18 +438,26 @@ def staged_environments(layout: dict[str, str], prefix: str) -> dict[str, str]:
 def label_keys(cfg: Config) -> list[dict[str, str]]:
     """The opt-ins that weaken a compliant default, as ``{kind, setting}`` (the cockpit's form).
 
-    ``solo_mode`` disables independent approval (D2, kind ``non-compliant``) and
-    ``identity: secrets`` stores provider tokens instead of using OIDC (D7, kind ``deviation``).
+    ``solo_mode`` disables independent approval (D2, kind ``non-compliant``),
+    ``identity: secrets`` stores provider tokens instead of using OIDC (D7, kind ``deviation``) and
+    ``gate_mechanism: workflow`` has ayasee, not GitHub, enforce the prod gate (D15, kind
+    ``deviation``).
     """
     out = []
     if cfg.solo_mode:
         out.append({"kind": "non-compliant", "setting": "solo_mode"})
     if cfg.identity == "secrets":
         out.append({"kind": "deviation", "setting": "identity"})
+    if cfg.gate_mechanism == "workflow":
+        out.append({"kind": "deviation", "setting": "gate_mechanism"})
     return out
 
 
-_LABEL_TEXT = {"solo_mode": NON_COMPLIANT, "identity": DEVIATION_SECRETS}
+_LABEL_TEXT = {
+    "solo_mode": NON_COMPLIANT,
+    "identity": DEVIATION_SECRETS,
+    "gate_mechanism": DEVIATION_GATE,
+}
 
 
 def labels(cfg: Config) -> list[str]:

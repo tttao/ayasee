@@ -22,7 +22,7 @@ behaviour and the end-to-end sandbox are unverified, and governance is not settl
 - Security, contributing, governance: [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md),
   [`GOVERNANCE.md`](GOVERNANCE.md)
 - Implementation plans: [`docs/superpowers/plans/`](docs/superpowers/plans/)
-- Design decisions D1 to D14: [`docs/governance/decisions.md`](docs/governance/decisions.md)
+- Design decisions D1 to D15: [`docs/governance/decisions.md`](docs/governance/decisions.md)
 - Provenance and licence: [`docs/governance/PROVENANCE.md`](docs/governance/PROVENANCE.md)
 
 Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).

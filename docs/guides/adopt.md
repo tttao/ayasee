@@ -11,8 +11,9 @@ tokens. Everything else is a command.
 
 ## What you need
 
-- A GitHub repository you administer, and `gh` logged in as an administrator. It must be
-  **public, or private on GitHub Enterprise** (Cloud or Server): see
+- A GitHub repository you administer, and `gh` logged in as an administrator. For the default
+  gate it must be **public, or private on GitHub Enterprise** (Cloud or Server); a private
+  repository on another plan uses `gate_mechanism: workflow`: see
   [below](#what-the-github-plan-must-allow).
 - `tofu` (OpenTofu 1.10 or later), `terragrunt`, and `uv`.
 - The release you adopt, `X.Y.Z`, from the [releases](https://github.com/tttao/ayasee/releases).
@@ -37,8 +38,25 @@ running ungated. `ayasee init` warns before it scaffolds, `ayasee doctor` fails 
 missing features, the bootstrap refuses to create the environments (a private repository states
 its plan in `private_repository_plan`, which must be `enterprise`), and the staged and break-glass
 runs refuse to go on when the gated environment has no required reviewers
-(`ayasee require-reviewers`). A gate that does not depend on the plan is tracked in
-[issue #40](https://github.com/tttao/ayasee/issues/40).
+(`ayasee require-reviewers`).
+
+Such a repository can opt into **`gate_mechanism: workflow`** (decision
+[D15](../governance/decisions.md#d15-the-workflow-gate)): ayasee, not GitHub, enforces the prod
+gate, and every run says so as a DEVIATION. The staged run stops after `prod-plan` with an approval
+issue, and a reviewer listed in `reviewers.prod` of `.ayasee.yaml` applies the plan with the
+`iac-approve` workflow ([how](../concepts/staged-run.md#the-workflow-gate)). Set
+`gate_mechanism = "workflow"` (and no reviewer variables) in the bootstrap as well, add the
+`iac-approve` caller by hand, and know what the plan still gives you:
+
+- **GitHub Pro or Team**: the environments stay restricted to `main` and keep their own secrets,
+  so only a job on `main` reaches the prod secrets, and a ruleset on `main` can make every change
+  to the reviewers or the callers go through a reviewed pull request.
+- **GitHub Free**: no environment secrets, environment variables, branch policies or rulesets.
+  Set `private_repository_plan = "free"`: the environments are created bare, and every secret and
+  variable is a repository one. Any collaborator with write access can read the prod secrets from
+  a workflow on any branch and push to `main`, and every stage reads the same provider tokens. The
+  gate then stops mistakes and unreviewed applies, not a collaborator who means harm: keep the
+  collaborators with write access to the reviewers.
 
 ## 1. Scaffold: `ayasee init`
 

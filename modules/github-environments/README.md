@@ -36,6 +36,19 @@ when GitHub did not keep the reviewers of `prod`, `prod-breakglass` or `prod-pr-
 repositories on other plans are not supported by the default gate
 ([adopt: what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
 
+### `gate_mechanism = "workflow"`
+
+Keep it equal to `gate_mechanism` of `.ayasee.yaml` (decision
+[D15](../../docs/governance/decisions.md#d15-the-workflow-gate)). With `"workflow"` no environment
+carries reviewers: leave `prod_reviewers` and `breakglass_reviewers` unset (the reviewers are
+`reviewers.prod` of `.ayasee.yaml`, which `iac-approve` checks), and `shared_units_pr_plan` is
+refused. The environments keep their main-only deployment branch policy where the plan has one
+(public, or private on Pro, Team or Enterprise). `private_repository_plan = "free"` is then
+accepted: GitHub Free has no branch policies, environment secrets or environment variables, so
+the environments are created bare (no branch policy, no `AYASEE_MANAGED` variable), `variables`
+and `generate_plan_passphrase` are refused, and `secret_commands` lists every secret as a
+repository secret, one per name: every stage then reads the same provider tokens.
+
 ## Names: `environment_prefix`
 
 `environment_prefix` (default `""`, the names above) is put in front of every environment name, so

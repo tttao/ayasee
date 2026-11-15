@@ -21,10 +21,16 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return n;
 }
 
-const LABEL_NAMES: Record<string, string> = { solo_mode: "solo mode", identity: "secrets identity" };
+const LABEL_NAMES: Record<string, string> = {
+  solo_mode: "solo mode",
+  identity: "secrets identity",
+  gate_mechanism: "workflow gate",
+};
 const LABEL_HELP: Record<string, string> = {
   solo_mode: "solo_mode: one person can merge and approve production (no independent approval, D2)",
   identity: "identity: secrets: provider tokens are stored as environment secrets instead of OIDC (D7)",
+  gate_mechanism:
+    "gate_mechanism: workflow: ayasee, not GitHub environment protection, enforces the prod gate (D15)",
 };
 
 /** An opt-in that weakens a compliant default, shown under the repository name. Text only. */

@@ -458,3 +458,5 @@ def test_labels_are_listed_per_repository():
     assert "a/two:" not in text.split("Labels")[1] and "a/three:" not in text.split("Labels")[1]
     snap["repos"][0]["labels"] = []
     assert "Labels" not in render(snap)
+    snap["repos"][0]["labels"] = [{"kind": "deviation", "setting": "gate_mechanism"}]
+    assert "- a/one: workflow gate (DEVIATION)" in render(snap)  # D15

@@ -27,6 +27,8 @@ EXPECTED = {
     "iac-staged.yml": [
         *[(f"stage-{i}", kind) for i in range(1, 5) for kind in ("guard", "ledger")],
         ("prod-plan", "guard"),
+        # D15: reads the last approved record to tell a change of the gate settings
+        ("prod-plan", "Does this commit change the gate settings? (D15)"),
         ("prod", "guard"),
         ("prod", "ledger"),
         ("prod-in-sync", "guard"),
@@ -34,6 +36,11 @@ EXPECTED = {
     ],
     "iac-nightly.yml": [("drift", "ledger show")],
     "iac-breakglass.yml": [("breakglass", "ledger show"), ("breakglass", "ledger")],
+    "iac-approve.yml": [
+        ("apply", "guard"),
+        ("apply", "Check the approval against the ledger"),
+        ("apply", "ledger"),
+    ],
 }
 
 

@@ -142,6 +142,12 @@ example). The reviewer approval on `prod-pr-plan` is what stands between an open
 approve only after reading the diff. If that is not acceptable, leave `prod-pr-plan` out: the job
 then waits and the change is seen first at the prod gate.
 
+With `gate_mechanism: workflow` ([D15](../governance/decisions.md#d15-the-workflow-gate)) there
+is no `prod-pr-plan` environment and so no reviewer before pull-request code runs with a prod
+identity: `shared-changes` reports no unit, warns, and `plan-shared` does not run. The mode is read
+from the pull request's configuration and from its base commit's, so a pull request cannot switch
+the plan back on. The shared units are planned by `prod-plan` after the merge.
+
 ## Fork pull requests
 
 A fork PR gets a read-only token and no OIDC token. For those PRs `resolve`, `plan-first-stage`

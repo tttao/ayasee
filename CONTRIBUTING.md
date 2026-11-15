@@ -3,7 +3,7 @@
 Thank you for helping. ayasee is pre-alpha; the best contributions right now are bug reports,
 accuracy fixes to the docs, tests, and small focused changes. For anything that changes a safety
 default (plan binding, approval, the guard, what leaves a job), open an issue first: those behaviours
-come from recorded design decisions ([D1 to D14](docs/governance/decisions.md)) and need a reason to
+come from recorded design decisions ([D1 to D15](docs/governance/decisions.md)) and need a reason to
 change.
 
 ## Ground rules

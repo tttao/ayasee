@@ -9,6 +9,46 @@ released version into the GitHub release notes.
 
 ### Added
 
+- **`gate_mechanism: workflow`, a prod gate that ayasee enforces itself** (#40, decision
+  [D15](docs/governance/decisions.md#d15-the-workflow-gate)): for a private repository below
+  GitHub Enterprise, which has no required reviewers on environments. Opt-in, labelled
+  `DEVIATION: gate enforced by ayasee, not by GitHub environment protection` on every run and in
+  the cockpit (`workflow gate`). The default, `environment`, does not change.
+  - `.ayasee.yaml`: `gate_mechanism` (`environment` or `workflow`) and `reviewers.prod`, the GitHub
+    logins that may approve; required with `workflow`, refused with `environment`.
+  - **`iac-staged`** stops after `prod-plan` in this mode: a new `prod-approval` job (no
+    environment, `contents: read` and `issues: write`) opens or rewrites one issue labelled
+    `ayasee:prod-approval` with the commit SHA, the SHA-256 of the plan manifest and the change
+    counts; the `prod` job is skipped. `prod-plan` gains the `changes` and `manifest-digest`
+    outputs.
+  - **`iac-approve`**, a new reusable workflow that a reviewer starts on `main` with `sha` and
+    `manifest-digest`. Its `verify` job (no environment, no secret) checks the dispatch (on
+    `refs/heads/main`, not re-run by someone else), the reviewer (in `reviewers.prod` of `main`'s
+    configuration, write access), the commit (on `main`), the plan (the newest unexpired
+    `ayasee-prod-plan` of that commit, from a successful `iac-staged` run on `main`, whose manifest
+    has that digest), independence (not who pushed, wrote or merged it, unless `solo_mode`) and
+    the prod environment (main-only, or a plan without branch policies, said as a deviation). Its
+    `apply` job runs the guard, then checks against the ledger (not already live; the reviewer was
+    already listed at the last approved prod apply, never at a commit that went live in sync,
+    with a `DEVIATION: bootstrap trust` warning before the first approval; no commit since is
+    theirs), applies exactly the
+    approved plan and records the approver. New `ayasee approve authorize|digest|baseline|gate-change|issue|close-issue`.
+  - A change of `gate_mechanism`, `reviewers.prod` or `solo_mode`, with the workflow gate on
+    either side, is never promoted in sync: `prod-plan` gains a `gate-changed` output (`ayasee
+    approve gate-change`), and such a commit goes to `prod-approval` (or to `prod` when it sets
+    the environment gate) even with an empty plan.
+  - `ayasee doctor` in this mode: Pro or Team is fine, Free warns what the gate does not protect,
+    every reviewer must have write access, an `iac-approve` caller must exist, and on Free the
+    secrets and variables are checked at repository level. With the environment gate, a plan
+    without reviewers now points to `gate_mechanism: workflow`.
+  - `github-environments`: new `gate_mechanism`. With `workflow`, no environment carries
+    reviewers (`prod_reviewers` and `breakglass_reviewers` are left unset), `prod-pr-plan` is
+    refused, and `private_repository_plan = "free"` is accepted: the environments are created
+    bare (no branch policy, no marker variable) and `secret_commands` lists repository secrets.
+  - Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request
+    plan of shared units (`iac-pr` skips it with a warning, reading the mode of the base commit
+    too, so a pull request cannot switch it back on); `ayasee init` does not scaffold the
+    `iac-approve` caller yet ([the caller to add](docs/concepts/staged-run.md#the-workflow-gate)).
 - **What the GitHub plan must allow** (#39): the default gate rests on required reviewers on
   environments (GitHub Enterprise only in a private repository), deployment branch policies and
   rulesets (GitHub Pro, Team or Enterprise in a private repository). A private repository on

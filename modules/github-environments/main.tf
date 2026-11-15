@@ -14,6 +14,9 @@ terraform {
 }
 
 locals {
+  # gate_mechanism = "workflow" (D15): no environment carries reviewers; iac-approve checks them
+  workflow_gate = var.gate_mechanism == "workflow"
+
   # Everything below is keyed by the logical environment name (dev, prod-plan, drift-prod, ...), the
   # name the stages, the secrets and the variables of this module use. The GitHub environment is
   # var.environment_prefix plus that name (issue #31); local.github_name maps one to the other.
@@ -29,7 +32,7 @@ locals {
   # prod reviewers because the PR's code runs with a prod identity.
   pr_plan = merge(
     { (local.pr_plan_environment) = null },
-    var.shared_units_pr_plan ? { "prod-pr-plan" = var.prod_reviewers } : {},
+    var.shared_units_pr_plan && !local.workflow_gate ? { "prod-pr-plan" = var.prod_reviewers } : {},
   )
 
   environments = merge(
@@ -37,8 +40,8 @@ locals {
     { for s in var.stages : "drift-${s}" => null },
     {
       "prod-plan"       = null
-      "prod"            = var.prod_reviewers
-      "prod-breakglass" = var.breakglass_reviewers
+      "prod"            = local.workflow_gate ? null : var.prod_reviewers
+      "prod-breakglass" = local.workflow_gate ? null : var.breakglass_reviewers
     },
     local.pr_plan,
   )
@@ -74,15 +77,16 @@ locals {
   # repository secret) so that the for expression below lists them in a stable order.
   pending_secrets = merge(
     { for name, scope in var.repository_secret_scopes : "/${name}" => { environment = "", name = name, scope = scope } },
+    # a bare environment (GitHub Free, private) has no secrets: one repository secret per name
     merge([
       for env in local.key_environments : {
         for name, scope in local.key_secret_scopes[var.key_provider] :
-        "${env}/${name}" => { environment = env, name = name, scope = scope }
+        "${local.bare ? "" : env}/${name}" => { environment = local.bare ? "" : env, name = name, scope = scope }
       }
     ]...),
     merge([
       for env, secrets in var.secret_scopes : {
-        for name, scope in secrets : "${env}/${name}" => { environment = env, name = name, scope = scope }
+        for name, scope in secrets : "${local.bare ? "" : env}/${name}" => { environment = local.bare ? "" : env, name = name, scope = scope }
       }
     ]...),
   )
@@ -158,6 +162,12 @@ locals {
   has_reviewers = local.open_to_all || (local.private && var.private_repository_plan == "enterprise")
   has_policies  = local.open_to_all || (local.private && contains(["pro", "team", "enterprise"], var.private_repository_plan))
   plan_label    = var.private_repository_plan == "" ? "not stated" : var.private_repository_plan
+
+  # D15: a private repository on GitHub Free with the workflow gate. It has no deployment branch
+  # policies, environment secrets or environment variables, so its environments are created bare
+  # (no reviewers, no branch policy, no AYASEE_MANAGED variable) and every secret and variable is
+  # a repository one, which any workflow of any branch can read. Stated, never inferred.
+  bare = local.workflow_gate && local.private && var.private_repository_plan == "free"
 }
 
 resource "github_repository_environment" "this" {
@@ -170,8 +180,12 @@ resource "github_repository_environment" "this" {
     # fail closed: an environment GitHub would create without its reviewers or its branch policy
     # turns the prod gate into a pass-through or opens the prod secrets to every branch
     precondition {
-      condition     = (each.value == null || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies)
-      error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${each.value == null ? "a main-only deployment branch policy" : "required reviewers"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, or move it to GitHub Enterprise and set private_repository_plan = \"enterprise\". ayasee does not support other private repositories with its default gate (docs/guides/adopt.md#what-you-need)."
+      condition     = (each.value == null || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies || local.bare)
+      error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${each.value == null ? "a main-only deployment branch policy" : "required reviewers"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, move it to GitHub Enterprise and set private_repository_plan = \"enterprise\", or use gate_mechanism = \"workflow\" (D15, a DEVIATION: ayasee enforces the gate, not GitHub; docs/guides/adopt.md#what-you-need)."
+    }
+    precondition {
+      condition     = !local.bare || (length(var.variables) == 0 && !var.generate_plan_passphrase)
+      error_message = "A private repository on GitHub Free has no environment variables or secrets: set the variables (AYASEE_LEDGER_URL, ...) and the plan passphrase as repository variables and secrets instead, and leave variables empty and generate_plan_passphrase false (secret_commands lists them at repository level)."
     }
     # GitHub may store an environment without the reviewers it was given: check what it kept
     postcondition {
@@ -184,8 +198,9 @@ resource "github_repository_environment" "this" {
     }
   }
 
-  # solo_mode (NON-COMPLIANT): the one maintainer approves their own prod change
-  prevent_self_review = !(var.solo_mode && contains(local.self_reviewed, each.key))
+  # solo_mode (NON-COMPLIANT): the one maintainer approves their own prod change. The workflow
+  # gate sets no reviewers, so there is no review to prevent (iac-approve checks it, D15)
+  prevent_self_review = local.workflow_gate ? false : !(var.solo_mode && contains(local.self_reviewed, each.key))
   can_admins_bypass   = false
 
   dynamic "reviewers" {
@@ -197,7 +212,7 @@ resource "github_repository_environment" "this" {
   }
 
   dynamic "deployment_branch_policy" {
-    for_each = contains(keys(local.pr_plan), each.key) ? [] : [1]
+    for_each = contains(keys(local.pr_plan), each.key) || local.bare ? [] : [1]
     content {
       protected_branches     = false
       custom_branch_policies = true
@@ -206,7 +221,7 @@ resource "github_repository_environment" "this" {
 }
 
 resource "github_repository_environment_deployment_policy" "main" {
-  for_each = local.main_only
+  for_each = local.bare ? {} : local.main_only
 
   repository     = var.repository
   environment    = github_repository_environment.this[each.key].environment
@@ -216,7 +231,7 @@ resource "github_repository_environment_deployment_policy" "main" {
 # Marks an environment as created by this module: the check above refuses an existing environment
 # without it, and `ayasee doctor` reads it. A configuration variable, not a secret.
 resource "github_actions_environment_variable" "marker" {
-  for_each = local.environments
+  for_each = local.bare ? {} : local.environments
 
   repository    = var.repository
   environment   = github_repository_environment.this[each.key].environment

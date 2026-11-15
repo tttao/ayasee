@@ -75,7 +75,7 @@ before you adopt it, and [the comparison](comparison.md) to check it is the righ
 | [Contributing](../CONTRIBUTING.md) | Development setup, tests, commit style, the SHA-pinning rule |
 | [Governance](../GOVERNANCE.md) | Maintainers and decisions |
 | [Provenance and licence](governance/PROVENANCE.md) | Public-sources statement, the Apache-2.0 licence, contributions and dependency licences |
-| [Design decisions](governance/decisions.md) | D1 to D14: the options considered and the default taken |
+| [Design decisions](governance/decisions.md) | D1 to D15: the options considered and the default taken |
 
 ## Conventions in these pages
 
