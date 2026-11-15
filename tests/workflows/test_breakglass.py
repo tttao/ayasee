@@ -69,7 +69,7 @@ def test_validate_checks_sha(wf):
     assert "[0-9a-f]{40}" in _run(step)
     assert "UNITS" not in step["env"] and "UNITS" not in _run(step)
     assert "units" not in wf["jobs"]["validate"]["outputs"]
-    assert wf["jobs"]["validate"]["permissions"] == {"contents": "read"}
+    assert wf["jobs"]["validate"]["permissions"] == {"contents": "read", "actions": "read"}
     assert "environment" not in wf["jobs"]["validate"]
 
 
@@ -398,3 +398,15 @@ def test_breakglass_plan_flags_shared_units():
     assert ".shared_units" in cfg["run"]
     plan = next(s for s in steps if "/actions/plan@" in s.get("uses", ""))
     assert plan["with"]["shared-units"] == "${{ steps.cfg.outputs.shared-units }}"
+
+
+def test_validate_refuses_a_breakglass_environment_without_reviewers(wf):
+    """Issue #39: the break-glass job waits for its reviewers, or does not start."""
+    job = wf["jobs"]["validate"]
+    (step,) = [s for s in job["steps"] if "ayasee require-reviewers" in s.get("run", "")]
+    assert step["env"]["PREFIX"] == "${{ steps.prefix.outputs.environment-prefix }}"
+    assert '--environment "${PREFIX}prod-breakglass"' in step["run"]
+    assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
+    assert "exit 1" in step["run"] and "continue-on-error" not in step
+    ids = [s.get("id") for s in job["steps"]]
+    assert ids.index("prefix") < job["steps"].index(step)

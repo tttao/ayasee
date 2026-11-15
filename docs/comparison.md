@@ -150,6 +150,12 @@ and have no ordered promotion.
 
 ## Where ayasee is weaker
 
+- The default gate is **GitHub's environment protection**: required reviewers, deployment branch
+  policies and rulesets. A private repository has the reviewers on GitHub Enterprise only, so a
+  **private repository on GitHub Free, Pro or Team is not supported today**; ayasee refuses to
+  run ungated there and says so ([what the plan must allow](guides/adopt.md#what-the-github-plan-must-allow)).
+  A gate that does not depend on the plan is tracked in
+  [issue #40](https://github.com/tttao/ayasee/issues/40).
 - It is **pre-alpha** with a single maintainer.
   Established tools have users, support and years of bug reports. See [governance](../GOVERNANCE.md).
 - The wired path is **OpenTofu, Terragrunt and Azure** (identities, Key Vault plan encryption, blob

@@ -569,3 +569,56 @@ def test_a_prefixed_init_is_rerunnable_and_upgrade_leaves_the_prefix_alone(tmp_p
     # --upgrade moves the pin only: it refuses the flag instead of ignoring it
     assert _init(tmp_path, "--upgrade", "--environment-prefix", "other-") == 1
     assert "environment_prefix: iac-" in (tmp_path / ".ayasee.yaml").read_text()
+
+
+# ---- the GitHub plan (issue #39) ---------------------------------------------------------------
+
+UPGRADE = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+
+
+def _mock_estate(visibility):
+    respx.get(f"{API}/repos/acme/estate").mock(
+        return_value=httpx.Response(
+            200, json={"visibility": visibility, "owner": {"login": "acme", "type": "Organization"}}
+        )
+    )
+
+
+@respx.mock
+def test_init_warns_before_scaffolding_a_free_private_repository(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("private")
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/repos/acme/estate/rulesets").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    rc = _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate")
+    err = capsys.readouterr().err
+    assert rc == 0 and (tmp_path / ".ayasee.yaml").is_file()  # a warning, the adopter decides
+    assert "init: warning: a private repository on the GitHub Free plan" in err
+    assert "required reviewers on environments" in err and "#40" in err
+    assert "HTTP 403" not in err
+
+
+@respx.mock
+def test_init_says_nothing_for_a_public_repository(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("public")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    assert "plan" not in capsys.readouterr().err
+
+
+@respx.mock
+def test_init_notes_a_plan_it_cannot_check(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    respx.get(f"{API}/repos/acme/estate").mock(return_value=httpx.Response(404, json={}))
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    err = capsys.readouterr().err
+    assert "init: note: cannot confirm" in err and "ayasee doctor" in err
+
+
+def test_init_without_a_repository_makes_no_plan_request(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0  # respx not active
+    assert "plan" not in capsys.readouterr().err

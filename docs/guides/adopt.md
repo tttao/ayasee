@@ -11,11 +11,34 @@ tokens. Everything else is a command.
 
 ## What you need
 
-- A GitHub repository you administer, and `gh` logged in as an administrator.
+- A GitHub repository you administer, and `gh` logged in as an administrator. It must be
+  **public, or private on GitHub Enterprise** (Cloud or Server): see
+  [below](#what-the-github-plan-must-allow).
 - `tofu` (OpenTofu 1.10 or later), `terragrunt`, and `uv`.
 - The release you adopt, `X.Y.Z`, from the [releases](https://github.com/tttao/ayasee/releases).
 - **(you)** Two reviewer sets, different and non-empty: one approves prod applies, the other the
   break-glass path. GitHub team or user IDs.
+
+### What the GitHub plan must allow
+
+The gate ayasee relies on is made of GitHub settings, and a private repository does not get all of
+them on every plan
+([GitHub: deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)):
+
+| Feature | Public repository | Private repository | What falls without it |
+|---|---|---|---|
+| Required reviewers on environments | every plan | GitHub Enterprise only | the prod gate (D9): nothing waits for an approval before prod; `prevent_self_review` (D2), the separate break-glass reviewers (D3) and the reviewer of `prod-pr-plan` go with it |
+| Deployment branch policies | every plan | GitHub Pro, Team or Enterprise | the `main`-only environments: any branch could run a job in `prod` and read its secrets |
+| Rulesets and branch protection | every plan | GitHub Pro, Team or Enterprise | the guard of the ledger token: it could push to `main` |
+
+So the repository must be **public, or private on GitHub Enterprise**. A private repository on
+GitHub Free, Pro or Team is **not supported by the default gate today**: ayasee says so instead of
+running ungated. `ayasee init` warns before it scaffolds, `ayasee doctor` fails first with the
+missing features, the bootstrap refuses to create the environments (a private repository states
+its plan in `private_repository_plan`, which must be `enterprise`), and the staged and break-glass
+runs refuse to go on when the gated environment has no required reviewers
+(`ayasee require-reviewers`). A gate that does not depend on the plan is tracked in
+[issue #40](https://github.com/tttao/ayasee/issues/40).
 
 ## 1. Scaffold: `ayasee init`
 
@@ -37,7 +60,9 @@ must not share them ([below](#environments-that-already-exist)); `--environment-
 chooses another prefix and `--environment-prefix ''` none (`--upgrade` moves the pin only and never
 touches it). Fill the Cloudflare zone, account and tunnel IDs it leaves as placeholders. `--ref
 <SHA>` is accepted only for the release commit of `X.Y.Z`; `doctor` (step 5) fails callers pinned to
-an older release. Details:
+an older release. When it can reach the repository (`--repo`, or the `origin` remote, with
+`GITHUB_TOKEN` if set) it first checks [what the plan allows](#what-the-github-plan-must-allow)
+and warns before writing anything; the scaffold is written either way. Details:
 [start from the example](quickstart.md#1-start-from-the-example).
 
 ## 2. Bootstrap the environments
@@ -52,6 +77,10 @@ tofu apply -var github_owner=my-org -var github_repository=my-estate \
   -var 'prod_reviewers={teams=[101],users=[]}' -var 'breakglass_reviewers={teams=[202],users=[]}' \
   -var generate_plan_passphrase=true
 ```
+
+A private repository adds `-var private_repository_plan=enterprise`: without it the plan refuses
+to create environments whose reviewers GitHub would not keep
+([what the plan must allow](#what-the-github-plan-must-allow)).
 
 It creates the eight environments (with the prefix, if any) with their reviewers and `main`-only deployment policies, sets
 `AYASEE_LEDGER_URL` where the ledger is read or written, and, with `generate_plan_passphrase=true`,
@@ -114,7 +143,8 @@ GITHUB_TOKEN="$(gh auth token)" uvx ayasee@X.Y.Z doctor \
 ```
 
 with the credentials of a key that can write each bucket in `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY`. It lists, in one pass, everything steps 1 to 4 left out: an environment or
+`AWS_SECRET_ACCESS_KEY`. It checks first that the repository's plan can hold the gate, and stops
+there with one failure if it cannot. Then it lists, in one pass, everything steps 1 to 4 left out: an environment or
 a reviewer, a secret missing or set at repository level, a variable, a caller still unpinned, the
 ruleset on `main`, a bucket that ignores the lock condition. Repeat until it exits 0. See
 [check it all](quickstart.md#check-it-all-before-the-first-run).

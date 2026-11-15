@@ -15,6 +15,9 @@ and plan encryption, the wired path will not fit yet: see [the comparison](../co
 ## What you need
 
 - A GitHub repository you can administer, on github.com. GitHub Enterprise Server is unverified.
+  It must be **public, or private on GitHub Enterprise**: the prod gate is the required
+  reviewers of the `prod` environment, which GitHub offers in a private repository on GitHub
+  Enterprise only ([what the plan must allow](adopt.md#what-the-github-plan-must-allow)).
 - A person with rights to create managed identities in an Azure resource group, and to assign roles.
 - An Azure storage account for Terraform state, a second container for the ledger, and a Key Vault
   key for plan encryption.
@@ -170,7 +173,9 @@ Set `environment_prefix: iac-` in `.ayasee.yaml` and add `-var environment_prefi
 repository already deploys applications to environments called `dev`, `uat` or `prod`
 ([why](adopt.md#environments-that-already-exist)): every name below then carries the prefix
 (`iac-prod`, `iac-drift-dev`, ...), the federated subjects too. The bootstrap refuses to take over an
-environment it did not create unless you add `-var adopt_existing_environments=true`.
+environment it did not create unless you add `-var adopt_existing_environments=true`. A private
+repository adds `-var private_repository_plan=enterprise`; any other plan is refused
+([what the plan must allow](adopt.md#what-the-github-plan-must-allow)).
 
 This uses the two modules:
 
@@ -232,6 +237,12 @@ GITHUB_TOKEN="$(gh auth token)" ayasee doctor
 
 It checks:
 
+- **the GitHub plan**, first: the repository can hold required reviewers on environments,
+  deployment branch policies and rulesets (public, or private on GitHub Enterprise). A plan that
+  lacks them is one failure naming what is missing and which guarantee falls with it, and the
+  GitHub settings below are then not checked; a plan it cannot confirm fails too (an
+  organization owner's token shows the plan, and reviewers already in place count as evidence)
+  ([what the plan must allow](adopt.md#what-the-github-plan-must-allow));
 - **the configuration**: `.ayasee.yaml` loads, uses only supported settings, fits the staged job
   slots, matches `shared_units` on disk, and each stage has its directory under `units_root`;
 - **the callers**: every workflow that calls an ayasee reusable workflow pins one full release SHA

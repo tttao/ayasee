@@ -177,7 +177,8 @@ jobs:
     name: validate
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read # read environment_prefix from main
+      actions: read # the prod-breakglass environment and its protection rules
     outputs:
       incident: ${{ steps.validate.outputs.incident }}
       sha: ${{ steps.validate.outputs.sha }}
@@ -233,6 +234,22 @@ jobs:
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
           echo "environment-prefix=$(jq -r '.environment_prefix' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
+      # issue #39: the break-glass job is gated only by the reviewers of its environment; without
+      # them (none set, not created yet, or a plan that ignores them) it would apply unapproved
+      - name: Refuse a break-glass environment without required reviewers
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PREFIX: ${{ steps.prefix.outputs.environment-prefix }}
+        run: |
+          err="$RUNNER_TEMP/ayasee-require-reviewers.err"
+          if ! notes="$(ayasee require-reviewers --repo "$REPO" --environment "${PREFIX}prod-breakglass" 2>"$err")"; then
+            while IFS= read -r line; do
+              case "$line" in require-reviewers:*) echo "::error::${line#require-reviewers: }" ;; *) echo "$line" ;; esac
+            done <"$err"
+            exit 1
+          fi
+          [ -z "$notes" ] || while IFS= read -r line; do echo "::notice::$line"; done <<<"$notes"
 
   breakglass:
     # plan and apply in one job behind the prod-breakglass reviewers

@@ -1,4 +1,9 @@
-mock_provider "github" {}
+mock_provider "github" {
+  # a public repository: every environment feature is available (issue #39)
+  mock_data "github_repository" {
+    defaults = { visibility = "public" }
+  }
+}
 
 variables {
   repository         = "demo"

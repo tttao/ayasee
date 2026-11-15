@@ -69,6 +69,10 @@ on, and ayasee's secrets and approvals stay apart from the application's. The bo
 to take over an environment that already exists unless you pass `-var
 adopt_existing_environments=true` ([why and how](../../docs/guides/adopt.md#environments-that-already-exist)).
 
+**A private repository** adds `-var private_repository_plan=enterprise`: its environments get
+required reviewers on GitHub Enterprise only, and the bootstrap refuses any other plan instead of
+creating an unprotected `prod` ([what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
+
 Managing GitHub environments needs administration rights on the repository. Run this root from a
 maintainer's machine, or from a workflow with a GitHub App or fine-grained token that has the
 **Administration** permission, never with `github.token`, and never as an ayasee unit: a unit's

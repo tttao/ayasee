@@ -285,7 +285,7 @@ def test_pre_prod_slots_and_prod_plan_form_one_chain(wf):
             f"(needs.{prev}.result == 'success' || (needs.resolve.outputs.run-{prev} == 'false'"
             f" && needs.{prev}.result == 'skipped'))" in cond
         ), job
-    assert jobs["prod-plan"]["needs"] == ["resolve", *SLOTS]
+    assert jobs["prod-plan"]["needs"] == ["resolve", "prod-gate", *SLOTS]
     for slot in SLOTS:
         assert (
             f"(needs.{slot}.result == 'success' || (needs.resolve.outputs.run-{slot} == 'false'"
@@ -313,7 +313,7 @@ def test_skipped_needs_only_count_when_the_skip_was_intended(wf):
     for slot in SLOTS[1:]:
         assert wf["jobs"][slot]["if"].count("'skipped'") == 1, slot
     assert wf["jobs"]["prod-plan"]["if"].count("'skipped'") == len(SLOTS)
-    assert wf["jobs"]["prod-plan"]["needs"] == ["resolve", *SLOTS]
+    assert wf["jobs"]["prod-plan"]["needs"] == ["resolve", "prod-gate", *SLOTS]
     assert "'skipped'" not in wf["jobs"][SLOTS[0]]["if"]
 
 
@@ -761,3 +761,23 @@ def test_prod_plan_flags_shared_units_and_resolve_checks_their_layout():
     assert plans and all(
         p["with"]["shared-units"] == "${{ needs.resolve.outputs.shared-units }}" for p in plans
     )
+
+
+def test_prod_gate_refuses_a_prod_environment_without_reviewers(wf):
+    """Issue #39: a prod environment that would not wait for an approval gets no plan."""
+    job = wf["jobs"]["prod-gate"]
+    assert job["needs"] == "resolve"
+    assert "github.ref == 'refs/heads/main'" in job["if"]
+    assert "needs.resolve.result == 'success'" in job["if"]
+    # no environment (no secret), and a token that reads environments only
+    assert "environment" not in job
+    assert job["permissions"] == {"actions": "read"}
+    (step,) = [s for s in job["steps"] if "ayasee require-reviewers" in s.get("run", "")]
+    # the GitHub name, environment_prefix included, as the prod job itself uses it
+    assert step["env"]["PROD_ENV"] == "${{ needs.resolve.outputs.env-prod }}"
+    assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
+    assert '--environment "$PROD_ENV"' in step["run"] and "exit 1" in step["run"]
+    assert "continue-on-error" not in step and "continue-on-error" not in job
+    plan = wf["jobs"]["prod-plan"]
+    assert "prod-gate" in plan["needs"]
+    assert "needs.prod-gate.result == 'success'" in plan["if"]

@@ -15,6 +15,12 @@ a release commit whose ``__version__`` is this version, else a refusal (a SHA of
 under these templates is the trap of issue #32); ``--unverified-ref`` skips that check. It is
 required when ayasee runs from a source checkout, whose templates may differ from any release.
 
+Before writing, it checks what the repository's GitHub plan allows (issue #39) when it can reach
+the repository (``--repo``, else the github.com ``origin`` remote of ``--dir``; ``GITHUB_TOKEN``
+when set, anonymous otherwise): a plan without required reviewers on environments, deployment
+branch policies or rulesets is a warning naming what falls, a plan it cannot confirm a note, and
+the scaffold is written either way; ``ayasee doctor`` fails on both.
+
 It writes no unit: ``<units_root>/<stage>/`` is created empty (a ``.gitkeep``), and
 ``shared_units`` starts empty. Existing files are never overwritten without ``--force``; on a
 refusal nothing is written."""
@@ -34,8 +40,10 @@ import yaml
 
 from ayasee import __version__, cli
 from ayasee.config import ENVIRONMENT_PREFIX, ConfigError, parse_config_text, staged_layout
+from ayasee.doctor import _origin_repo
 from ayasee.github import DEFAULT_API_URL, GitHub, GitHubError
 from ayasee.maintip import _repo
+from ayasee.plansupport import SUPPORTED, UNSUPPORTED, detect
 from ayasee.releasepin import NotARelease, release_version
 
 DEFAULT_SOURCE = "tttao/ayasee"
@@ -255,6 +263,31 @@ def _resolve_pin(args: argparse.Namespace) -> tuple[str, str]:
     return sha, f"ayasee v{__version__} (release/v{__version__})"
 
 
+def _warn_plan(repo: str | None) -> None:
+    """Say on stderr what the repository's plan lacks (issue #39); never refuses, never raises."""
+    if repo is None:
+        return
+    try:
+        gh = GitHub(
+            os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL, os.environ.get("GITHUB_TOKEN", "")
+        )
+    except GitHubError as exc:
+        print(f"init: note: cannot check the GitHub plan: {exc}", file=sys.stderr)
+        return
+    try:
+        support = detect(gh, repo)
+    finally:
+        gh.close()
+    if support.verdict == SUPPORTED:
+        return
+    lines = support.explain()
+    if support.verdict == UNSUPPORTED:
+        print(f"init: warning: {lines[0]}", *lines[1:], sep="\n  ", file=sys.stderr)
+    else:
+        lines.append("`ayasee doctor` checks it again, with an administrator's token")
+        print(f"init: note: {lines[0]}", *lines[1:], sep="\n  ", file=sys.stderr)
+
+
 def _inside(dest: Path, rel: str) -> Path:
     """``dest/rel``, refused when it resolves outside ``dest`` (a symlink or a ``..``)."""
     root = dest.resolve()
@@ -432,6 +465,7 @@ def _run(args: argparse.Namespace) -> int:
     except (InitError, ConfigError, GitHubError, OSError) as exc:
         print(f"init: error: {exc}", file=sys.stderr)
         return 1
+    _warn_plan(args.repo or _origin_repo(dest))
     for rel in same:
         print(f"unchanged {rel}")
     for rel, content in todo.items():
@@ -482,6 +516,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
         "otherwise; '' clears it)",
     )
     parser.add_argument("--dir", default=".", help="the repository checkout (default: .)")
+    parser.add_argument(
+        "--repo",
+        type=_repo,
+        help="owner/name of the repository, to check what its GitHub plan allows (default: the "
+        "github.com origin remote of --dir)",
+    )
     parser.add_argument(
         "--source", type=_repo, default=DEFAULT_SOURCE, help="owner/name of ayasee (a mirror)"
     )

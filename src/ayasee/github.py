@@ -582,6 +582,42 @@ class GitHub:
             f"/repos/{repo}/environments", {"per_page": 100}, "environments", "environments"
         )
 
+    def environment(self, repo: str, env: str) -> dict[str, Any]:
+        """``GET /repos/{repo}/environments/{env}`` (Actions: read): one environment with its
+        protection rules. 404 when it does not exist."""
+        data = self._get(f"/repos/{repo}/environments/{quote(env, safe='')}", "environment")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected environment response")
+        return data
+
+    # ---- plan support (issue #39; read-only, Metadata: read) ------------------------------
+
+    def repository(self, repo: str) -> dict[str, Any]:
+        """``GET /repos/{repo}``: ``visibility``, ``private`` and ``owner`` are what is used."""
+        data = self._get(f"/repos/{repo}", "repository")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected repository response")
+        return data
+
+    def organization(self, org: str) -> dict[str, Any]:
+        """``GET /orgs/{org}``. ``plan`` is present only for an owner of the organization."""
+        data = self._get(f"/orgs/{quote(org, safe='')}", "organization")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected organization response")
+        return data
+
+    def authenticated_user(self) -> dict[str, Any]:
+        """``GET /user``: the token's own user, with its ``plan`` (403 for an app token)."""
+        data = self._get("/user", "user")
+        if not isinstance(data, dict):
+            raise GitHubError(0, "unexpected user response")
+        return data
+
+    def rulesets(self, repo: str) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/rulesets`` (Metadata: read). A private repository on the free plan
+        answers 403 "Upgrade to GitHub Pro or make this repository public"."""
+        return self._paginate(f"/repos/{repo}/rulesets", {"per_page": 100}, "rulesets")
+
     def environment_branch_policies(self, repo: str, env: str) -> list[dict[str, Any]]:
         """The custom deployment branch and tag policies of ``env``."""
         return self._paginate(

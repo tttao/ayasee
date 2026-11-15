@@ -67,3 +67,9 @@ variable "adopt_existing_environments" {
   type        = bool
   default     = false
 }
+
+variable "private_repository_plan" {
+  description = "For a private repository, the GitHub plan of its owner: free, pro, team or enterprise. Required reviewers on environments need GitHub Enterprise in a private repository, so the plan refuses any other value; ignored for a public repository (docs/guides/adopt.md#what-you-need)."
+  type        = string
+  default     = ""
+}

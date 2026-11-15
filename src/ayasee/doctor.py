@@ -3,6 +3,11 @@
 Run it locally, at the root of the adopting repository. It prints one list of what is missing
 instead of failed jobs found one at a time:
 
+- **GitHub plan** (first, with ``GITHUB_TOKEN``): the repository can carry required reviewers on
+  environments, deployment branch policies and rulesets (issue #39, :mod:`ayasee.plansupport`): a
+  public repository, or a private one on a plan that has them. A plan that lacks them is one
+  failure that names the missing features and the guarantees that fall with them, and the GitHub
+  settings below are then not checked one by one; a plan that cannot be confirmed fails too;
 - **configuration**: ``.ayasee.yaml`` loads, uses only supported settings, fits the staged job
   slots, matches ``shared_units`` on disk, and has a directory per stage under ``units_root``;
 - **callers**: the workflows under ``.github/workflows`` that call the ayasee reusable workflows
@@ -59,6 +64,7 @@ from ayasee.config import (
 )
 from ayasee.github import GitHub, GitHubError
 from ayasee.maintip import _repo
+from ayasee.plansupport import SUPPORTED, UNSUPPORTED, PlanSupport, detect, is_plan_error
 from ayasee.releasepin import NotARelease, release_version, version_key
 
 OK, WARN, FAIL, SKIP = "ok", "warn", "FAIL", "skip"
@@ -440,7 +446,15 @@ def check_github(report: Report, gh: GitHub, repo: str, cfg: Config, callers: li
         try:
             rules = gh.branch_rules(repo, "main")
         except GitHubError as exc:
-            report.add(FAIL, sec, f"cannot read the rules of main: {exc}")
+            if is_plan_error(exc):
+                report.add(
+                    FAIL,
+                    sec,
+                    "this repository's plan has no rulesets, so nothing stops the ledger token "
+                    "from pushing to main (see the GitHub plan above)",
+                )
+            else:
+                report.add(FAIL, sec, f"cannot read the rules of main: {exc}")
         else:
             if any(r.get("type") == "pull_request" for r in rules):
                 report.add(
@@ -617,6 +631,33 @@ def _check_secrets_and_variables(
         report.add(OK, sec, f"{checked} variable(s) in place")
 
 
+# ---- GitHub plan (issue #39) -----------------------------------------------------------------
+
+PLAN_SECTION = "GitHub plan"
+
+
+def check_plan(report: Report, gh: GitHub, repo: str) -> PlanSupport:
+    """Can the repository's plan hold the gate? One line, first in the report.
+
+    ``UNSUPPORTED`` and ``UNKNOWN`` fail: the default gate rests on environment reviewers, and a
+    plan that is not confirmed is not taken for one that has them. A plan inferred from reviewers
+    already in place (the token cannot read the owner's plan) warns. A gate that does not need
+    these features (issue #40) would make the failure a recommendation here."""
+    support = detect(gh, repo)
+    lines = support.explain()
+    if support.verdict == SUPPORTED:
+        level = WARN if support.inferred else OK
+        if support.inferred:
+            lines = [
+                f"{lines[0]}; the owner's plan could not be read, so this rests on the "
+                "reviewers GitHub reports"
+            ]
+    else:
+        level = FAIL
+    report.add(level, PLAN_SECTION, "\n        ".join(lines))
+    return support
+
+
 # ---- lock ------------------------------------------------------------------------------------
 
 
@@ -682,15 +723,33 @@ def _origin_repo(root: Path) -> str | None:
 def run(args: argparse.Namespace) -> Report:
     root = Path(args.root)
     report = Report()
+    repo = args.repo or _origin_repo(root)
+    support: PlanSupport | None = None
+    if repo is None:
+        report.add(SKIP, PLAN_SECTION, "no --repo and no github.com origin remote")
+    elif not os.environ.get("GITHUB_TOKEN"):
+        report.add(SKIP, PLAN_SECTION, "set GITHUB_TOKEN to check what the plan allows")
+    else:
+        gh = GitHub.from_env()
+        try:
+            support = check_plan(report, gh, repo)
+        finally:
+            gh.close()
     cfg = check_config(report, args.config_path, root)
     callers = find_callers(report, root)
     check_callers(report, callers)
     if cfg is not None:
         check_shared_environments(report, cfg, root)
-    repo = args.repo or _origin_repo(root)
     sec = "GitHub"
     if cfg is None:
         report.add(SKIP, sec, "the configuration does not load")
+    elif support is not None and support.verdict == UNSUPPORTED:
+        report.add(
+            SKIP,
+            sec,
+            "not checked: this repository's plan cannot hold the settings they need "
+            "(GitHub plan above)",
+        )
     elif repo is None:
         report.add(SKIP, sec, "no --repo and no github.com origin remote")
     elif not os.environ.get("GITHUB_TOKEN"):
