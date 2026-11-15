@@ -57,6 +57,10 @@ environment, identity and federated subject then carries the prefix (`iac-prod`,
 already exists unless you pass `-var adopt_existing_environments=true`
 ([why and how](../../docs/guides/adopt.md#environments-that-already-exist)).
 
+**A private repository** adds `-var private_repository_plan=enterprise`: its environments get
+required reviewers on GitHub Enterprise only, and the bootstrap refuses any other plan instead of
+creating an unprotected `prod` ([what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
+
 `prod` and `prod-breakglass` need different, non-empty reviewer sets; the environments forbid self
 review and admin bypass (D2). Keep the state of this root outside the stage units' state. The
 `client_ids` and `principal_ids` outputs are what the next step needs. See

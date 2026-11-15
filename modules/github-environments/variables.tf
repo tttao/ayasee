@@ -149,3 +149,14 @@ variable "adopt_existing_environments" {
   type        = bool
   default     = false
 }
+
+variable "private_repository_plan" {
+  description = "The GitHub plan of the repository's owner, for a private repository: free, pro, team or enterprise (GitHub Enterprise Cloud or Server). Ignored for a public or internal repository. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on Pro, Team or Enterprise: on any other plan, or when it is not stated (the default), the plan fails instead of creating environments without them (issue #39). `ayasee doctor` checks the plan against GitHub."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "free", "pro", "team", "enterprise"], var.private_repository_plan)
+    error_message = "private_repository_plan is empty, free, pro, team or enterprise."
+  }
+}

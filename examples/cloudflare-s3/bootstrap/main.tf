@@ -57,6 +57,12 @@ variable "adopt_existing_environments" {
   default     = false
 }
 
+variable "private_repository_plan" {
+  description = "For a private repository, the GitHub plan of its owner: free, pro, team or enterprise. Required reviewers on environments need GitHub Enterprise in a private repository, so the plan refuses any other value; ignored for a public repository (docs/guides/adopt.md#what-you-need)."
+  type        = string
+  default     = ""
+}
+
 provider "github" {
   owner = var.github_owner
 }
@@ -111,6 +117,7 @@ module "environments" {
   environment_prefix   = var.environment_prefix
 
   adopt_existing_environments = var.adopt_existing_environments
+  private_repository_plan     = var.private_repository_plan
 
   variables = { for env in local.ledger_envs : env => { AYASEE_LEDGER_URL = local.ledger_url } }
 

@@ -85,6 +85,7 @@ module "environments" {
   environment_prefix   = var.environment_prefix
 
   adopt_existing_environments = var.adopt_existing_environments
+  private_repository_plan     = var.private_repository_plan
 
   owner        = var.github_owner
   key_provider = local.key_provider

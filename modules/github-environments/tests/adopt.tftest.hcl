@@ -1,6 +1,10 @@
 # An environment that already exists and was not created by this module (an application's own
 # test or prod) is refused unless the adopter says so (issue #31).
 mock_provider "github" {
+  # a public repository: every environment feature is available (issue #39)
+  mock_data "github_repository" {
+    defaults = { visibility = "public" }
+  }
   mock_data "github_repository_environments" {
     defaults = {
       environments = [

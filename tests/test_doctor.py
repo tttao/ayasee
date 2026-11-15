@@ -100,8 +100,17 @@ def _mock_pin(version=None, parents=None, status=200, head=None):
     )
 
 
+def _mock_repo(visibility="public"):
+    respx.get(f"{API}/repos/{REPO}").mock(
+        return_value=httpx.Response(
+            200, json={"visibility": visibility, "owner": {"login": "acme", "type": "Organization"}}
+        )
+    )
+
+
 def _mock(state):
     _mock_pin()
+    _mock_repo(state.get("visibility", "public"))
 
     def names(items, key):
         return httpx.Response(200, json={key: [{"name": n} for n in sorted(items)]})
@@ -389,6 +398,7 @@ def test_ledger_token_without_a_pull_request_ruleset(estate, capsys):
 @respx.mock
 def test_an_unreadable_api_fails_without_a_traceback(estate, capsys):
     _mock_pin()
+    _mock_repo()
     respx.get(f"{API}/repos/{REPO}/environments").mock(return_value=httpx.Response(403, json={}))
     rc, out = _doctor(estate, capsys)
     assert rc == 1
@@ -757,3 +767,105 @@ def test_the_ayasee_callers_themselves_are_not_reported(estate, capsys, monkeypa
     monkeypatch.delenv("GITHUB_TOKEN")
     _, out = _doctor(estate, capsys)
     assert "is also used by" not in out
+
+
+# ---- the GitHub plan (issue #39) ---------------------------------------------------------------
+
+UPGRADE = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+
+
+def _plan_lines(out):
+    sec = out.split("GitHub plan\n", 1)[1].split("\n\n", 1)[0]
+    return [line.strip() for line in sec.splitlines()]
+
+
+def _free_private():
+    """The repository of the issue: private, in an organization on the free plan, read with a
+    token that cannot see the organization's plan."""
+    _mock_pin()
+    _mock_repo("private")
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/repos/{REPO}/rulesets").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+
+
+@respx.mock
+def test_the_plan_is_checked_first(estate, capsys):
+    _mock(_good_state())
+    _, out = _doctor(estate, capsys)
+    assert out.startswith("GitHub plan\n")
+    assert _plan_lines(out)[0].startswith("ok")
+
+
+@respx.mock
+def test_a_free_private_repository_is_one_clear_failure(estate, capsys):
+    _free_private()
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1 and out.startswith("GitHub plan\n")
+    fails = _fails(out)
+    assert len(fails) == 1, out
+    text = "\n".join(_plan_lines(out))
+    assert "required reviewers on environments" in text and "prod gate" in text
+    assert "deployment branch policies" in text and "main-only" in text
+    assert "rulesets" in text and "ledger token" in text and "#40" in text
+    # the settings the plan cannot hold are not listed one by one, and no raw 403 is shown
+    assert "HTTP 403" not in out and "Upgrade to GitHub Pro" not in out
+    assert "skip  not checked: this repository's plan" in out
+
+
+@respx.mock
+def test_a_private_repository_on_team_lacks_the_reviewers(estate, capsys):
+    _mock_pin()
+    _mock_repo("private")
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": "team"}})
+    )
+    rc, out = _doctor(estate, capsys)
+    text = "\n".join(_plan_lines(out))
+    assert rc == 1 and "Team plan" in text and "required reviewers on environments" in text
+    assert "deployment branch policies" not in text
+
+
+@respx.mock
+def test_a_plan_that_cannot_be_confirmed_fails(estate, capsys):
+    state = _good_state()
+    for env in state["envs"].values():
+        env["protection_rules"] = []
+    state["visibility"] = "private"
+    _mock(state)
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/repos/{REPO}/rulesets").mock(return_value=httpx.Response(200, json=[]))
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    assert _plan_lines(out)[0].startswith("FAIL  cannot confirm")
+
+
+@respx.mock
+def test_reviewers_in_place_on_a_private_repository_warn_that_the_plan_is_inferred(estate, capsys):
+    state = _good_state()
+    state["visibility"] = "private"
+    _mock(state)
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(404, json={}))
+    respx.get(f"{API}/repos/{REPO}/rulesets").mock(return_value=httpx.Response(200, json=[]))
+    _, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    assert _plan_lines(out)[0].startswith("warn")
+
+
+def test_without_a_token_the_plan_is_skipped(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _, out = _doctor(estate, capsys)
+    assert _plan_lines(out)[0].startswith("skip")
+
+
+@respx.mock
+def test_the_upgrade_403_on_the_rules_of_main_is_said_in_ayasee_words(estate, capsys):
+    state = _good_state()
+    _mock(state)
+    respx.get(f"{API}/repos/{REPO}/rules/branches/main").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    _, out = _doctor(estate, capsys)
+    assert "HTTP 403" not in out
+    assert any("this repository's plan has no rulesets" in f for f in _fails(out))

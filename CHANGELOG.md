@@ -7,6 +7,41 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- **What the GitHub plan must allow** (#39): the default gate rests on required reviewers on
+  environments (GitHub Enterprise only in a private repository), deployment branch policies and
+  rulesets (GitHub Pro, Team or Enterprise in a private repository). A private repository on
+  another plan is not supported by the default gate today, and ayasee now says so at every step
+  instead of running ungated ([adopt: what the plan must allow](docs/guides/adopt.md#what-the-github-plan-must-allow);
+  a plan-independent gate is tracked in #40). `ayasee.plansupport.detect` reads the repository's
+  visibility, the owner's plan when the token may see it, the 403 "Upgrade to GitHub Pro" of the
+  rulesets API and the reviewers already set, and answers `supported`, `unsupported` (with the
+  missing features) or `unknown`, never `supported` without evidence.
+  - `ayasee doctor` checks the plan **first**: a plan that lacks the features is one failure that
+    names them and the guarantees that fall (the prod gate, `prevent_self_review` and the
+    break-glass reviewers; the `main`-only environments; the guard of the ledger token), and the
+    GitHub settings are then not listed one by one; a plan it cannot confirm fails too. The raw
+    `HTTP 403: Upgrade to GitHub Pro` on the rules of `main` is reported in ayasee's words.
+  - `ayasee init` runs the same check before it scaffolds, when it can reach the repository
+    (new `--repo`, else the `origin` remote), and warns; the scaffold is still written.
+  - `ayasee require-reviewers --repo --environment`: refuses a gated environment that has no
+    required reviewers, does not exist, cannot be read, or whose plan ignores them.
+
+### Changed
+
+- **`iac-staged`: a new `prod-gate` job** (`actions: read` only, no environment) runs
+  `ayasee require-reviewers` on the `prod` environment (prefixed name) beside the pre-prod stages,
+  and `prod-plan` needs it: no plan is handed to a `prod` that would not wait for an approval.
+  `solo_mode` does not lift it (the reviewers stay required). **`iac-breakglass`**: the `validate`
+  job now holds `actions: read` and runs the same check on `prod-breakglass`.
+- **Breaking for private repositories in `github-environments`**: the module reads the
+  repository's visibility, and a private repository must set the new `private_repository_plan`
+  (`free`, `pro`, `team` or `enterprise`); the plan refuses every environment whose reviewers or
+  `main`-only policy that plan cannot hold, which in practice means `enterprise`. Public and
+  internal repositories need nothing. A postcondition fails when GitHub did not keep the reviewers
+  of a gated environment. Both example bootstraps pass `private_repository_plan` through.
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of

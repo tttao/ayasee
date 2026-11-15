@@ -18,6 +18,24 @@ gives `test-plan`, matching `prod-plan` (output `pr_plan_environment`). The firs
 those names would make a pull-request environment, which accepts every branch, collide with one
 that has a fixed role.
 
+## What the repository's plan must allow
+
+Required reviewers on environments exist in a private repository on **GitHub Enterprise only**
+(Cloud or Server), and deployment branch policies on GitHub Pro, Team or Enterprise; a public
+repository has both on every plan
+([GitHub](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
+The module reads the repository's `visibility` (`data.github_repository`): a public or internal
+repository is planned as before; a private one must state its owner's plan in
+`private_repository_plan` (`free`, `pro`, `team` or `enterprise`), and the plan **fails** on every
+environment whose reviewers or `main`-only policy that plan cannot hold, naming the environment and
+what would fall. In practice a private repository needs `private_repository_plan = "enterprise"`,
+since `prod` carries reviewers. Any other visibility is refused too. The value is a statement, so
+`ayasee doctor` checks the plan against GitHub, and the staged and break-glass runs refuse a gated
+environment without reviewers whatever the module was told. After an apply, a postcondition fails
+when GitHub did not keep the reviewers of `prod`, `prod-breakglass` or `prod-pr-plan`. Private
+repositories on other plans are not supported by the default gate
+([adopt: what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
+
 ## Names: `environment_prefix`
 
 `environment_prefix` (default `""`, the names above) is put in front of every environment name, so

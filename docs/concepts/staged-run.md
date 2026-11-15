@@ -72,7 +72,8 @@ two-stage, four-stage or five-stage run has been executed on GitHub yet.
 | `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. |
 | `stage-2`, `stage-3` | the slot before | its stage is in the list and not before `start-stage`; the slot before succeeded, or was skipped (by `start-stage` or as unused) | Same as `stage-1`. |
 | `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
-| `prod-plan` | `stage-1` to `stage-4` | after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
+| `prod-gate` | `resolve` | `resolve` succeeded and runs `prod-plan` | `ayasee require-reviewers` on the `prod` environment (its GitHub name, `environment_prefix` included): refuses when it has no required reviewers, does not exist yet (GitHub would create it unprotected on first use), or the repository's plan ignores them (a private repository on GitHub Free, seen from the 403 of the rulesets API), and when the API cannot be read. No environment, so no secret; its token holds `actions: read` only. It runs beside the pre-prod stages, which need no approval (issue #39). |
+| `prod-plan` | `prod-gate`, `stage-1` to `stage-4` | `prod-gate` succeeded; after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
 | `prod` | `prod-plan` | `has-changes == 'true'` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
 | `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
 
@@ -153,6 +154,12 @@ deploy and the approval of an infrastructure apply are not the same environment.
 On `prod`: **required reviewers** and **`prevent_self_review: true`** (D2), so the person who
 merged cannot approve the production apply. `dev`, `uat` and `prod-plan` have no reviewers. The
 `prod` job reads the approvers from the approvals API and refuses to apply when there are none.
+Before that, `prod-gate` refuses to let `prod-plan` produce a plan for a `prod` environment that
+would not wait for an approval, so a missing reviewer list or a GitHub plan without environment
+reviewers never turns the gate into a pass-through ([what the plan must allow](../guides/adopt.md#what-the-github-plan-must-allow)).
+`solo_mode` does not lift it: it lets the one maintainer approve their own change, but the
+reviewers stay required. The `validate` job of `iac-breakglass` runs the same check on
+`prod-breakglass` before the break-glass job starts.
 
 ## Environment variables (per environment)
 

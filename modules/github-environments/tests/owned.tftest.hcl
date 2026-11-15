@@ -1,5 +1,9 @@
 # An existing environment that carries the AYASEE_MANAGED variable is ours: re-applying is fine.
 mock_provider "github" {
+  # a public repository: every environment feature is available (issue #39)
+  mock_data "github_repository" {
+    defaults = { visibility = "public" }
+  }
   mock_data "github_repository_environments" {
     defaults = {
       environments = [{ name = "prod", node_id = "n1" }, { name = "dev", node_id = "n2" }]

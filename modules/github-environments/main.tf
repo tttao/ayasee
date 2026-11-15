@@ -141,6 +141,25 @@ locals {
   marker_name = "AYASEE_MANAGED"
 }
 
+# What the repository's GitHub plan lets an environment carry (issue #39). A public repository has
+# every feature on every plan, an internal one exists on GitHub Enterprise only. A private one has
+# deployment branch policies on GitHub Pro, Team or Enterprise, but required reviewers on
+# environments on GitHub Enterprise only (Cloud or Server). The API does not show the plan to
+# every administrator, so a private repository states it in private_repository_plan, which
+# `ayasee doctor` checks against GitHub. Any other visibility is refused, never taken for public.
+data "github_repository" "this" {
+  name = var.repository
+}
+
+locals {
+  visibility    = data.github_repository.this.visibility
+  open_to_all   = contains(["public", "internal"], local.visibility)
+  private       = local.visibility == "private"
+  has_reviewers = local.open_to_all || (local.private && var.private_repository_plan == "enterprise")
+  has_policies  = local.open_to_all || (local.private && contains(["pro", "team", "enterprise"], var.private_repository_plan))
+  plan_label    = var.private_repository_plan == "" ? "not stated" : var.private_repository_plan
+}
+
 resource "github_repository_environment" "this" {
   for_each = local.environments
 
@@ -148,6 +167,17 @@ resource "github_repository_environment" "this" {
   environment = local.github_name[each.key]
 
   lifecycle {
+    # fail closed: an environment GitHub would create without its reviewers or its branch policy
+    # turns the prod gate into a pass-through or opens the prod secrets to every branch
+    precondition {
+      condition     = (each.value == null || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies)
+      error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${each.value == null ? "a main-only deployment branch policy" : "required reviewers"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, or move it to GitHub Enterprise and set private_repository_plan = \"enterprise\". ayasee does not support other private repositories with its default gate (docs/guides/adopt.md#what-you-need)."
+    }
+    # GitHub may store an environment without the reviewers it was given: check what it kept
+    postcondition {
+      condition     = each.value == null || length(self.reviewers) > 0
+      error_message = "GitHub did not keep the required reviewers of \"${local.github_name[each.key]}\": its job would run without an approval. Check the repository's plan (`ayasee doctor`); the staged and break-glass runs refuse such an environment."
+    }
     precondition {
       condition     = var.adopt_existing_environments || !contains(local.foreign, local.github_name[each.key])
       error_message = "The GitHub environment \"${local.github_name[each.key]}\" already exists and was not created by ayasee (it has no ${local.marker_name} variable). Applying would overwrite its reviewers and deployment branch policy, and its secrets would be shared with ayasee's jobs. Set environment_prefix (for example \"iac-\", and the same in .ayasee.yaml) so ayasee gets environments of its own, or, to take this one over deliberately, set adopt_existing_environments = true. `ayasee doctor` lists the workflows that reference it."
