@@ -87,7 +87,8 @@ def _git(*args, cwd):
 
 @pytest.fixture
 def history(tmp_path):
-    """main: c1 (environment gate) -> c2 (workflow gate, rita) -> c3 (adds mallory)."""
+    """main: c1 (environment gate) -> c2 (workflow gate, rita) -> c3 (adds mallory) -> c4 (an
+    infra change); side branches off c1. Returns (root, [c1, c2, c3, side, c4])."""
     root = tmp_path / "repo"
     root.mkdir()
     _git("init", "-q", "-b", "main", cwd=root)
@@ -103,17 +104,21 @@ def history(tmp_path):
         _git("add", ".", cwd=root)
         _git("commit", "-q", "-m", "c", cwd=root)
         shas.append(_git("rev-parse", "HEAD", cwd=root))
+    (root / "infra.tf").write_text("# c4\n")
+    _git("add", ".", cwd=root)
+    _git("commit", "-q", "-m", "c4", cwd=root)
+    c4 = _git("rev-parse", "HEAD", cwd=root)
     _git("checkout", "-q", "-b", "side", shas[0], cwd=root)
     (root / "x").write_text("x")
     _git("add", ".", cwd=root)
     _git("commit", "-q", "-m", "side", cwd=root)
     shas.append(_git("rev-parse", "HEAD", cwd=root))
     _git("checkout", "-q", "main", cwd=root)
-    return root, shas
+    return root, [*shas, c4]
 
 
 def test_the_sha_must_be_an_ancestor_of_main(history):
-    root, (c1, c2, c3, side) = history
+    root, (c1, c2, c3, side, _c4) = history
     approve.check_ancestor(c2, c3, root)
     approve.check_ancestor(c3, c3, root)
     with pytest.raises(Refused, match="not an ancestor of main"):
@@ -380,7 +385,7 @@ def test_an_unreadable_change_is_refused(gh):
 
 
 def _authorize(gh, history, cfg_text=WORKFLOW, actor="rita"):
-    root, (c1, c2, c3, _side) = history
+    root, (c1, c2, c3, _side, _c4) = history
     return approve.authorize(
         gh,
         repo=REPO,
@@ -463,16 +468,32 @@ def test_the_digest_binds_the_manifest(tmp_path):
         approve.check_digest(tmp_path / "missing.json", digest, SHA)
 
 
-# ---- the baseline ------------------------------------------------------------------------------
+# ---- the baseline: trust is anchored on the last approved apply -----------------------------
 
 
-def _live(tmp_path, sha, converged=True):
+def _ledger(tmp_path, *records):
+    """A prod ledger of ``(sha, approver)`` records, oldest first; approver None is the
+    in-sync path (an empty plan that went live without an approval)."""
     store = FileStore(tmp_path / "ledger")
-    units = {"u": UnitResult("applied", converged)}
-    store.append(
-        record_from_run(repo=REPO, env="prod", sha=sha, run_id=1, run_attempt=1, units=units)
-    )
+    units = {"u": UnitResult("applied", True)}
+    for n, (sha, approver) in enumerate(records):
+        store.append(
+            record_from_run(
+                repo=REPO,
+                env="prod",
+                sha=sha,
+                run_id=n + 1,
+                run_attempt=1,
+                units=units,
+                approver=approver,
+                now=f"2026-11-06T12:00:{n:02d}.000001Z",
+            )
+        )
     return store
+
+
+def _live(tmp_path, sha):
+    return _ledger(tmp_path, (sha, "someone"))
 
 
 def _compare(base, head, *logins, status=200):
@@ -498,10 +519,10 @@ def _baseline(gh, store, history, sha, actor="rita", solo=False):
 
 
 @respx.mock
-def test_baseline_without_a_prod_record_notes_it(gh, history, tmp_path):
+def test_baseline_without_an_approved_record_is_bootstrap_trust(gh, history, tmp_path):
     store = FileStore(tmp_path / "ledger")
     (note,) = _baseline(gh, store, history, history[1][2])
-    assert "no prod record yet" in note
+    assert note.startswith("DEVIATION: bootstrap trust") and "main" in note
 
 
 @respx.mock
@@ -513,48 +534,80 @@ def test_baseline_refuses_a_sha_already_live(gh, history, tmp_path):
 
 @respx.mock
 def test_baseline_refuses_a_reviewer_added_by_the_change_itself(gh, history, tmp_path):
-    _, (c1, c2, c3, _side) = history
+    _, (c1, c2, c3, _side, _c4) = history
     _compare(c2, c3, "alice")
     store = _live(tmp_path, c2)
-    with pytest.raises(Refused, match="mallory was not in reviewers.prod at the commit live"):
+    with pytest.raises(Refused, match="mallory was not in reviewers.prod at the last approved"):
         _baseline(gh, store, history, c3, actor="mallory")
     assert _baseline(gh, store, history, c3) == []
 
 
 @respx.mock
+def test_a_reviewer_added_through_the_in_sync_path_cannot_approve(gh, history, tmp_path):
+    """The bypass: c3 only adds mallory to reviewers.prod, its prod plan is empty, so it went
+    live without an approval. The last approved apply (c2) is the anchor, not the live c3."""
+    _, (c1, c2, c3, _side, c4) = history
+    _compare(c2, c4, "alice")
+    store = _ledger(tmp_path, (c2, "rita"), (c3, None))
+    with pytest.raises(Refused, match="mallory was not in reviewers.prod at the last approved"):
+        _baseline(gh, store, history, c4, actor="mallory")
+    with pytest.raises(Refused, match="mallory was not in reviewers.prod at the last approved"):
+        _baseline(gh, store, history, c4, actor="mallory", solo=True)
+    assert _baseline(gh, store, history, c4) == []
+
+
+@respx.mock
+def test_independence_covers_every_commit_since_the_last_approval(gh, history, tmp_path):
+    _, (c1, c2, c3, _side, c4) = history
+    _compare(c2, c4, "alice", "rita")  # rita wrote c3, which went live without approval
+    store = _ledger(tmp_path, (c2, "ron"), (c3, None))
+    with pytest.raises(Refused, match="wrote a commit since"):
+        _baseline(gh, store, history, c4)
+
+
+@respx.mock
 def test_baseline_refuses_the_author_of_a_commit_since_prod(gh, history, tmp_path):
-    _, (c1, c2, c3, _side) = history
+    _, (c1, c2, c3, _side, _c4) = history
     _compare(c2, c3, "alice", "rita")
     with pytest.raises(Refused, match="wrote a commit since"):
         _baseline(gh, _live(tmp_path, c2), history, c3)
 
 
 @respx.mock
-def test_baseline_after_the_environment_gate_notes_the_transition(gh, history, tmp_path):
-    _, (c1, c2, c3, _side) = history
+def test_baseline_after_the_environment_gate_is_bootstrap_trust(gh, history, tmp_path):
+    _, (c1, c2, c3, _side, _c4) = history
     _compare(c1, c3, "alice")
     (note,) = _baseline(gh, _live(tmp_path, c1), history, c3, actor="mallory")
-    assert "predates gate_mechanism: workflow" in note
+    assert note.startswith("DEVIATION: bootstrap trust") and "predates" in note
 
 
 @respx.mock
 def test_baseline_refuses_an_unreadable_compare(gh, history, tmp_path):
-    _, (c1, c2, c3, _side) = history
+    _, (c1, c2, c3, _side, _c4) = history
     _compare(c2, c3, status=500)
     with pytest.raises(Refused, match="cannot list the commits"):
         _baseline(gh, _live(tmp_path, c2), history, c3)
 
 
 @respx.mock
-def test_baseline_refuses_a_live_commit_outside_the_history(gh, history, tmp_path):
+def test_baseline_refuses_an_approved_commit_outside_the_history(gh, history, tmp_path):
     with pytest.raises(Refused, match="not in the history of main"):
         _baseline(gh, _live(tmp_path, "b" * 40), history, history[1][2])
 
 
 @respx.mock
+def test_baseline_refuses_when_no_approved_record_is_in_reach(gh, history, tmp_path, monkeypatch):
+    _, (c1, c2, c3, _side, c4) = history
+    monkeypatch.setattr(approve, "GATE_HISTORY", 3)
+    store = _ledger(tmp_path, (c1, None), (c2, None), (c3, None))
+    with pytest.raises(Refused, match="no approved prod record among the newest 3"):
+        _baseline(gh, store, history, c4)
+
+
+@respx.mock
 def test_solo_mode_counts_only_when_both_commits_have_it(gh, history, tmp_path):
-    # main says solo_mode, the commit live in prod does not: independence is still checked
-    _, (c1, c2, c3, _side) = history
+    # main says solo_mode, the last approved commit does not: independence is still checked
+    _, (c1, c2, c3, _side, _c4) = history
     _run(20, head_sha=c3)
     respx.get(f"{API}/repos/{REPO}/commits/{c3}").mock(
         return_value=httpx.Response(200, json={"author": {"login": "rita"}})
@@ -564,6 +617,65 @@ def test_solo_mode_counts_only_when_both_commits_have_it(gh, history, tmp_path):
     )
     with pytest.raises(Refused, match="rita pushed, wrote or merged it"):
         _baseline(gh, _live(tmp_path, c2), history, c3, solo=True)
+
+
+# ---- a change of the gate settings needs an approval, even with an empty plan --------------
+
+ENV_GATE = "stages: [dev, prod]\n"
+WF_RITA = "gate_mechanism: workflow\nreviewers: {prod: [rita]}\n"
+WF_BOTH = "gate_mechanism: workflow\nreviewers: {prod: [rita, mallory]}\n"
+
+
+def _reader(files):
+    return lambda sha: files.get(sha)
+
+
+@pytest.mark.parametrize(
+    "anchor_text, sha_text, changed",
+    [
+        (WF_RITA, WF_RITA, False),
+        (WF_RITA, WF_RITA + "units_root: stages\n", False),  # not a gate setting
+        (WF_RITA, WF_BOTH, True),  # a reviewer added
+        (WF_RITA, WF_RITA + "solo_mode: true\n", True),
+        (WF_RITA, ENV_GATE, True),  # back to the environment gate
+        (ENV_GATE, WF_RITA, True),  # into the workflow gate
+        (ENV_GATE, ENV_GATE + "solo_mode: true\n", False),  # the environment gate alone
+        (None, WF_RITA, True),  # no approved record: the first workflow change
+        (None, ENV_GATE, False),
+    ],
+)
+def test_gate_change(tmp_path, anchor_text, sha_text, changed):
+    c_anchor = "a" * 40
+    store = (
+        _ledger(tmp_path, (c_anchor, "rita"))
+        if anchor_text is not None
+        else FileStore(tmp_path / "ledger")
+    )
+    files = {c_anchor: anchor_text}
+    got, notes = approve.gate_change(store, REPO, parse_config_text(sha_text), _reader(files))
+    assert got is changed
+    assert bool(notes) is changed
+
+
+def test_gate_change_skips_in_sync_records(tmp_path):
+    a, b = "a" * 40, "b" * 40
+    store = _ledger(tmp_path, (a, "rita"), (b, None))  # b changed the gate, went live in sync
+    got, _ = approve.gate_change(
+        store, REPO, parse_config_text(WF_BOTH), _reader({a: WF_RITA, b: WF_BOTH})
+    )
+    assert got is True
+
+
+def test_gate_change_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(approve, "GATE_HISTORY", 1)
+    store = _ledger(tmp_path, ("a" * 40, None))
+    with pytest.raises(Refused, match="no approved prod record"):
+        approve.gate_change(store, REPO, parse_config_text(ENV_GATE), _reader({}))
+    store = _ledger(tmp_path / "x", ("c" * 40, "rita"))
+    with pytest.raises(Refused, match="cannot read"):
+        approve.gate_change(
+            store, REPO, parse_config_text(WF_RITA), _reader({"c" * 40: "bogus: 1\n"})
+        )
 
 
 # ---- the approval issue: identifiers and counts only -------------------------------------------
@@ -690,7 +802,7 @@ def test_the_digest_cli(tmp_path, monkeypatch, capsys):
 
 @respx.mock
 def test_the_authorize_cli_prints_outputs_and_refusals(monkeypatch, capsys, history):
-    root, (c1, c2, c3, _side) = history
+    root, (c1, c2, c3, _side, _c4) = history
     _all_green(c2)
     monkeypatch.chdir(root)
     args = [
@@ -735,3 +847,31 @@ def test_the_authorize_cli_prints_outputs_and_refusals(monkeypatch, capsys, hist
     args[args.index("--triggering-actor") + 1] = "mallory"
     assert _cli(monkeypatch, *args) == 1
     assert "approve: this run was started by rita" in capsys.readouterr().err
+
+
+@respx.mock
+def test_the_gate_change_cli_reads_the_anchor_from_the_contents_api(tmp_path, monkeypatch, capsys):
+    import base64
+
+    anchor = "a" * 40
+    _ledger(tmp_path, (anchor, "rita"))
+    respx.get(f"{API}/repos/{REPO}/contents/.ayasee.yaml", params={"ref": anchor}).mock(
+        return_value=httpx.Response(
+            200,
+            json={"encoding": "base64", "content": base64.b64encode(WF_RITA.encode()).decode()},
+        )
+    )
+    args = ["gate-change", "--store", f"file://{tmp_path / 'ledger'}", "--repo", REPO]
+    args += ["--config-path", ".ayasee.yaml"]
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ayasee.yaml").write_text(WF_BOTH)
+    assert _cli(monkeypatch, *args) == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "gate-changed=true" and "needs a prod approval" in captured.err
+    (tmp_path / ".ayasee.yaml").write_text(WF_RITA)
+    assert _cli(monkeypatch, *args) == 0
+    assert capsys.readouterr().out.strip() == "gate-changed=false"
+    respx.clear()
+    respx.get(f"{API}/repos/{REPO}/contents/.ayasee.yaml").mock(return_value=httpx.Response(500))
+    assert _cli(monkeypatch, *args) == 1
+    assert "gate-changed" not in capsys.readouterr().out

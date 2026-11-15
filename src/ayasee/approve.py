@@ -20,8 +20,13 @@ ayasee checks, before any secret is used:
     the downloaded manifest is byte for byte the one the reviewer named, and binds that SHA.
 ``baseline`` (the ``apply`` job, after the guard, before the apply step)
     against the ledger: the SHA is not already live in prod; the person was already a prod
-    reviewer at the commit live in prod (a pull request cannot add its own approver); and no
-    commit since that one is theirs (unless ``solo_mode`` at both commits).
+    reviewer at the last *approved* prod apply (never at a commit that went live in sync, so a
+    change cannot add its own approver; before the first approval, a bootstrap-trust DEVIATION);
+    and no commit since that one is theirs (unless ``solo_mode`` at both commits).
+``gate-change`` (``prod-plan`` of ``iac-staged``)
+    whether the commit changes ``gate_mechanism``, ``reviewers.prod`` or ``solo_mode`` against
+    the last approved apply, with the workflow gate on either side: such a commit needs an
+    approval even with an empty plan, so the in-sync path never changes who may approve.
 
 Then the apply step applies exactly the bound plan (D1) and the ledger records the approver.
 Every check fails closed: an API error, an unexpected answer or a missing input is a refusal.
@@ -35,7 +40,7 @@ import hashlib
 import re
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,7 +50,7 @@ from ayasee.binding import Manifest
 from ayasee.config import DEVIATION_GATE, Config, ConfigError, parse_config_text
 from ayasee.github import GitHub, GitHubError
 from ayasee.labels import PROD_APPROVAL_LABEL
-from ayasee.ledger import LedgerError, LedgerStore, open_store
+from ayasee.ledger import LedgerError, LedgerRecord, LedgerStore, open_store
 from ayasee.maintip import _repo
 from ayasee.plansupport import BRANCH_POLICIES, UNSUPPORTED, detect, reviewer_count
 
@@ -326,7 +331,7 @@ def _git_show(root: Path, sha: str, path: str) -> str | None:
             check=False,
         )
         if exists.returncode != 0:
-            raise Refused(f"prod's live commit {sha[:12]} is not in the history of main")
+            raise Refused(f"the prod commit {sha[:12]} is not in the history of main")
         proc = subprocess.run(
             ["git", "-C", str(root), "show", f"{sha}:{path}"],
             capture_output=True,
@@ -342,6 +347,74 @@ def _git_show(root: Path, sha: str, path: str) -> str | None:
         raise Refused(f"{path} at {sha[:12]} is not text") from None
 
 
+# How far back the ledger is searched for the last approved prod apply.
+GATE_HISTORY = 200
+
+BOOTSTRAP = (
+    "DEVIATION: bootstrap trust: {why}, so reviewers.prod of main alone decides this approval "
+    "(D15); from the first approved apply in this mode on, a reviewer must also be listed at the "
+    "last approved commit"
+)
+
+
+def last_approved(store: LedgerStore, repo: str) -> LedgerRecord | None:
+    """The newest prod record that carries an approver: the last approved apply. The in-sync
+    path (an empty plan, no approval) never counts. None when the ledger has none; refused when
+    the newest :data:`GATE_HISTORY` records hold none but more may exist (fail closed)."""
+    try:
+        records = store.history(repo, "prod", GATE_HISTORY)
+    except LedgerError as exc:
+        raise Refused(f"cannot read the prod ledger: {exc}") from None
+    for rec in records:
+        if rec.approver:
+            return rec
+    if len(records) >= GATE_HISTORY:
+        raise Refused(
+            f"no approved prod record among the newest {GATE_HISTORY}: the trust anchor of the "
+            "workflow gate cannot be found"
+        )
+    return None
+
+
+def gate_settings(cfg: Config) -> tuple[str, tuple[str, ...], bool]:
+    """What decides who may approve prod: the mechanism, its reviewers and solo_mode."""
+    return cfg.gate_mechanism, tuple(sorted(_fold(cfg.reviewers.prod))), cfg.solo_mode
+
+
+def gate_change(
+    store: LedgerStore,
+    repo: str,
+    cfg: Config,
+    read: Callable[[str], str | None],
+) -> tuple[bool, list[str]]:
+    """Does ``cfg`` (the configuration of the commit planned) change the gate settings against
+    the last approved prod apply, with the workflow gate on either side? Such a change needs an
+    approval even with an empty plan, so that the in-sync path can never add a reviewer, turn
+    solo_mode on, or leave or enter the workflow gate unapproved (D15). ``read(sha)`` returns the
+    configuration text at ``sha`` (None: no file). A change of the environment gate alone keeps
+    today's in-sync path. Raises :class:`Refused` on anything it cannot read."""
+    anchor = last_approved(store, repo)
+    if anchor is None:
+        prev, where = Config(), "no approved prod apply yet"
+    else:
+        try:
+            text = read(anchor.sha)
+            prev = parse_config_text(text) if text is not None else Config()
+        except (ConfigError, GitHubError) as exc:
+            raise Refused(
+                f"cannot read the configuration at the last approved commit: {exc}"
+            ) from None
+        where = f"the last approved commit {anchor.sha[:12]}"
+    if "workflow" not in (cfg.gate_mechanism, prev.gate_mechanism):
+        return False, []
+    if gate_settings(cfg) == gate_settings(prev):
+        return False, []
+    return True, [
+        f"the gate settings (gate_mechanism, reviewers.prod, solo_mode) differ from {where}: "
+        "this change needs a prod approval even if its plan is empty"
+    ]
+
+
 def baseline(
     gh: GitHub,
     store: LedgerStore,
@@ -354,42 +427,47 @@ def baseline(
     config_path: str,
     root: Path,
 ) -> list[str]:
-    """The checks that need the ledger (the ``apply`` job); raises :class:`Refused`."""
+    """The checks that need the ledger (the ``apply`` job); raises :class:`Refused`.
+
+    Trust is anchored on the last approved prod apply, not on the commit live in prod: an
+    empty plan goes live without an approval (the in-sync path), so a reviewer it added must
+    not count (D15)."""
     try:
         cur = store.current(repo, "prod")
     except LedgerError as exc:
         raise Refused(f"cannot read the prod ledger: {exc}") from None
-    if cur is None:
-        return [
-            "no prod record yet: reviewers.prod of main alone decides this first approval, and "
-            "independence is checked on the approved commit only"
-        ]
-    if cur.sha == sha and cur.converged:
+    if cur is not None and cur.sha == sha and cur.converged:
         raise Refused(f"{sha[:12]} is already live and converged in prod")
-    text = _git_show(root, cur.sha, config_path)
-    try:
-        prev = parse_config_text(text) if text is not None else Config()
-    except ConfigError as exc:
-        raise Refused(f"cannot read {config_path} at prod's live commit: {exc}") from None
+    anchor = last_approved(store, repo)
     notes: list[str] = []
-    if prev.gate_mechanism == "workflow":
+    prev: Config | None = None
+    if anchor is not None:
+        text = _git_show(root, anchor.sha, config_path)
+        try:
+            prev = parse_config_text(text) if text is not None else Config()
+        except ConfigError as exc:
+            raise Refused(f"cannot read {config_path} at the last approved commit: {exc}") from None
+    if prev is not None and prev.gate_mechanism == "workflow":
+        assert anchor is not None
         if actor.casefold() not in _fold(prev.reviewers.prod):
             raise Refused(
-                f"{actor} was not in reviewers.prod at the commit live in prod "
-                f"({cur.sha[:12]}): a reviewer added since then approves from the next change "
-                "that goes live, so that no change approves itself"
+                f"{actor} was not in reviewers.prod at the last approved commit "
+                f"({anchor.sha[:12]}): a reviewer added since then approves from the next change "
+                "after the one that adds them is approved, so that no change approves itself"
             )
         solo = main_solo and prev.solo_mode
     else:
-        notes.append(
-            f"the commit live in prod ({cur.sha[:12]}) predates gate_mechanism: workflow: "
-            "reviewers.prod of main alone decides this approval"
+        why = (
+            "there is no approved prod apply yet"
+            if anchor is None
+            else f"the last approved commit ({anchor.sha[:12]}) predates gate_mechanism: workflow"
         )
+        notes.append(BOOTSTRAP.format(why=why))
         solo = main_solo
     if solo:
         return notes
     if main_solo:
-        notes.append("solo_mode was off at the commit live in prod: independence is checked")
+        notes.append("solo_mode was off at the last approved commit: independence is checked")
         try:
             pushers = find_run_pushers(gh, repo, run_id)
         except GitHubError as exc:
@@ -397,10 +475,16 @@ def baseline(
         check_independent(
             actor, change_people(gh, repo, sha, pushers), "pushed, wrote or merged it"
         )
+    # every commit since the last approval, the ones that went live in sync included
+    base = anchor if anchor is not None else cur
+    if base is None:
+        return notes
+    if anchor is None:
+        _git_show(root, base.sha, config_path)  # the live commit must be in main's history
     try:
-        commits = gh.compare_commits(repo, cur.sha, sha)
+        commits = gh.compare_commits(repo, base.sha, sha)
     except GitHubError as exc:
-        raise Refused(f"cannot list the commits since prod's live commit: {exc}") from None
+        raise Refused(f"cannot list the commits since {base.sha[:12]}: {exc}") from None
     people: set[str] = set()
     unmapped = 0
     for c in commits:
@@ -408,11 +492,10 @@ def baseline(
         if _login(c.get("author")) is None:
             unmapped += 1
         people.update(found)
-    since = f"wrote a commit since {cur.sha[:12]}, the commit live in prod"
-    check_independent(actor, people, since)
+    check_independent(actor, people, f"wrote a commit since {base.sha[:12]}")
     if unmapped:
         notes.append(
-            f"{unmapped} commit(s) since prod's live commit have an author GitHub cannot map to a "
+            f"{unmapped} commit(s) since {base.sha[:12]} have an author GitHub cannot map to a "
             "login; their authors were not checked"
         )
     return notes
@@ -581,6 +664,32 @@ def _baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gate_change(args: argparse.Namespace) -> int:
+    """Prints ``gate-changed=true|false``; the anchor's configuration is read with the GitHub
+    contents API, so the job needs no history."""
+    gh: GitHub | None = None
+    try:
+        cfg = _load_quiet(args.config_path)
+        store = open_store(args.store)
+        gh = GitHub.from_env()
+        client = gh
+        changed, notes = gate_change(
+            store, args.repo, cfg, lambda sha: client.get_file(args.repo, args.config_path, sha)
+        )
+    except (Refused, GitHubError, LedgerError) as exc:
+        print(f"approve: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # fail closed, never a traceback
+        print(f"approve: unexpected {type(exc).__name__}", file=sys.stderr)
+        return 1
+    finally:
+        if gh is not None:
+            gh.close()
+    _report(notes)
+    print(f"gate-changed={'true' if changed else 'false'}")
+    return 0
+
+
 def _counts(args: argparse.Namespace) -> dict[str, int]:
     out = {}
     for key in ("changes", "critical", "high"):
@@ -668,6 +777,14 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--config-path", required=True)
     p.add_argument("--root", default=".")
     p.set_defaults(handler=_baseline)
+    p = sub.add_parser(
+        "gate-change",
+        help="print gate-changed=true when the gate settings differ from the last approved apply",
+    )
+    p.add_argument("--store", required=True)
+    p.add_argument("--repo", required=True, type=_repo)
+    p.add_argument("--config-path", required=True, help="the configuration of the planned commit")
+    p.set_defaults(handler=_gate_change)
     p = sub.add_parser("issue", help="open or rewrite the prod approval issue")
     p.add_argument("--repo", required=True, type=_repo)
     p.add_argument("--sha", required=True)

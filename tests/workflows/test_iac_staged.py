@@ -187,6 +187,7 @@ def test_prod_plan_outputs(wf):
         "units",
         "changes",
         "manifest-digest",
+        "gate-changed",
     }
 
 
@@ -407,7 +408,8 @@ def test_ledger_credentials_are_step_scoped_env_only(wf):
         for step in _steps(wf, name):
             uses = step.get("uses", "")
             env = step.get("env", {})
-            if "/actions/guard@" in uses or "/actions/ledger@" in uses:
+            # the gate-change step of prod-plan reads the ledger too (D15)
+            if "/actions/guard@" in uses or "/actions/ledger@" in uses or step.get("id") == "gate":
                 assert env["GIT_CONFIG_COUNT"] == "${{ secrets.ledger-token && '1' || '0' }}", name
                 assert env["GIT_CONFIG_KEY_0"] == "credential.${{ github.server_url }}.helper"
                 assert "$AYASEE_LEDGER_TOKEN" in env["GIT_CONFIG_VALUE_0"]

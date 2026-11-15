@@ -29,8 +29,14 @@ released version into the GitHub release notes.
     has that digest), independence (not who pushed, wrote or merged it, unless `solo_mode`) and
     the prod environment (main-only, or a plan without branch policies, said as a deviation). Its
     `apply` job runs the guard, then checks against the ledger (not already live; the reviewer was
-    already listed at the commit live in prod; no commit since is theirs), applies exactly the
-    approved plan and records the approver. New `ayasee approve authorize|digest|baseline|issue|close-issue`.
+    already listed at the last approved prod apply, never at a commit that went live in sync,
+    with a `DEVIATION: bootstrap trust` warning before the first approval; no commit since is
+    theirs), applies exactly the
+    approved plan and records the approver. New `ayasee approve authorize|digest|baseline|gate-change|issue|close-issue`.
+  - A change of `gate_mechanism`, `reviewers.prod` or `solo_mode`, with the workflow gate on
+    either side, is never promoted in sync: `prod-plan` gains a `gate-changed` output (`ayasee
+    approve gate-change`), and such a commit goes to `prod-approval` (or to `prod` when it sets
+    the environment gate) even with an empty plan.
   - `ayasee doctor` in this mode: Pro or Team is fine, Free warns what the gate does not protect,
     every reviewer must have write access, an `iac-approve` caller must exist, and on Free the
     secrets and variables are checked at repository level. With the environment gate, a plan

@@ -861,6 +861,7 @@ jobs:
     name: prod-plan
     outputs:
       has-changes: ${{ steps.plan.outputs.has-changes }}
+      gate-changed: ${{ steps.gate.outputs.gate-changed }}
       critical: ${{ steps.summary.outputs.critical }}
       high: ${{ steps.summary.outputs.high }}
       units: ${{ steps.summary.outputs.units }}
@@ -921,6 +922,40 @@ jobs:
           stage: prod
           sha: ${{ github.sha }}
           order: ${{ needs.resolve.outputs.order }}
+      - id: gate
+        name: Does this commit change the gate settings? (D15)
+        env:
+          # read-only: the prod ledger, and the configuration at the last approved commit
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
+          REPO: ${{ github.repository }}
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # with the workflow gate on either side, a change of gate_mechanism, reviewers.prod or
+          # solo_mode against the last approved prod apply needs an approval even when the plan
+          # is empty: the in-sync path must never change who may approve
+          err="$RUNNER_TEMP/ayasee-gate-change.err"
+          rc=0
+          out="$(ayasee approve gate-change --store "$AYASEE_LEDGER_URL" --repo "$REPO" \
+            --config-path "$CONFIG_PATH" 2>"$err")" || rc=$?
+          while IFS= read -r line; do
+            case "$line" in
+              approve:*) echo "::error::${line#approve: }" ;;
+              warning:*) echo "::warning::${line#warning: }" ;;
+              notice:*) echo "::notice::${line#notice: }" ;;
+              *) echo "$line" ;;
+            esac
+          done <"$err"
+          [ "$rc" -eq 0 ] || exit 1
+          case "$out" in
+            gate-changed=true | gate-changed=false) echo "$out" >>"$GITHUB_OUTPUT" ;;
+            *) echo "::error::cannot tell whether the gate settings changed"; exit 1 ;;
+          esac
       - id: plan
         uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
@@ -999,7 +1034,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ steps.plan.outputs.has-changes == 'true' }}
+        if: ${{ steps.plan.outputs.has-changes == 'true' || steps.gate.outputs.gate-changed == 'true' }}
         with:
           event: prod_waiting
           repo: ${{ github.repository }}
@@ -1023,7 +1058,7 @@ jobs:
     # (gate_mechanism: workflow, D15: prod-approval and iac-approve.yml instead)
     name: prod
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' && needs.resolve.outputs.gate-mechanism != 'workflow' }}
+    if: ${{ github.ref == 'refs/heads/main' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism != 'workflow' }}
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.env-prod }}
     permissions:
@@ -1187,7 +1222,7 @@ jobs:
     # counts and links only reach the issue.
     name: prod-approval
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' && needs.resolve.outputs.gate-mechanism == 'workflow' }}
+    if: ${{ github.ref == 'refs/heads/main' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism == 'workflow' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # check out the code (in-repo actions)
@@ -1222,10 +1257,12 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
 
   prod-in-sync:
-    # empty prod plan: no reviewers, record every unit as converged at this SHA
+    # empty prod plan: no reviewers, record every unit as converged at this SHA. Not when the
+    # commit changes the gate settings with the workflow gate on either side (D15): that change
+    # goes to prod or prod-approval like any other
     name: prod-in-sync
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'false' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'false' && needs.prod-plan.outputs.gate-changed == 'false' }}
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.env-prod-plan }}
     permissions:
@@ -1327,7 +1364,7 @@ jobs:
     # An apply failure notifies from the prod job itself; only a rejection is announced here.
     name: prod-result
     needs: [resolve, prod-plan, prod]
-    if: ${{ always() && github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'true' && needs.prod.result == 'failure' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.prod.result == 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # check out the code (in-repo actions)

@@ -74,9 +74,9 @@ two-stage, four-stage or five-stage run has been executed on GitHub yet.
 | `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
 | `prod-gate` | `resolve` | `resolve` succeeded and runs `prod-plan` | `ayasee require-reviewers` on the `prod` environment (its GitHub name, `environment_prefix` included): refuses when it has no required reviewers, does not exist yet (GitHub would create it unprotected on first use), or the repository's plan ignores them (a private repository on GitHub Free, seen from the 403 of the rulesets API), and when the API cannot be read. No environment, so no secret; its token holds `actions: read` only. It runs beside the pre-prod stages, which need no approval (issue #39). With `gate_mechanism: workflow` the check is skipped: `iac-approve` checks the prod environment itself. |
 | `prod-plan` | `prod-gate`, `stage-1` to `stage-4` | `prod-gate` succeeded; after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
-| `prod` | `prod-plan` | `has-changes == 'true'`, and `gate_mechanism` is not `workflow` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
-| `prod-approval` | `prod-plan` | `has-changes == 'true'` and `gate_mechanism: workflow` | No environment, no secret (`contents: read`, `issues: write`): opens or rewrites the prod approval issue and ends the run. `iac-approve` applies the plan ([the workflow gate](#the-workflow-gate)). |
-| `prod-in-sync` | `prod-plan` | `has-changes == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
+| `prod` | `prod-plan` | `has-changes == 'true'` or `gate-changed == 'true'`, and `gate_mechanism` is not `workflow` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
+| `prod-approval` | `prod-plan` | `has-changes == 'true'` or `gate-changed == 'true'`, and `gate_mechanism: workflow` | No environment, no secret (`contents: read`, `issues: write`): opens or rewrites the prod approval issue and ends the run. `iac-approve` applies the plan ([the workflow gate](#the-workflow-gate)). |
+| `prod-in-sync` | `prod-plan` | `has-changes == 'false'` and `gate-changed == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
 
 Every stage job has `environment: <name>`, an `ayasee-<repo>-<env>` concurrency group with
 `cancel-in-progress: false`, and `github.ref == 'refs/heads/main'` in its `if:`. `prod-plan` runs in
@@ -432,8 +432,9 @@ the cockpit. The default, `environment`, is unchanged.
    `ayasee-prod-plan` artifact (7 days). Instead of `prod`, the `prod-approval` job opens one issue
    labelled `ayasee:prod-approval` (or rewrites the open one: only the newest plan can be applied)
    with the commit SHA, the SHA-256 of `manifest.json` (`manifest-digest`), the change counts and
-   the run link. No value of the plan goes there. An empty plan still takes the
-   [empty-plan path](#the-empty-plan-path) and needs no approval.
+   the run link. No value of the plan goes there. An empty plan takes the
+   [empty-plan path](#the-empty-plan-path) and needs no approval, unless the commit changes the
+   gate settings (below).
 2. **A reviewer starts `iac-approve` on `main`** with `sha` and `manifest-digest` from the issue
    (`gh workflow run iac-approve.yml --ref main -f sha=... -f manifest-digest=...`). The `verify`
    job has no environment and receives no secret; with `github.token` (`contents: read`,
@@ -458,10 +459,11 @@ the cockpit. The default, `environment`, is unchanged.
    that it is on `main`, runs the [guard](#the-supersession-guard) (the commit must be the one live
    and converged in the stage before prod, and no stop-the-line issue open), then
    `ayasee approve baseline` against the ledger: the commit is not already live in prod; the actor
-   was already in `reviewers.prod` at the commit live in prod, so a change cannot add its own
-   approver (before the first prod record, or when that commit predates the mode, `main`'s list
-   alone decides and a notice says so); and, unless `solo_mode` is on at both commits, no commit
-   since the one live in prod has the actor as author or committer. It then downloads the artifact
+   was already in `reviewers.prod` at the **last approved** commit (the newest prod record with an
+   approver, never one that went live in sync), so a change cannot add its own approver (before
+   the first approved apply, or when it predates the mode, `main`'s list alone decides and the run
+   prints a `DEVIATION: bootstrap trust` warning); and, unless `solo_mode` is on at both commits,
+   no commit since the last approved one has the actor as author or committer. It then downloads the artifact
    again, checks the digest again, applies it with `binding-mode: encrypted_plan` (D1: hashes,
    engine version, lock files, and OpenTofu's own stale-plan check), writes the ledger with the
    actor as approver, closes the approval issue and notifies. No step before the apply step
@@ -473,6 +475,40 @@ What the mode guarantees depends on the plan: see
 stay restricted to `main` and keep their own secrets; on GitHub Free there are no environment
 secrets or branch policies, so the secrets are repository secrets that any collaborator with
 write access can read from any branch, and every stage reads the same ones.
+
+**Where reviewer trust is anchored** ([D15](../governance/decisions.md#d15-the-workflow-gate)). An empty prod plan goes live without an approval (the
+in-sync path), so the commit live in prod is not a trusted reference. The anchor is the last
+**approved** prod apply, the newest ledger record that carries an approver. A reviewer must be in
+`reviewers.prod` both at `main` and at that approved commit, `solo_mode` counts only when both
+have it, and independence covers every commit since that approval. Before the first approved apply
+(or while the last one predates the workflow gate) there is no anchor: `main`'s list alone
+decides, and the run prints `DEVIATION: bootstrap trust: ...`. That first approval is the one to
+watch.
+
+**A change of the gate settings always needs an approval.** With the workflow gate on either side
+(the commit planned, or the last approved commit), a change of `gate_mechanism`,
+`reviewers.prod` or `solo_mode` against the last approved commit is never promoted in sync, even
+when its plan is empty: `prod-plan` reports `gate-changed` and the run goes to `prod-approval` (or,
+when the commit sets the environment gate, to the `prod` job and its GitHub reviewers). The
+approval is recorded in the ledger and becomes the new anchor. So:
+
+- a change that only adds a reviewer, or only turns `solo_mode` on, waits for a reviewer of the
+  previous list, and the person added cannot approve it (they are not listed at the anchor);
+- leaving the workflow gate for `environment` needs the approval of the `prod` environment's
+  GitHub reviewers; on a plan without them `prod-gate` refuses every such run, so it cannot be
+  used to skip the gate;
+- entering the workflow gate is the first approval, under bootstrap trust.
+
+A change of the environment gate alone (both sides `environment`) keeps the in-sync path.
+
+**Known limits.**
+
+- The check that a plan comes from `iac-staged` is a path pattern on the run's referenced
+  workflows (`*/.github/workflows/iac-staged.yml@...`): a caller on `main` that pointed at a fork
+  would pass. A reusable workflow cannot compare it with its own repository and ref.
+- A commit whose author GitHub cannot map to a login is reported, not refused: its author is not
+  checked for independence.
+- Bootstrap trust, above, until the first approved apply.
 
 Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request plan of
 [shared units](#units-that-serve-every-stage), which needs a reviewer before pull-request code
@@ -514,8 +550,9 @@ jobs:
 
 ## The empty-plan path
 
-When every unit plans clean, `has-changes` is `false`: `prod` is skipped and `prod-in-sync` runs
-instead. It runs in the `prod-plan` environment, so it never waits for prod reviewers. It still
+When every unit plans clean, `has-changes` is `false`, and unless the commit changes the gate
+settings with the workflow gate on either side (`gate-changed`, [the workflow gate](#the-workflow-gate)),
+`prod` is skipped and `prod-in-sync` runs instead. It runs in the `prod-plan` environment, so it never waits for prod reviewers. It still
 passes the guard, then writes the prod ledger record (and the deployment projection) at this SHA
 with every unit `no_changes` and converged, built from the `units` output (an empty list is
 refused). Drift checks therefore never keep planning an older SHA. A failure notifies

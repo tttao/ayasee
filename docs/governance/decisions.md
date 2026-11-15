@@ -35,13 +35,47 @@ prod gate, enforced by ayasee instead of GitHub:
 - A reviewer starts `iac-approve` on `main` with that SHA and digest. Before any secret is used,
   ayasee checks that the run is a `workflow_dispatch` on `refs/heads/main`, started and not
   re-run by one person (`github.actor` equal to `github.triggering_actor`); that this person is in
-  `reviewers.prod` of `.ayasee.yaml` **read at `main`**, and was already there at the commit live
-  in prod (so a change cannot add its own approver); that they have write access; that the
-  commit is on `main` and its newest unexpired plan comes from a successful `iac-staged` run on
-  `main` whose manifest has exactly that digest; that they did not push, write or merge the change,
-  nor write any commit since the one live in prod (unless `solo_mode`, at both commits); and the
-  guard (the commit is the one live in the stage before prod; no stop-the-line issue).
+  `reviewers.prod` of `.ayasee.yaml` **read at `main`**, and was already there at the last
+  approved commit (so a change cannot add its own approver); that they have write access; that
+  the commit is on `main` and its newest unexpired plan comes from a successful `iac-staged` run
+  on `main` whose manifest has exactly that digest; that they did not push, write or merge the
+  change, nor write any commit since the last approved one (unless `solo_mode`, at both commits);
+  and the guard (the commit is the one live in the stage before prod; no stop-the-line issue).
 - It then applies exactly the approved encrypted plan and records the approver in the ledger.
+
+**Where reviewer trust is anchored.** An empty prod plan goes live without an approval (the
+in-sync path), so the commit live in prod is not a trusted reference. The anchor is the last
+**approved** prod apply, the newest ledger record that carries an approver. A reviewer must be in
+`reviewers.prod` both at `main` and at that approved commit, `solo_mode` counts only when both
+have it, and independence covers every commit since that approval. Before the first approved apply
+(or while the last one predates the workflow gate) there is no anchor: `main`'s list alone
+decides, and the run prints `DEVIATION: bootstrap trust: ...`. That first approval is the one to
+watch.
+
+**A change of the gate settings always needs an approval.** With the workflow gate on either side
+(the commit planned, or the last approved commit), a change of `gate_mechanism`,
+`reviewers.prod` or `solo_mode` against the last approved commit is never promoted in sync, even
+when its plan is empty: `prod-plan` reports `gate-changed` and the run goes to `prod-approval` (or,
+when the commit sets the environment gate, to the `prod` job and its GitHub reviewers). The
+approval is recorded in the ledger and becomes the new anchor. So:
+
+- a change that only adds a reviewer, or only turns `solo_mode` on, waits for a reviewer of the
+  previous list, and the person added cannot approve it (they are not listed at the anchor);
+- leaving the workflow gate for `environment` needs the approval of the `prod` environment's
+  GitHub reviewers; on a plan without them `prod-gate` refuses every such run, so it cannot be
+  used to skip the gate;
+- entering the workflow gate is the first approval, under bootstrap trust.
+
+A change of the environment gate alone (both sides `environment`) keeps the in-sync path.
+
+**Known limits.**
+
+- The check that a plan comes from `iac-staged` is a path pattern on the run's referenced
+  workflows (`*/.github/workflows/iac-staged.yml@...`): a caller on `main` that pointed at a fork
+  would pass. A reusable workflow cannot compare it with its own repository and ref.
+- A commit whose author GitHub cannot map to a login is reported, not refused: its author is not
+  checked for independence.
+- Bootstrap trust, above, until the first approved apply.
 
 **What it keeps.** D1: the applied plan is the approved plan, bound by the manifest digest and
 the plan binding, and a stale plan still stops the apply. D2: independence, checked by ayasee

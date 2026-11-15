@@ -367,3 +367,51 @@ def test_apply_refuses_a_rerun_by_another_person(tmp_path, approver, actor, trig
         tmp_path, steps[0]["run"], APPROVER=approver, ACTOR=actor, TRIGGERING_ACTOR=triggering
     )
     assert proc.returncode == rc, proc.stdout
+
+
+# ---- a change of the gate settings is never promoted in sync (D15) ----------------------------
+
+
+def test_a_gate_change_routes_to_an_approval_not_to_in_sync():
+    changed = "needs.prod-plan.outputs.gate-changed == 'true'"
+    assert STAGED["jobs"]["prod-plan"]["outputs"]["gate-changed"] == (
+        "${{ steps.gate.outputs.gate-changed }}"
+    )
+    for job in ("prod", "prod-approval", "prod-result"):
+        assert changed in STAGED["jobs"][job]["if"], job
+    assert "needs.prod-plan.outputs.gate-changed == 'false'" in STAGED["jobs"]["prod-in-sync"]["if"]
+    steps = _steps(STAGED, "prod-plan")
+    guard = _index(steps, lambda s: "/actions/guard@" in s.get("uses", ""))
+    gate = _index(steps, lambda s: s.get("id") == "gate")
+    plan = _index(steps, lambda s: "/actions/plan@" in s.get("uses", ""))
+    assert guard < gate < plan
+    assert not re.search(
+        r"secrets\.(AYASEE_PLAN|CLOUDFLARE|AWS_ACCESS|AYASEE_KMS)", str(steps[gate])
+    )
+
+
+@pytest.mark.parametrize(
+    "body, rc, output",
+    [
+        ('echo "gate-changed=true"\n', 0, "gate-changed=true"),
+        ('echo "gate-changed=false"\n', 0, "gate-changed=false"),
+        ('echo "gate-changed=maybe"\n', 1, ""),
+        ('echo "approve: cannot read the prod ledger" >&2; exit 1\n', 1, ""),
+    ],
+)
+def test_the_gate_step_fails_closed(tmp_path, body, rc, output):
+    step = next(s for s in _steps(STAGED, "prod-plan") if s.get("id") == "gate")
+    out = tmp_path / "out.txt"
+    out.write_text("")
+    proc = _run(
+        tmp_path,
+        step["run"],
+        body,
+        AYASEE_LEDGER_URL="file:///x",
+        REPO="o/r",
+        CONFIG_PATH=".ayasee.yaml",
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_OUTPUT=str(out),
+    )
+    assert proc.returncode == rc
+    assert out.read_text().strip() == output

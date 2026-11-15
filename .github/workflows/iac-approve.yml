@@ -17,9 +17,12 @@
 #           DEVIATION, the prod secrets are then repository secrets).
 #   apply   (the prod environment) runs the guard against the ledger (the commit is the one live
 #           in the stage before prod, nothing newer; no stop-the-line issue), then the ledger
-#           checks (not already live; the approver was a prod reviewer at the commit live in prod;
-#           no commit since then is theirs), then applies exactly the approved encrypted plan (D1)
-#           and records the approver in the ledger.
+#           checks (not already live; the approver was a prod reviewer at the last APPROVED
+#           commit, never at a commit that went live in sync; no commit since that one is theirs;
+#           before the first approval main's list alone decides, printed as a bootstrap-trust
+#           DEVIATION), then applies exactly the approved encrypted plan (D1) and records the
+#           approver in the ledger. A change of the gate settings is never promoted in sync:
+#           iac-staged sends it here even when its plan is empty.
 #
 # No step before the apply step receives a provider or plan-key secret. Every refusal stops the
 # run. Like iac-breakglass, the job checks out the commit to apply, so the --local (./actions) form
@@ -61,8 +64,11 @@ on:
         required: false
       AYASEE_LEDGER_AWS_ACCESS_KEY_ID:
         description: >-
-          Only for an s3:// ledger. The ledger's own key, as in iac-staged; only the guard, the
-          ledger checks and the ledger steps receive it.
+          Only for an s3:// ledger (experimental). Access key id of a key dedicated to the
+          ledger, never the state key, as in iac-staged. Create it as an environment secret of
+          prod (a repository secret on GitHub Free, which has no environment secrets). Only the
+          guard and ledger steps receive it, as AWS_ACCESS_KEY_ID (the ledger check of the
+          approval is one of them).
         required: false
       AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY:
         description: Only for an s3:// ledger. Goes with AYASEE_LEDGER_AWS_ACCESS_KEY_ID.
@@ -322,7 +328,7 @@ jobs:
           while IFS= read -r line; do
             case "$line" in
               approve:*) echo "::error::${line#approve: }" ;;
-              warning:*) echo "::warning::${line#warning: }" ;;
+              warning:*) echo "::warning::${line#warning: }"; echo "> **${line#warning: }**" >>"$GITHUB_STEP_SUMMARY" ;;
               notice:*) echo "::notice::${line#notice: }" ;;
               *) echo "$line" ;;
             esac
