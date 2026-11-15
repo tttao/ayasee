@@ -228,10 +228,10 @@ jobs:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: |
           a="${APPROVER,,}"
-          [ -n "$a" ] && [ "${ACTOR,,}" = "$a" ] && [ "${TRIGGERING_ACTOR,,}" = "$a" ] || {
+          if [ -z "$a" ] || [ "${ACTOR,,}" != "$a" ] || [ "${TRIGGERING_ACTOR,,}" != "$a" ]; then
             echo "::error::this attempt was started by $TRIGGERING_ACTOR, not by the approver $APPROVER; start iac-approve again"
             exit 1
-          }
+          fi
       - name: Require a ledger URL
         run: |
           [ -n "$AYASEE_LEDGER_URL" ] || {
