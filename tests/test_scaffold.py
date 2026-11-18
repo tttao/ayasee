@@ -11,8 +11,16 @@ import respx
 import yaml
 
 from ayasee import cli, doctor, scaffold  # noqa: F401  (registers the subcommands)
-from ayasee.config import parse_config_text
+from ayasee.config import REVIEWER_PLACEHOLDER, ConfigError, parse_config_text
 from ayasee.github import GitHub
+from ayasee.plansupport import (
+    FREE_MISSING,
+    REVIEWERS,
+    SUPPORTED,
+    UNKNOWN,
+    UNSUPPORTED,
+    PlanSupport,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 API = "https://api.github.com"
@@ -472,7 +480,7 @@ def test_the_wheel_packages_exactly_the_files_the_profiles_read():
     wanted = {}
     for p in scaffold.PROFILES.values():
         rels = [".ayasee.yaml", "root.hcl"]
-        rels += [f".github/workflows/{w}" for w in p.workflows]
+        rels += [f".github/workflows/{w}" for w in (*p.workflows, *p.gate_workflows)]
         rels += [f"bootstrap/{b}" for b in p.bootstrap]
         for rel in rels:
             wanted[f"examples/{p.name}/{rel}"] = f"ayasee/templates/{p.name}/{rel}"
@@ -621,4 +629,272 @@ def test_init_notes_a_plan_it_cannot_check(tmp_path, capsys, monkeypatch):
 
 def test_init_without_a_repository_makes_no_plan_request(tmp_path, capsys):
     assert _init(tmp_path, "--profile", "cloudflare-s3") == 0  # respx not active
-    assert "plan" not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no repository to check the GitHub plan of" in err and "--gate-mechanism" in err
+
+
+# ---- the gate chosen from the plan, and the iac-approve caller (issue #40) ---------------------
+
+PUBLIC = PlanSupport(SUPPORTED, "public", evidence=("public",))
+ENTERPRISE = PlanSupport(SUPPORTED, "private", "enterprise", evidence=("the organization's plan",))
+INFERRED = PlanSupport(SUPPORTED, "private", evidence=("required reviewers are set on prod",))
+FREE = PlanSupport(UNSUPPORTED, "private", "free", FREE_MISSING, ("the organization's plan",))
+TEAM = PlanSupport(UNSUPPORTED, "private", "team", (REVIEWERS,), ("the organization's plan",))
+NOT_SEEN = PlanSupport(UNKNOWN, "private", evidence=("no environment carries required reviewers",))
+
+
+@pytest.mark.parametrize(
+    "support, gate, plan, want",
+    [
+        # detected, no flag
+        (None, None, None, ("environment", "")),
+        (PUBLIC, None, None, ("environment", "")),
+        (ENTERPRISE, None, None, ("environment", "enterprise")),
+        (INFERRED, None, None, ("environment", "")),  # stated, never inferred
+        (FREE, None, None, ("workflow", "free")),
+        (TEAM, None, None, ("workflow", "team")),
+        (NOT_SEEN, None, None, ("environment", "")),  # unknown: never a guess
+        # --plan alone
+        (None, None, "free", ("workflow", "free")),
+        (NOT_SEEN, None, "pro", ("workflow", "pro")),
+        (None, None, "enterprise", ("environment", "enterprise")),
+        (PUBLIC, None, "team", ("environment", "team")),  # public: the stronger gate stays
+        # --gate-mechanism wins over the detection, both ways
+        (FREE, "environment", None, ("environment", "free")),
+        (PUBLIC, "workflow", None, ("workflow", "")),
+        (NOT_SEEN, "workflow", "free", ("workflow", "free")),
+    ],
+)
+def test_the_gate_follows_the_plan_and_the_flags(support, gate, plan, want):
+    choice = scaffold.choose_gate(support, gate, plan)
+    assert (choice.gate, choice.plan) == want
+
+
+def _says(choice) -> str:
+    return "\n".join(line for _, lines in choice.messages for line in lines)
+
+
+def test_an_unknown_plan_says_why_and_which_flag_to_pass():
+    for support in (None, NOT_SEEN):
+        text = _says(scaffold.choose_gate(support, None, None))
+        assert "gate_mechanism: environment" in text
+        assert "--gate-mechanism workflow --plan" in text and "--plan enterprise" in text
+
+
+def test_a_choice_against_the_detection_is_warned():
+    assert "doctor fails" in _says(scaffold.choose_gate(FREE, "environment", None))
+    assert "stronger" in _says(scaffold.choose_gate(PUBLIC, "workflow", None))
+    assert "detected" in _says(scaffold.choose_gate(ENTERPRISE, None, "free"))
+    assert "refuses" in _says(scaffold.choose_gate(None, "environment", "team"))
+
+
+def _approve_caller(tmp_path):
+    return yaml.safe_load((tmp_path / ".github/workflows/iac-approve.yml").read_text())
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_the_workflow_gate_scaffolds_the_approve_caller_and_a_refused_placeholder(
+    tmp_path, capsys, profile
+):
+    assert _init(tmp_path, "--profile", profile, "--plan", "team") == 0
+    text = (tmp_path / ".ayasee.yaml").read_text()
+    assert "gate_mechanism: workflow" in text and REVIEWER_PLACEHOLDER in text
+    with pytest.raises(ConfigError, match="placeholder"):  # fail closed until a person fills it
+        parse_config_text(text)
+    filled = parse_config_text(text.replace(REVIEWER_PLACEHOLDER, "alice"))
+    assert filled.gate_mechanism == "workflow" and filled.reviewers.prod == ["alice"]
+    approve = (tmp_path / ".github/workflows/iac-approve.yml").read_text()
+    assert f"tttao/ayasee/.github/workflows/iac-approve.yml@{SHA} #" in approve
+    assert "OWNER" not in approve and "0" * 40 not in approve
+    assert _approve_caller(tmp_path)[True] == {
+        "workflow_dispatch": {
+            "inputs": {
+                "sha": {
+                    "description": "Commit SHA from the prod approval issue.",
+                    "required": True,
+                },
+                "manifest-digest": {
+                    "description": "manifest-digest from the prod approval issue.",
+                    "required": True,
+                },
+            }
+        }
+    }
+    boot = "".join(p.read_text() for p in (tmp_path / "bootstrap").glob("*.tf"))
+    assert re.search(r'variable "gate_mechanism" \{[^}]*default\s*=\s*"workflow"', boot, re.S)
+    assert re.search(r'variable "private_repository_plan" \{[^}]*default\s*=\s*"team"', boot, re.S)
+    out = capsys.readouterr().out
+    assert "wrote .github/workflows/iac-approve.yml" in out
+    assert "reviewers.prod" in out and "prod_reviewers" not in out
+
+
+def test_the_approve_caller_holds_exactly_what_the_reusable_jobs_need(tmp_path):
+    """A called job cannot hold more than its caller: the union of the jobs of iac-approve."""
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--gate-mechanism", "workflow") == 0
+    reusable = yaml.safe_load((ROOT / ".github/workflows/iac-approve.yml").read_text())
+    needed: dict[str, str] = {}
+    for job in reusable["jobs"].values():
+        needed.update(job.get("permissions", {}))
+    caller = _approve_caller(tmp_path)
+    assert caller["permissions"] == {}
+    (job,) = caller["jobs"].values()
+    assert job["permissions"] == needed
+    call = reusable[True]["workflow_call"]
+    assert set(job["with"]) == {k for k, v in call["inputs"].items() if v.get("required")}
+    assert set(job["secrets"]) <= set(call["secrets"])
+    staged = yaml.safe_load((tmp_path / ".github/workflows/iac-staged.yml").read_text())
+    (staged_job,) = staged["jobs"].values()
+    assert job["secrets"] == staged_job["secrets"]  # the same secrets as the staged caller
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_the_environment_gate_writes_no_approve_caller(tmp_path, profile):
+    assert _init(tmp_path, "--profile", profile) == 0
+    assert not (tmp_path / ".github/workflows/iac-approve.yml").exists()
+    text = (tmp_path / ".ayasee.yaml").read_text()
+    assert "gate_mechanism" not in text and "reviewers" not in text
+    boot = "".join(p.read_text() for p in (tmp_path / "bootstrap").glob("*.tf"))
+    assert re.search(r'variable "gate_mechanism" \{[^}]*default\s*=\s*"environment"', boot, re.S)
+    assert re.search(r'variable "private_repository_plan" \{[^}]*default\s*=\s*""', boot, re.S)
+
+
+def test_doctor_refuses_the_workflow_scaffold_until_a_reviewer_is_named(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--plan", "free") == 0
+    capsys.readouterr()
+    assert cli.main(["doctor", "--root", str(tmp_path), "--repo", "acme/estate"]) == 1
+    assert "placeholder REPLACE_WITH_GITHUB_LOGIN" in capsys.readouterr().out
+    cfg = tmp_path / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text().replace(REVIEWER_PLACEHOLDER, "alice"))
+    cli.main(["doctor", "--root", str(tmp_path), "--repo", "acme/estate"])
+    out = capsys.readouterr().out
+    assert "no workflow calls iac-approve" not in out and "placeholder" not in out
+    assert "0 failed" in out
+
+
+def test_a_workflow_scaffold_is_rerunnable_and_upgrade_moves_the_approve_pin(tmp_path, capsys):
+    args = ("--profile", "cloudflare-s3", "--plan", "free")
+    assert _init(tmp_path, *args) == 0
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert _init(tmp_path, *args) == 0
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    # the same repository without the flags: the scaffold differs, so nothing is written
+    capsys.readouterr()
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 1
+    assert "key only in your file (--force drops it): gate_mechanism" in capsys.readouterr().err
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    other = "c" * 40
+    upgrade = ["init", "--dir", str(tmp_path), "--upgrade", "--ref", other, "--unverified-ref"]
+    assert cli.main(upgrade) == 1  # the configuration does not load until a reviewer is named
+    assert "placeholder" in capsys.readouterr().err
+    cfg = tmp_path / ".ayasee.yaml"
+    cfg.write_text(cfg.read_text().replace(REVIEWER_PLACEHOLDER, "alice"))
+    assert cli.main(upgrade) == 0
+    approve = (tmp_path / ".github/workflows/iac-approve.yml").read_text()
+    assert f"iac-approve.yml@{other}" in approve
+
+
+@pytest.mark.parametrize("flag", [("--gate-mechanism", "workflow"), ("--plan", "free")])
+def test_upgrade_refuses_the_gate_flags(tmp_path, capsys, flag):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    capsys.readouterr()
+    assert _init(tmp_path, "--upgrade", *flag) == 1
+    assert flag[0] in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args", [("--gate-mechanism", "github"), ("--plan", "business")])
+def test_the_gate_flags_take_known_values(tmp_path, args):
+    with pytest.raises(SystemExit):
+        _init(tmp_path, "--profile", "cloudflare-s3", *args)
+    assert not (tmp_path / ".ayasee.yaml").exists()
+
+
+def test_databricks_on_free_is_warned_that_it_needs_environment_variables(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "databricks-azure", "--plan", "free") == 0
+    err = capsys.readouterr().err
+    assert "environment variables" in err and "GitHub Free" in err
+
+
+@respx.mock
+def test_a_detected_free_private_repository_gets_the_workflow_gate(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secretvalue")
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("private")
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": "free"}})
+    )
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    captured = capsys.readouterr()
+    assert "gate_mechanism: workflow" in (tmp_path / ".ayasee.yaml").read_text()
+    assert (tmp_path / ".github/workflows/iac-approve.yml").is_file()
+    assert "--gate-mechanism environment" in captured.err  # how to undo the choice
+    assert "ghp_secretvalue" not in captured.out + captured.err
+
+
+@respx.mock
+def test_a_plan_it_cannot_read_keeps_the_environment_gate(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    respx.get(f"{API}/repos/acme/estate").mock(return_value=httpx.Response(500, json={}))
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    assert "gate_mechanism" not in (tmp_path / ".ayasee.yaml").read_text()
+    assert not (tmp_path / ".github/workflows/iac-approve.yml").exists()
+    assert "--gate-mechanism workflow --plan" in capsys.readouterr().err
+
+
+@respx.mock
+def test_a_detected_enterprise_plan_is_stated_in_the_bootstrap(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("private")
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": "enterprise"}})
+    )
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    boot = (tmp_path / "bootstrap/main.tf").read_text()
+    assert re.search(
+        r'variable "private_repository_plan" \{[^}]*default\s*=\s*"enterprise"', boot, re.S
+    )
+    assert not (tmp_path / ".github/workflows/iac-approve.yml").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "profile, plan",
+    [("cloudflare-s3", "free"), ("cloudflare-s3", "team"), ("databricks-azure", "pro")],
+)
+def test_the_workflow_gate_bootstrap_validates(tmp_path, profile, plan):
+    import shutil
+    import subprocess
+
+    tofu = shutil.which("tofu")
+    if not tofu:
+        pytest.skip("tofu is not installed")
+    assert _init(tmp_path, "--profile", profile, "--plan", plan) == 0
+    boot = tmp_path / "bootstrap"
+    main = boot / "main.tf"
+    main.write_text(
+        re.sub(
+            r"git::https://github\.com/tttao/ayasee\.git//modules/([a-z-]+)\?ref=[0-9a-f]{40}",
+            lambda m: str(ROOT / "modules" / m.group(1)),
+            main.read_text(),
+        )
+    )
+    for cmd in ([tofu, "init", "-backend=false", "-input=false"], [tofu, "validate"]):
+        done = subprocess.run(cmd, cwd=boot, capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_the_documented_approve_caller_is_the_one_init_writes():
+    doc = (ROOT / "docs/concepts/staged-run.md").read_text()
+    block = re.search(r"```yaml\n# \.github/workflows/iac-approve\.yml\n(.*?)```", doc, re.S)
+    assert block
+    shipped = (ROOT / "examples/cloudflare-s3/.github/workflows/iac-approve.yml").read_text()
+    shipped = re.sub(r"^#[^\n]*\n", "", shipped, flags=re.M).lstrip("\n")
+    shipped = re.sub(
+        r"OWNER/ayasee/(\S+)@0{40} # [^\n]*",
+        r"tttao/ayasee/\1@<release SHA> # ayasee vX.Y.Z (release/vX.Y.Z)",
+        shipped,
+    )
+    assert block.group(1) == shipped

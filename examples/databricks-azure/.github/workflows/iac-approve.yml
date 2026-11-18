@@ -1,0 +1,33 @@
+# The prod approval of gate_mechanism: workflow (D15): a reviewer of reviewers.prod starts it on
+# main with the sha and manifest-digest of the prod approval issue (Actions tab, "Run workflow",
+# or gh workflow run iac-approve.yml --ref main -f sha=... -f manifest-digest=...). With the
+# default gate_mechanism: environment it refuses to run: ayasee init writes it only with workflow.
+name: iac-approve
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA from the prod approval issue.
+        required: true
+      manifest-digest:
+        description: manifest-digest from the prod approval issue.
+        required: true
+
+permissions: {}
+
+jobs:
+  approve:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      id-token: write
+      deployments: write
+      issues: write
+    uses: OWNER/ayasee/.github/workflows/iac-approve.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
+    with:
+      sha: ${{ inputs.sha }}
+      manifest-digest: ${{ inputs.manifest-digest }}
+    secrets:
+      teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}

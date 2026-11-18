@@ -34,6 +34,8 @@ ENVS = (
 def estate(tmp_path, monkeypatch):
     root = tmp_path / "estate"
     shutil.copytree(EXAMPLE, root)
+    # the environment gate: ayasee init writes the iac-approve caller with the workflow gate only
+    (root / ".github" / "workflows" / "iac-approve.yml").unlink()
     for wf in (root / ".github" / "workflows").glob("*.yml"):
         text = wf.read_text().replace("OWNER/ayasee", "tttao/ayasee")
         wf.write_text(text.replace("0" * 40, PIN))

@@ -17,9 +17,12 @@ required when ayasee runs from a source checkout, whose templates may differ fro
 
 Before writing, it checks what the repository's GitHub plan allows (issue #39) when it can reach
 the repository (``--repo``, else the github.com ``origin`` remote of ``--dir``; ``GITHUB_TOKEN``
-when set, anonymous otherwise): a plan without required reviewers on environments, deployment
-branch policies or rulesets is a warning naming what falls, a plan it cannot confirm a note, and
-the scaffold is written either way; ``ayasee doctor`` fails on both.
+when set, anonymous otherwise; the token is never printed), and chooses the prod gate from it
+(:func:`choose_gate`, issue #40): a private repository on GitHub Free, Pro or Team gets
+``gate_mechanism: workflow`` (D15), the ``iac-approve`` caller and ``private_repository_plan`` in
+the bootstrap, with ``reviewers.prod`` left as a placeholder that the configuration refuses until a
+person names the reviewers; a plan it cannot read keeps the default ``environment`` gate and says
+which flag to pass. ``--gate-mechanism`` and ``--plan`` override the detection.
 
 It writes no unit: ``<units_root>/<stage>/`` is created empty (a ``.gitkeep``), and
 ``shared_units`` starts empty. Existing files are never overwritten without ``--force``; on a
@@ -39,11 +42,25 @@ from pathlib import Path
 import yaml
 
 from ayasee import __version__, cli
-from ayasee.config import ENVIRONMENT_PREFIX, ConfigError, parse_config_text, staged_layout
+from ayasee.config import (
+    ENVIRONMENT_PREFIX,
+    GATE_MECHANISMS,
+    REVIEWER_PLACEHOLDER,
+    ConfigError,
+    parse_config_text,
+    staged_layout,
+)
 from ayasee.doctor import _origin_repo
 from ayasee.github import DEFAULT_API_URL, GitHub, GitHubError
 from ayasee.maintip import _repo
-from ayasee.plansupport import SUPPORTED, UNSUPPORTED, detect
+from ayasee.plansupport import (
+    PRIVATE_MISSING,
+    REVIEWERS,
+    UNKNOWN,
+    UNSUPPORTED,
+    PlanSupport,
+    detect,
+)
 from ayasee.releasepin import NotARelease, release_version
 
 DEFAULT_SOURCE = "tttao/ayasee"
@@ -56,6 +73,9 @@ _USES = re.compile(r"OWNER/ayasee/(\.github/workflows/[a-z-]+\.yml)@0{40}( # [^\
 _PUSH_MAIN = "  push:\n    branches: [main]\n"
 STAGED_PATHS_CALLERS = ".github/workflows/iac-*.yml"
 _TF_PREFIX = re.compile(r'(variable "environment_prefix" \{[^}]*?default\s*=\s*)""')
+_TF_GATE = re.compile(r'(variable "gate_mechanism" \{[^}]*?default\s*=\s*)"environment"')
+_TF_PLAN = re.compile(r'(variable "private_repository_plan" \{[^}]*?default\s*=\s*)""')
+PLANS = tuple(PRIVATE_MISSING)  # free, pro, team, enterprise
 # in a monorepo the repository already deploys applications, whose environments are called test
 # and prod: ayasee's get a prefix of their own by default (issue #31)
 MONOREPO_PREFIX = "iac-"
@@ -63,6 +83,20 @@ _PREFIX_NOTE = (
     "\n\n# The GitHub environments are <prefix><stage>, so that ayasee's never share a name with\n"
     "# an application's own test or prod. Keep it equal to environment_prefix in the bootstrap.\n"
 )
+_WORKFLOW_GATE = f"""
+
+# The prod gate (D15, issue #40), for a private repository below GitHub Enterprise, whose plan has
+# no required reviewers on environments: ayasee enforces the gate itself, labelled a DEVIATION on
+# every run. The staged run stops after prod-plan with an approval issue, and a reviewer below
+# starts the iac-approve workflow on main to apply the plan. Keep it equal to gate_mechanism in
+# the bootstrap.
+# docs/concepts/staged-run.md#the-workflow-gate
+gate_mechanism: workflow
+reviewers:
+  # The GitHub logins that may approve a prod apply. ayasee refuses this file until the
+  # placeholder is replaced: no run, no doctor pass, no approval.
+  prod: [{REVIEWER_PLACEHOLDER}]
+"""
 
 
 class InitError(Exception):
@@ -75,6 +109,8 @@ class Profile:
     stages: tuple[str, ...]
     workflows: tuple[str, ...]
     bootstrap: tuple[str, ...]
+    # the callers written with gate_mechanism: workflow only (D15)
+    gate_workflows: tuple[str, ...] = ("iac-approve.yml",)
 
 
 WORKFLOWS = ("iac-pr.yml", "iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml")
@@ -160,8 +196,12 @@ def render(
     sha: str,
     label: str,
     environment_prefix: str = "",
+    gate: str = "environment",
+    plan: str = "",
 ) -> dict[str, str]:
-    """Repository-relative path -> content of every file to write."""
+    """Repository-relative path -> content of every file to write. ``gate``: gate_mechanism of the
+    configuration and the bootstrap; ``workflow`` adds the iac-approve caller and the
+    ``reviewers.prod`` placeholder. ``plan``: the bootstrap's ``private_repository_plan``."""
     src = templates / profile.name
     units_root = "stages" if iac_root == "." else f"{iac_root}/stages"
     files: dict[str, str] = {}
@@ -175,9 +215,12 @@ def render(
     cfg = re.sub(r"^shared_units: \[[^\]]*\]$", "shared_units: []", cfg, flags=re.M)
     if environment_prefix:
         cfg = cfg.rstrip("\n") + _PREFIX_NOTE + f"environment_prefix: {environment_prefix}\n"
+    if gate == "workflow":
+        cfg = cfg.rstrip("\n") + _WORKFLOW_GATE
     files[".ayasee.yaml"] = cfg
 
-    for name in profile.workflows:
+    workflows = profile.workflows + (profile.gate_workflows if gate == "workflow" else ())
+    for name in workflows:
         text = (src / ".github" / "workflows" / name).read_text()
         text, n = _USES.subn(f"{source}/\\1@{sha} # {label}", text)
         if n == 0 or "OWNER/" in text or "0" * 40 in text:
@@ -193,6 +236,7 @@ def render(
 
     base = "" if iac_root == "." else f"{iac_root}/"
     files[f"{base}root.hcl"] = (src / "root.hcl").read_text()
+    gates = plans = 0
     for name in profile.bootstrap:
         path = src / "bootstrap" / name
         if not path.is_file():
@@ -210,7 +254,15 @@ def render(
             text = text.replace("shared_units_pr_plan = true", "shared_units_pr_plan = false")
         if environment_prefix:
             text = _TF_PREFIX.sub(f'\\g<1>"{environment_prefix}"', text)
+        if gate != "environment":
+            text, n_gate = _TF_GATE.subn(f'\\g<1>"{gate}"', text)
+            gates += n_gate
+        if plan:
+            text, n_plan = _TF_PLAN.subn(f'\\g<1>"{plan}"', text)
+            plans += n_plan
         files[f"{base}bootstrap/{name}"] = text
+    if gates != (gate != "environment") or plans != bool(plan):
+        raise InitError("template: bootstrap: gate_mechanism or private_repository_plan not found")
     for stage in stages:
         files[f"{units_root}/{stage}/.gitkeep"] = ""
     return files
@@ -263,29 +315,214 @@ def _resolve_pin(args: argparse.Namespace) -> tuple[str, str]:
     return sha, f"ayasee v{__version__} (release/v{__version__})"
 
 
-def _warn_plan(repo: str | None) -> None:
-    """Say on stderr what the repository's plan lacks (issue #39); never refuses, never raises."""
+_FLAG_HINT = (
+    "a private repository on GitHub Free, Pro or Team: run init again with --gate-mechanism "
+    "workflow --plan free|pro|team; a private one on GitHub Enterprise: with --plan enterprise"
+)
+_FREE_TIER = (
+    "on GitHub Free the environments are created bare and the prod secrets are repository "
+    "secrets, which any collaborator with write access can read from any branch: the gate stops "
+    "mistakes and unreviewed applies, not a collaborator who means harm (D15)"
+)
+_WORKFLOW_CHOSEN = (
+    "gate_mechanism: workflow (D15, a DEVIATION): ayasee, not GitHub, enforces the prod gate; "
+    "init writes the iac-approve caller and leaves reviewers.prod in .ayasee.yaml for you to "
+    "fill (ayasee refuses the file until then)"
+)
+_DATABRICKS_FREE = (
+    "the databricks-azure profile gives every environment its own identity through environment "
+    "variables (AZURE_CLIENT_ID, ...), which a private repository on GitHub Free does not have: "
+    "its bootstrap refuses. Use GitHub Pro or Team, or a public repository"
+)
+
+Message = tuple[str, tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class GateChoice:
+    """The prod gate ``init`` scaffolds: ``gate`` (gate_mechanism), ``plan`` (the bootstrap's
+    ``private_repository_plan``, ``""`` when not stated) and ``messages``: (``warning`` or
+    ``note``, lines) to print, never a value."""
+
+    gate: str
+    plan: str
+    messages: tuple[Message, ...] = ()
+
+
+def _where(support: PlanSupport | None) -> str:
+    vis = support.visibility if support else None
+    return f"a {vis} repository" if vis else "this repository"
+
+
+def _plan_flag_notes(support: PlanSupport | None, plan: str, detected: str | None) -> list[Message]:
+    msgs: list[Message] = []
+    if detected and detected != plan:
+        how = "; ".join(support.evidence) if support else ""
+        msgs.append(
+            (
+                "warning",
+                (
+                    f"--plan {plan}: the plan detected is {detected} ({how}); the bootstrap "
+                    f"states {plan}, and `ayasee doctor` checks it against GitHub",
+                ),
+            )
+        )
+    if support is not None and support.visibility in ("public", "internal"):
+        msgs.append(
+            (
+                "note",
+                (
+                    f"--plan {plan}: this is {_where(support)}, which has every feature the gate "
+                    "needs; the bootstrap ignores private_repository_plan for it",
+                ),
+            )
+        )
+    return msgs
+
+
+def _gate_flag_notes(
+    support: PlanSupport | None, gate: str, plan: str, no_reviewers: bool, open_repo: bool
+) -> list[Message]:
+    if gate == "environment" and no_reviewers and support is not None:
+        lines = support.explain()
+        lines.append(
+            "--gate-mechanism environment: ayasee doctor fails until the plan has them, and the "
+            "bootstrap refuses to create the environments"
+        )
+        return [("warning", tuple(lines))]
+    if gate == "environment" and plan in ("free", "pro", "team") and not open_repo:
+        return [
+            (
+                "warning",
+                (
+                    f'--gate-mechanism environment with private_repository_plan "{plan}": the '
+                    "bootstrap refuses, since a private repository has required reviewers on "
+                    "environments on GitHub Enterprise only",
+                ),
+            )
+        ]
+    if gate == "workflow" and support is not None and support.supported:
+        return [
+            (
+                "warning",
+                (
+                    f"--gate-mechanism workflow: {_where(support)} has required reviewers on "
+                    "environments, so the default gate, which GitHub enforces, is stronger; "
+                    "`ayasee doctor` says so too",
+                ),
+            )
+        ]
+    return []
+
+
+def choose_gate(
+    support: PlanSupport | None, gate: str | None = None, plan: str | None = None
+) -> GateChoice:
+    """The gate and the plan to scaffold from the detected plan support (``None``: no repository to
+    ask) and the ``--gate-mechanism`` and ``--plan`` flags, which win (issue #40).
+
+    Without a flag the workflow gate is chosen only on evidence: a private repository whose plan is
+    read as Free, Pro or Team. Anything that cannot be read keeps the default environment gate,
+    the stronger one, and says which flag to pass: an error never weakens the gate."""
+    vis = support.visibility if support else None
+    open_repo = vis in ("public", "internal")
+    detected = support.plan if support and vis == "private" and support.plan in PLANS else None
+    no_reviewers = (
+        support is not None
+        and support.verdict == UNSUPPORTED
+        and REVIEWERS in support.missing
+        and detected is not None
+    )
+    msgs: list[Message] = []
+    if plan is None:
+        chosen_plan = detected or ""
+    else:
+        chosen_plan = plan
+        msgs += _plan_flag_notes(support, plan, detected)
+
+    if gate is not None:
+        chosen = gate
+        msgs += _gate_flag_notes(support, gate, chosen_plan, no_reviewers, open_repo)
+    elif plan is not None and not open_repo:
+        chosen = "environment" if plan == "enterprise" else "workflow"
+        if chosen == "workflow":
+            msgs.append(("note", (f"--plan {plan}: {_WORKFLOW_CHOSEN}",)))
+    elif support is not None and support.supported:
+        chosen = "environment"
+        if support.inferred:
+            msgs.append(
+                (
+                    "note",
+                    (
+                        f"{_where(support)} already has required reviewers on environments "
+                        f"({'; '.join(support.evidence)}), but this token cannot see its plan: "
+                        "pass --plan enterprise so that the bootstrap states it (it refuses a "
+                        "private repository whose plan is not stated)",
+                    ),
+                )
+            )
+    elif no_reviewers and support is not None:
+        chosen = "workflow"
+        lines = support.explain()
+        lines.append(
+            f'so init sets {_WORKFLOW_CHOSEN}, with private_repository_plan = "{detected}" in the '
+            "bootstrap; --gate-mechanism environment keeps the default gate, which "
+            "`ayasee doctor` then fails"
+        )
+        msgs.append(("warning", tuple(lines)))
+    else:
+        chosen = "environment"
+        if support is None:
+            lines = [
+                "no repository to check the GitHub plan of (--repo, or a github.com origin "
+                "remote): gate_mechanism: environment, the default"
+            ]
+        else:
+            lines = support.explain()
+            lines.append(
+                "init keeps gate_mechanism: environment, the default; `ayasee doctor` checks the "
+                "plan again, with an administrator's token"
+            )
+        lines.append(_FLAG_HINT)
+        msgs.append(("note", tuple(lines)))
+
+    if chosen == "workflow" and chosen_plan == "free":
+        msgs.append(("note", (_FREE_TIER,)))
+    if chosen == "workflow" and not chosen_plan and not open_repo:
+        msgs.append(
+            (
+                "note",
+                (
+                    "private_repository_plan is not stated: for a private repository pass --plan "
+                    "free|pro|team, or the bootstrap refuses to create the environments",
+                ),
+            )
+        )
+    return GateChoice(chosen, chosen_plan, tuple(msgs))
+
+
+def _detect_plan(repo: str | None) -> PlanSupport | None:
+    """What the repository's plan allows (issue #39), or None without a repository. Never raises:
+    a failure is UNKNOWN, which keeps the default gate. The token is sent, never printed."""
     if repo is None:
-        return
+        return None
     try:
         gh = GitHub(
             os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL, os.environ.get("GITHUB_TOKEN", "")
         )
     except GitHubError as exc:
-        print(f"init: note: cannot check the GitHub plan: {exc}", file=sys.stderr)
-        return
+        return PlanSupport(UNKNOWN, None, evidence=(f"cannot reach GitHub: {exc}",))
     try:
-        support = detect(gh, repo)
+        return detect(gh, repo)
+    except GitHubError as exc:
+        return PlanSupport(UNKNOWN, None, evidence=(f"cannot read the plan: {exc}",))
     finally:
         gh.close()
-    if support.verdict == SUPPORTED:
-        return
-    lines = support.explain()
-    if support.verdict == UNSUPPORTED:
-        print(f"init: warning: {lines[0]}", *lines[1:], sep="\n  ", file=sys.stderr)
-    else:
-        lines.append("`ayasee doctor` checks it again, with an administrator's token")
-        print(f"init: note: {lines[0]}", *lines[1:], sep="\n  ", file=sys.stderr)
+
+
+def _say(messages: tuple[Message, ...]) -> None:
+    for level, lines in messages:
+        print(f"init: {level}: {lines[0]}", *lines[1:], sep="\n  ", file=sys.stderr)
 
 
 def _inside(dest: Path, rel: str) -> Path:
@@ -387,6 +624,8 @@ def _upgrade(args: argparse.Namespace, dest: Path) -> int:
         ("--stages", args.stages),
         ("--iac-root", args.iac_root),
         ("--environment-prefix", args.environment_prefix),
+        ("--gate-mechanism", args.gate_mechanism),
+        ("--plan", args.plan),
         ("--force", args.force or None),
     ):
         if value:
@@ -442,6 +681,16 @@ def _run(args: argparse.Namespace) -> int:
             prefix = MONOREPO_PREFIX if iac_root != "." else ""
         templates, _ = templates_root()
         sha, label = _resolve_pin(args)
+        choice = choose_gate(
+            _detect_plan(args.repo or _origin_repo(dest)), args.gate_mechanism, args.plan
+        )
+        _say(choice.messages)
+        if (
+            choice.gate == "workflow"
+            and choice.plan == "free"
+            and profile.name == "databricks-azure"
+        ):
+            _say((("warning", (_DATABRICKS_FREE,)),))
         files = render(
             profile,
             templates,
@@ -451,8 +700,10 @@ def _run(args: argparse.Namespace) -> int:
             sha=sha,
             label=label,
             environment_prefix=prefix,
+            gate=choice.gate,
+            plan=choice.plan,
         )
-        parse_config_text(files[".ayasee.yaml"])  # the written configuration must load
+        _check_config(files[".ayasee.yaml"], choice.gate)
         todo, same, conflicts = plan_writes(dest, files)
         if conflicts and not args.force:
             for report in conflicts.values():
@@ -465,7 +716,6 @@ def _run(args: argparse.Namespace) -> int:
     except (InitError, ConfigError, GitHubError, OSError) as exc:
         print(f"init: error: {exc}", file=sys.stderr)
         return 1
-    _warn_plan(args.repo or _origin_repo(dest))
     for rel in same:
         print(f"unchanged {rel}")
     for rel, content in todo.items():
@@ -474,17 +724,43 @@ def _run(args: argparse.Namespace) -> int:
         path.write_text(content)
         print(f"wrote {rel}")
     base = "" if iac_root == "." else f"{iac_root}/"
-    print(
-        f"\nPinned to {args.source}@{sha}.\n"
-        "Next:\n"
-        f"  1. run the bootstrap root in {base}bootstrap (a repository administrator, locally)\n"
-        "  2. create the state store (the profile's README), then the secrets: run one by one\n"
-        f"     the commands of `tofu output -raw secret_commands` in {base}bootstrap\n"
-        f"  3. add the units under {base}stages/<stage>/\n"
-        '  4. GITHUB_TOKEN="$(gh auth token)" ayasee doctor, until it has no failure\n'
-        "  5. open the first pull request"
-    )
+    if choice.gate == "workflow":
+        steps = [
+            "replace the placeholder of reviewers.prod in .ayasee.yaml with the GitHub logins\n"
+            "     that may approve a prod apply (iac-approve, docs/concepts/staged-run.md)",
+            f"run the bootstrap root in {base}bootstrap (a repository administrator, locally;\n"
+            '     gate_mechanism = "workflow": no reviewer variables)',
+        ]
+    else:
+        steps = [
+            f"run the bootstrap root in {base}bootstrap (a repository administrator, locally,\n"
+            "     with prod_reviewers and breakglass_reviewers)"
+        ]
+    steps += [
+        "create the state store (the profile's README), then the secrets: run one by one\n"
+        f"     the commands of `tofu output -raw secret_commands` in {base}bootstrap",
+        f"add the units under {base}stages/<stage>/",
+        'GITHUB_TOKEN="$(gh auth token)" ayasee doctor, until it has no failure',
+        "open the first pull request",
+    ]
+    print(f"\nPinned to {args.source}@{sha} (gate_mechanism: {choice.gate}).\nNext:")
+    for n, step in enumerate(steps, 1):
+        print(f"  {n}. {step}")
     return 0
+
+
+def _check_config(text: str, gate: str) -> None:
+    """The written configuration must load once a person has filled what init cannot know, and,
+    with the workflow gate, must not load before (fail closed: no reviewer is never a pass)."""
+    if gate == "workflow":
+        try:
+            parse_config_text(text)
+        except ConfigError:
+            pass
+        else:
+            raise InitError("template: the reviewers.prod placeholder would load as a reviewer")
+        text = text.replace(REVIEWER_PLACEHOLDER, "reviewer")
+    parse_config_text(text)
 
 
 def _prefix(value: str) -> str:
@@ -514,6 +790,20 @@ def _setup(parser: argparse.ArgumentParser) -> None:
         type=_prefix,
         help="prefix of every GitHub environment (default: 'iac-' with --iac-root, none "
         "otherwise; '' clears it)",
+    )
+    parser.add_argument(
+        "--gate-mechanism",
+        choices=GATE_MECHANISMS,
+        help="the prod gate (default: from the repository's GitHub plan: workflow for a private "
+        "repository read as Free, Pro or Team, environment otherwise, and when the plan cannot "
+        "be read)",
+    )
+    parser.add_argument(
+        "--plan",
+        choices=PLANS,
+        help="the GitHub plan of a private repository, for the bootstrap's "
+        "private_repository_plan (default: the plan read from GitHub, if any); without "
+        "--gate-mechanism, enterprise keeps the environment gate and the others choose workflow",
     )
     parser.add_argument("--dir", default=".", help="the repository checkout (default: .)")
     parser.add_argument(

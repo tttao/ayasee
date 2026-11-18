@@ -25,6 +25,7 @@ CALLS = {
     "iac-staged.yml": "iac-staged.yml",
     "iac-nightly.yml": "iac-nightly.yml",
     "iac-breakglass.yml": "iac-breakglass.yml",
+    "iac-approve.yml": "iac-approve.yml",  # written by ayasee init with gate_mechanism: workflow
     "cockpit.yml": "cockpit-collect.yml",
 }
 PLACEHOLDER = "@0000000000000000000000000000000000000000 # replace with an ayasee release SHA"
@@ -104,7 +105,7 @@ def test_callers_pass_only_declared_secrets_and_inputs_and_all_required_ones():
 
 
 def test_the_stage_callers_pass_the_teams_webhook_and_nothing_else_secret():
-    for caller in ("iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml"):
+    for caller in ("iac-staged.yml", "iac-nightly.yml", "iac-breakglass.yml", "iac-approve.yml"):
         (job,) = _yaml(CALLERS / caller)["jobs"].values()
         assert set(job["secrets"]) == {"teams-webhook"}, caller
     (job,) = _yaml(CALLERS / "iac-pr.yml")["jobs"].values()
@@ -139,6 +140,17 @@ def test_caller_permissions_match_the_documented_scopes():
                 "security-events: write",
             ],
         ),
+        "iac-approve.yml": (
+            "docs/concepts/staged-run.md",
+            [
+                "contents: read",
+                "actions: read",
+                "pull-requests: read",
+                "id-token: write",
+                "deployments: write",
+                "issues: write",
+            ],
+        ),
         "cockpit.yml": (
             "docs/cockpit/setup.md",
             ["contents: read", "pages: write", "id-token: write"],
@@ -162,6 +174,9 @@ def test_triggers():
     assert set(bg) == {"workflow_dispatch"}
     # R71: no units input, break-glass always plans the whole prod tree
     assert set(bg["workflow_dispatch"]["inputs"]) == {"incident", "sha", "allow-rollback"}
+    approve = _on(_yaml(CALLERS / "iac-approve.yml"))
+    assert set(approve) == {"workflow_dispatch"}
+    assert set(approve["workflow_dispatch"]["inputs"]) == {"sha", "manifest-digest"}
     for caller in CALLS:
         assert "pull_request_target" not in _on(_yaml(CALLERS / caller)), caller
 
@@ -185,6 +200,8 @@ def _called_environments() -> set[str]:
                     found |= {f"drift-{s}" for s in stages}
                 elif env == "${{ needs.resolve.outputs.pr-plan-environment }}":
                     found.add(pr_plan_environment(stages))
+                elif env == "${{ needs.verify.outputs.env-prod }}":  # iac-approve
+                    found.add("prod")
                 elif env in (
                     "${{ needs.resolve.outputs.env-prod-plan }}",
                     "${{ needs.resolve.outputs.env-prod }}",

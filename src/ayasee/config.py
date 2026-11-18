@@ -41,6 +41,9 @@ IDENTITIES = ("oidc", "secrets")
 GATE_MECHANISMS = ("environment", "workflow")
 # a GitHub login: letters, digits and single hyphens, not at either end, at most 39 characters
 GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+# what `ayasee init` writes in reviewers.prod with gate_mechanism: workflow, for a person to
+# replace; never a login (a GitHub login has no underscore), refused with its own message
+REVIEWER_PLACEHOLDER = "REPLACE_WITH_GITHUB_LOGIN"
 # Wired plan-encryption key providers (D1, issue #10).
 KEY_PROVIDERS = ("azure_vault", "pbkdf2", "aws_kms", "gcp_kms", "openbao")
 # Stage names become GitHub environment names, paths and labels (same rule as sg_check_env).
@@ -297,6 +300,11 @@ def _parse(raw: Any) -> Config:
 
 def _logins(value: Any, where: str) -> list[str]:
     logins = _str_list(value, where)
+    if REVIEWER_PLACEHOLDER in logins:
+        raise ConfigError(
+            f"{where}: still the placeholder {REVIEWER_PLACEHOLDER} written by ayasee init; list "
+            "the GitHub logins that may approve a prod apply"
+        )
     for login in logins:
         if not GITHUB_LOGIN.fullmatch(login):
             raise ConfigError(f"{where}: {login!r} is not a GitHub login")

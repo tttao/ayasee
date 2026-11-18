@@ -513,12 +513,24 @@ A change of the environment gate alone (both sides `environment`) keeps the in-s
 Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request plan of
 [shared units](#units-that-serve-every-stage), which needs a reviewer before pull-request code
 runs with a prod identity (`iac-pr` skips it with a warning when the configuration of the pull
-request or of its base commit says `workflow`). `ayasee init` does not scaffold the caller yet;
-add it by hand, with the same secrets as the `iac-staged` caller:
+request or of its base commit says `workflow`).
+
+**The caller.** `ayasee init` chooses this mode itself for a private repository whose plan it
+reads as GitHub Free, Pro or Team, or when given `--gate-mechanism workflow` (and `--plan`, the
+plan the bootstrap states); see [adopt: what the plan must allow](../guides/adopt.md#what-the-github-plan-must-allow).
+It then writes `gate_mechanism: workflow` with `reviewers.prod` set to the placeholder
+`REPLACE_WITH_GITHUB_LOGIN`, which the configuration refuses (so every run and `ayasee doctor`
+fail) until you list the reviewers; `gate_mechanism = "workflow"` and `private_repository_plan`
+as the defaults of the bootstrap's variables; and the `iac-approve` caller below, pinned to the
+same release as the other callers. A called job cannot hold more than its caller, so the caller
+holds the union of what the `verify` and `apply` jobs need, and the same secrets as the
+`iac-staged` caller (a test keeps both equal to the reusable workflow). The caller `init` writes
+for the Cloudflare profile:
 
 ```yaml
 # .github/workflows/iac-approve.yml
 name: iac-approve
+
 on:
   workflow_dispatch:
     inputs:
@@ -528,24 +540,29 @@ on:
       manifest-digest:
         description: manifest-digest from the prod approval issue.
         required: true
+
 permissions: {}
+
 jobs:
   approve:
     permissions:
       contents: read
+      actions: read
+      pull-requests: read
       id-token: write
       deployments: write
       issues: write
-      actions: read
-      pull-requests: read
-    uses: tttao/ayasee/.github/workflows/iac-approve.yml@<release SHA>
+    uses: tttao/ayasee/.github/workflows/iac-approve.yml@<release SHA> # ayasee vX.Y.Z (release/vX.Y.Z)
     with:
       sha: ${{ inputs.sha }}
       manifest-digest: ${{ inputs.manifest-digest }}
     secrets:
+      teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}
       ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}
       AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }}
-      # and the provider secrets the iac-staged caller passes
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 ```
 
 ## The empty-plan path

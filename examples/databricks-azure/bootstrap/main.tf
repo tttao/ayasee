@@ -83,6 +83,7 @@ module "environments" {
   breakglass_reviewers = var.breakglass_reviewers
   variables            = local.variables
   environment_prefix   = var.environment_prefix
+  gate_mechanism       = var.gate_mechanism
 
   adopt_existing_environments = var.adopt_existing_environments
   private_repository_plan     = var.private_repository_plan

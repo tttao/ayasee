@@ -73,6 +73,16 @@ adopt_existing_environments=true` ([why and how](../../docs/guides/adopt.md#envi
 required reviewers on GitHub Enterprise only, and the bootstrap refuses any other plan instead of
 creating an unprotected `prod` ([what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
 
+**A private repository below GitHub Enterprise** (GitHub Free, Pro or Team) uses `gate_mechanism: workflow`
+([the workflow gate](../../docs/concepts/staged-run.md#the-workflow-gate)): set
+`-var gate_mechanism=workflow -var private_repository_plan=<plan>` and leave out the two reviewer
+variables, and set `shared_units_pr_plan = false` in the locals (no pull-request plan of shared
+units in this mode yet; `init` starts with none). On Free the bootstrap sets `AYASEE_LEDGER_URL` as
+a repository variable. `ayasee init` writes `gate_mechanism` and `private_repository_plan` as the defaults when it reads such a plan,
+together with `gate_mechanism: workflow`, a `reviewers.prod` placeholder in `.ayasee.yaml` and the
+`.github/workflows/iac-approve.yml` caller, which is in this example for that mode only (with the
+default gate it refuses to run, and `ayasee doctor` warns about it: delete it).
+
 Managing GitHub environments needs administration rights on the repository. Run this root from a
 maintainer's machine, or from a workflow with a GitHub App or fine-grained token that has the
 **Administration** permission, never with `github.token`, and never as an ayasee unit: a unit's
