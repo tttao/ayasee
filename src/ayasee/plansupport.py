@@ -18,7 +18,9 @@ Actions read, and the owner's plan is visible only to an owner of the organizati
 to the user themself (``/user``); a call that fails is evidence of nothing.
 
 Callers decide what a verdict means: ``ayasee doctor`` fails on ``UNSUPPORTED`` and ``UNKNOWN``,
-``ayasee init`` warns, ``ayasee require-reviewers`` refuses a definite ``UNSUPPORTED``. With
+``ayasee init`` warns and scaffolds ``gate_mechanism: workflow`` for a definite ``UNSUPPORTED``
+whose plan it read (never for ``UNKNOWN``), ``ayasee require-reviewers`` refuses a definite
+``UNSUPPORTED``. With
 ``gate_mechanism: workflow`` (D15, issue #40), which does not rest on environment reviewers, the
 doctor reads the same result to say what that gate keeps, and ``ayasee approve`` reads it to tell
 a plan without branch policies from a prod environment left open."""

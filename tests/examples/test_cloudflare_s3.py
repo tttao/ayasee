@@ -23,6 +23,7 @@ CALLS = {
     "iac-staged.yml": "iac-staged.yml",
     "iac-nightly.yml": "iac-nightly.yml",
     "iac-breakglass.yml": "iac-breakglass.yml",
+    "iac-approve.yml": "iac-approve.yml",  # written by ayasee init with gate_mechanism: workflow
 }
 TOKENS = ("CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
 UNITS = {"test": {"dns"}, "prod": {"dns", "tunnel", "access"}}
@@ -104,7 +105,9 @@ def test_callers_pass_the_provider_tokens_by_name_and_only_declared_secrets():
             assert passed[token] == f"${{{{ secrets.{token} }}}}", (caller, token)
         # the plan passphrase goes only where a prod plan is made or applied
         has_pass = "AYASEE_PLAN_PASSPHRASE" in passed
-        assert has_pass == (reusable in {"iac-staged.yml", "iac-breakglass.yml"}), caller
+        assert has_pass == (
+            reusable in {"iac-staged.yml", "iac-breakglass.yml", "iac-approve.yml"}
+        ), caller
         if "ledger-token" in declared:
             assert passed["ledger-token"] == "${{ secrets.AYASEE_LEDGER_TOKEN }}", caller
 

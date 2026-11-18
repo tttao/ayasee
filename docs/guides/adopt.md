@@ -18,7 +18,8 @@ tokens. Everything else is a command.
 - `tofu` (OpenTofu 1.10 or later), `terragrunt`, and `uv`.
 - The release you adopt, `X.Y.Z`, from the [releases](https://github.com/tttao/ayasee/releases).
 - **(you)** Two reviewer sets, different and non-empty: one approves prod applies, the other the
-  break-glass path. GitHub team or user IDs.
+  break-glass path. GitHub team or user IDs. With `gate_mechanism: workflow`, one list of GitHub
+  logins instead (`reviewers.prod`).
 
 ### What the GitHub plan must allow
 
@@ -34,7 +35,8 @@ them on every plan
 
 So the repository must be **public, or private on GitHub Enterprise**. A private repository on
 GitHub Free, Pro or Team is **not supported by the default gate today**: ayasee says so instead of
-running ungated. `ayasee init` warns before it scaffolds, `ayasee doctor` fails first with the
+running ungated. `ayasee init` warns and scaffolds the workflow gate below instead (or, with
+`--gate-mechanism environment`, keeps the default and warns), `ayasee doctor` fails first with the
 missing features, the bootstrap refuses to create the environments (a private repository states
 its plan in `private_repository_plan`, which must be `enterprise`), and the staged and break-glass
 runs refuse to go on when the gated environment has no required reviewers
@@ -44,16 +46,21 @@ Such a repository can opt into **`gate_mechanism: workflow`** (decision
 [D15](../governance/decisions.md#d15-the-workflow-gate)): ayasee, not GitHub, enforces the prod
 gate, and every run says so as a DEVIATION. The staged run stops after `prod-plan` with an approval
 issue, and a reviewer listed in `reviewers.prod` of `.ayasee.yaml` applies the plan with the
-`iac-approve` workflow ([how](../concepts/staged-run.md#the-workflow-gate)). Set
-`gate_mechanism = "workflow"` (and no reviewer variables) in the bootstrap as well, add the
-`iac-approve` caller by hand, and know what the plan still gives you:
+`iac-approve` workflow ([how](../concepts/staged-run.md#the-workflow-gate)). `ayasee init`
+(step 1) sets it up when it reads the plan as Free, Pro or Team, or when you pass
+`--gate-mechanism workflow --plan free|pro|team`: `gate_mechanism: workflow` and a
+`reviewers.prod` placeholder in `.ayasee.yaml`, `gate_mechanism = "workflow"` and
+`private_repository_plan` in the bootstrap (which then takes no reviewer variables), and the
+`iac-approve` caller. Know what the plan still gives you:
 
 - **GitHub Pro or Team**: the environments stay restricted to `main` and keep their own secrets,
   so only a job on `main` reaches the prod secrets, and a ruleset on `main` can make every change
   to the reviewers or the callers go through a reviewed pull request.
 - **GitHub Free**: no environment secrets, environment variables, branch policies or rulesets.
-  Set `private_repository_plan = "free"`: the environments are created bare, and every secret and
-  variable is a repository one. Any collaborator with write access can read the prod secrets from
+  With `private_repository_plan = "free"` the environments are created bare, and every secret and
+  variable is a repository one (the Cloudflare profile's bootstrap then sets `AYASEE_LEDGER_URL`
+  as a repository variable; the Databricks profile, which needs one identity per environment
+  through environment variables, cannot run there). Any collaborator with write access can read the prod secrets from
   a workflow on any branch and push to `main`, and every stage reads the same provider tokens. The
   gate then stops mistakes and unreviewed applies, not a collaborator who means harm: keep the
   collaborators with write access to the reviewers.
@@ -70,7 +77,7 @@ uvx ayasee@X.Y.Z init --profile cloudflare-s3 --iac-root infra/iac      # beside
 It writes `.ayasee.yaml`, the callers under `.github/workflows/`, `root.hcl`, the bootstrap root and
 one empty directory per stage, all pinned to the release commit of `X.Y.Z`: no placeholder to
 search, no `sed`. The callers are `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
-`iac-breakglass.yml`. It can be run again: a file with identical content is skipped, a file that
+`iac-breakglass.yml`, and `iac-approve.yml` with the workflow gate (below). It can be run again: a file with identical content is skipped, a file that
 differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. With
 `--iac-root` it also sets `environment_prefix: iac-` in `.ayasee.yaml` and in the bootstrap, because a
 repository that holds code already deploys it to environments called `test` and `prod`, and ayasee
@@ -78,10 +85,28 @@ must not share them ([below](#environments-that-already-exist)); `--environment-
 chooses another prefix and `--environment-prefix ''` none (`--upgrade` moves the pin only and never
 touches it). Fill the Cloudflare zone, account and tunnel IDs it leaves as placeholders. `--ref
 <SHA>` is accepted only for the release commit of `X.Y.Z`; `doctor` (step 5) fails callers pinned to
-an older release. When it can reach the repository (`--repo`, or the `origin` remote, with
-`GITHUB_TOKEN` if set) it first checks [what the plan allows](#what-the-github-plan-must-allow)
-and warns before writing anything; the scaffold is written either way. Details:
-[start from the example](quickstart.md#1-start-from-the-example).
+an older release. Details: [start from the example](quickstart.md#1-start-from-the-example).
+
+**The gate follows the plan.** When it can reach the repository (`--repo`, or the github.com
+`origin` remote; `GITHUB_TOKEN` if set, anonymously otherwise, and the token is never printed) it
+first reads [what the plan allows](#what-the-github-plan-must-allow), and chooses:
+
+| What init reads | `gate_mechanism` | `private_repository_plan` (bootstrap) | `iac-approve` caller |
+|---|---|---|---|
+| public or internal repository | `environment` | not stated | no |
+| private, GitHub Enterprise | `environment` | `enterprise` | no |
+| private, GitHub Free, Pro or Team | `workflow`, with a warning | the plan read | yes |
+| nothing it can trust (no repository, no token that shows the plan, an API error) | `environment`, with a note naming the flags | not stated | no |
+
+It never guesses the weaker gate: a plan it cannot read keeps `environment`, and the note says to
+run init again with `--gate-mechanism workflow --plan free|pro|team` (or `--plan enterprise`).
+`--gate-mechanism environment|workflow` and `--plan free|pro|team|enterprise` override what it
+reads, with a warning when they go against it; `--plan` alone picks `environment` for
+`enterprise` and `workflow` otherwise. With `workflow`, `reviewers.prod` is the placeholder
+`REPLACE_WITH_GITHUB_LOGIN`: `.ayasee.yaml` does not load, so no run and no `doctor` passes,
+until you list the GitHub logins that may approve a prod apply **(you)**. On a repository that
+`init` already scaffolded with the other gate, the files that change are shown as a diff and
+nothing is written without `--force`.
 
 ## 2. Bootstrap the environments
 
@@ -96,9 +121,12 @@ tofu apply -var github_owner=my-org -var github_repository=my-estate \
   -var generate_plan_passphrase=true
 ```
 
-A private repository adds `-var private_repository_plan=enterprise`: without it the plan refuses
-to create environments whose reviewers GitHub would not keep
-([what the plan must allow](#what-the-github-plan-must-allow)).
+A private repository states its plan in `private_repository_plan`, which `init` sets as the
+variable's default when it read the plan (`-var private_repository_plan=enterprise` otherwise):
+without it the plan refuses to create environments whose reviewers GitHub would not keep
+([what the plan must allow](#what-the-github-plan-must-allow)). With `gate_mechanism = "workflow"`
+leave out `prod_reviewers` and `breakglass_reviewers`: the bootstrap refuses them, and the
+reviewers are `reviewers.prod` of `.ayasee.yaml`.
 
 It creates the eight environments (with the prefix, if any) with their reviewers and `main`-only deployment policies, sets
 `AYASEE_LEDGER_URL` where the ledger is read or written, and, with `generate_plan_passphrase=true`,

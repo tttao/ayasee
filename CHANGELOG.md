@@ -47,8 +47,26 @@ released version into the GitHub release notes.
     bare (no branch policy, no marker variable) and `secret_commands` lists repository secrets.
   - Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request
     plan of shared units (`iac-pr` skips it with a warning, reading the mode of the base commit
-    too, so a pull request cannot switch it back on); `ayasee init` does not scaffold the
-    `iac-approve` caller yet ([the caller to add](docs/concepts/staged-run.md#the-workflow-gate)).
+    too, so a pull request cannot switch it back on).
+- **`ayasee init` chooses the prod gate from the GitHub plan** (#40): a private repository it
+  reads as GitHub Free, Pro or Team gets `gate_mechanism: workflow`, the `iac-approve` caller
+  (pinned like the other callers, with exactly the permissions of the reusable workflow's jobs
+  and the secrets of the `iac-staged` caller) and the plan in the bootstrap; a public repository
+  or GitHub Enterprise keeps `environment` (Enterprise is stated as `private_repository_plan`);
+  a plan it cannot read keeps `environment` and says which flags to pass, never the weaker gate
+  ([adopt: the gate follows the plan](docs/guides/adopt.md#1-scaffold-ayasee-init)).
+  - New `--gate-mechanism environment|workflow` and `--plan free|pro|team|enterprise` override the
+    detection, with a warning when they go against it; `--upgrade` refuses both and moves the pin
+    of `iac-approve.yml` like the others.
+  - With `workflow`, `reviewers.prod` is the placeholder `REPLACE_WITH_GITHUB_LOGIN`, which
+    `.ayasee.yaml` refuses with its own message (so no run and no `ayasee doctor` passes) until it
+    is replaced by GitHub logins.
+  - The example bootstraps take `gate_mechanism` (default `environment`) and pass it to
+    `github-environments`; `prod_reviewers` and `breakglass_reviewers` default to unset, which the
+    module still refuses with the environment gate. The Cloudflare bootstrap on private GitHub Free
+    sets `AYASEE_LEDGER_URL` as a repository variable. Both examples ship the
+    `iac-approve.yml` caller, for that mode only.
+  - `init` without a repository to read now says that it kept the default gate, and how to choose.
 - **What the GitHub plan must allow** (#39): the default gate rests on required reviewers on
   environments (GitHub Enterprise only in a private repository), deployment branch policies and
   rulesets (GitHub Pro, Team or Enterprise in a private repository). A private repository on

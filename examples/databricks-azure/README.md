@@ -61,6 +61,14 @@ already exists unless you pass `-var adopt_existing_environments=true`
 required reviewers on GitHub Enterprise only, and the bootstrap refuses any other plan instead of
 creating an unprotected `prod` ([what the plan must allow](../../docs/guides/adopt.md#what-the-github-plan-must-allow)).
 
+**A private repository below GitHub Enterprise** (GitHub Pro or Team (not Free: its identities need environment variables)) uses `gate_mechanism: workflow`
+([the workflow gate](../../docs/concepts/staged-run.md#the-workflow-gate)): set
+`-var gate_mechanism=workflow -var private_repository_plan=<plan>` and leave out the two reviewer
+variables. `ayasee init` writes `gate_mechanism` and `private_repository_plan` as the defaults when it reads such a plan,
+together with `gate_mechanism: workflow`, a `reviewers.prod` placeholder in `.ayasee.yaml` and the
+`.github/workflows/iac-approve.yml` caller, which is in this example for that mode only (with the
+default gate it refuses to run, and `ayasee doctor` warns about it: delete it).
+
 `prod` and `prod-breakglass` need different, non-empty reviewer sets; the environments forbid self
 review and admin bypass (D2). Keep the state of this root outside the stage units' state. The
 `client_ids` and `principal_ids` outputs are what the next step needs. See
@@ -175,6 +183,7 @@ cannot show this repository, so move the ledger to a branch first if you want it
 | `iac-staged.yml` | `iac-staged` | push to `main` | dev, uat, prod-plan, gated prod apply of the approved encrypted plan, ledger writes. |
 | `iac-nightly.yml` | `iac-nightly` | cron | Drift plan per stage in `drift-<stage>` (plan identity), issues, rescan of `main`. |
 | `iac-breakglass.yml` | `iac-breakglass` | manual | Emergency prod change: incident reference, `prod-breakglass` reviewers, post-approval issue. |
+| `iac-approve.yml` | `iac-approve` | manual | Only with `gate_mechanism: workflow`: a reviewer of `reviewers.prod` applies the approved prod plan. |
 | `cockpit.yml` | `cockpit-collect` | `main` runs and cron | Estate snapshot and its renderer. Optional. |
 
 See [docs/concepts](../../docs/concepts/staged-run.md) for the details and

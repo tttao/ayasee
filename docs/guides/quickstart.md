@@ -17,7 +17,10 @@ and plan encryption, the wired path will not fit yet: see [the comparison](../co
 - A GitHub repository you can administer, on github.com. GitHub Enterprise Server is unverified.
   It must be **public, or private on GitHub Enterprise**: the prod gate is the required
   reviewers of the `prod` environment, which GitHub offers in a private repository on GitHub
-  Enterprise only ([what the plan must allow](adopt.md#what-the-github-plan-must-allow)).
+  Enterprise only ([what the plan must allow](adopt.md#what-the-github-plan-must-allow)). A
+  private repository on GitHub Pro or Team uses `gate_mechanism: workflow` instead, which
+  `ayasee init` sets up (GitHub Free has no environment variables, which this profile's
+  identities need).
 - A person with rights to create managed identities in an Azure resource group, and to assign roles.
 - An Azure storage account for Terraform state, a second container for the ledger, and a Key Vault
   key for plan encryption.
@@ -80,6 +83,14 @@ nothing unless you pass `--force`. To move to another release, run
 ayasee it needs `--ref`, because its templates may differ from any release. The placeholders that
 only you can fill (subscription and tenant GUIDs, storage account names, the Cloudflare IDs) stay,
 and step 2 below is then already done.
+
+It also chooses the prod gate from the repository's GitHub plan, read with `GITHUB_TOKEN` when
+set: a private repository it reads as GitHub Free, Pro or Team gets `gate_mechanism: workflow`
+([the workflow gate](../concepts/staged-run.md#the-workflow-gate)), the `iac-approve` caller,
+`gate_mechanism` and `private_repository_plan` in the bootstrap, and a `reviewers.prod`
+placeholder that `.ayasee.yaml` refuses until you replace it with GitHub logins. A plan it cannot
+read keeps the default gate and says which flags to pass: `--gate-mechanism environment|workflow`
+and `--plan free|pro|team|enterprise` ([the table](adopt.md#1-scaffold-ayasee-init)).
 
 To start from the full example instead, with its units, copy `examples/databricks-azure/` into a new
 repository. It contains:
@@ -174,8 +185,10 @@ repository already deploys applications to environments called `dev`, `uat` or `
 ([why](adopt.md#environments-that-already-exist)): every name below then carries the prefix
 (`iac-prod`, `iac-drift-dev`, ...), the federated subjects too. The bootstrap refuses to take over an
 environment it did not create unless you add `-var adopt_existing_environments=true`. A private
-repository adds `-var private_repository_plan=enterprise`; any other plan is refused
-([what the plan must allow](adopt.md#what-the-github-plan-must-allow)).
+repository states its plan in `private_repository_plan` (`init` sets it when it read the plan, or
+add `-var private_repository_plan=enterprise`); with the default gate any other plan is refused
+([what the plan must allow](adopt.md#what-the-github-plan-must-allow)). With
+`gate_mechanism = "workflow"` (Pro or Team) leave out the two reviewer variables.
 
 This uses the two modules:
 

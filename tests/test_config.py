@@ -827,6 +827,18 @@ def test_the_workflow_gate_refuses_a_bad_reviewer_list(text, message):
         config.parse_config_text(text)
 
 
+@pytest.mark.parametrize(
+    "logins", ["[REPLACE_WITH_GITHUB_LOGIN]", "[alice, REPLACE_WITH_GITHUB_LOGIN]"]
+)
+def test_the_init_placeholder_is_never_a_reviewer(logins):
+    """ayasee init writes a placeholder in reviewers.prod: it must fail closed until replaced."""
+    assert config.REVIEWER_PLACEHOLDER == "REPLACE_WITH_GITHUB_LOGIN"
+    with pytest.raises(
+        ConfigError, match="placeholder REPLACE_WITH_GITHUB_LOGIN written by ayasee"
+    ):
+        config.parse_config_text(f"gate_mechanism: workflow\nreviewers:\n  prod: {logins}\n")
+
+
 def test_the_workflow_gate_is_labelled_as_a_deviation():
     cfg = config.parse_config_text(WORKFLOW_GATE)
     assert config.label_keys(cfg) == [{"kind": "deviation", "setting": "gate_mechanism"}]

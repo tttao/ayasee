@@ -28,20 +28,28 @@ variable "location" {
   type        = string
 }
 
+variable "gate_mechanism" {
+  description = "gate_mechanism of .ayasee.yaml; keep the two equal. \"environment\": GitHub's required reviewers on prod and prod-breakglass hold the gate. \"workflow\" (D15, a DEVIATION, for a private repository on GitHub Pro or Team): no environment carries reviewers, and the iac-approve workflow checks reviewers.prod of .ayasee.yaml. ayasee init sets it from the repository's GitHub plan."
+  type        = string
+  default     = "environment"
+}
+
 variable "prod_reviewers" {
-  description = "Required reviewers of the prod environment (GitHub team and user IDs)."
+  description = "Required reviewers of the prod environment (GitHub team and user IDs). Required with gate_mechanism = \"environment\"; leave it unset with \"workflow\", whose reviewers are reviewers.prod of .ayasee.yaml."
   type = object({
     teams = list(number)
     users = list(number)
   })
+  default = null
 }
 
 variable "breakglass_reviewers" {
-  description = "Required reviewers of prod-breakglass; must differ from prod_reviewers."
+  description = "Required reviewers of prod-breakglass; must differ from prod_reviewers. Required with gate_mechanism = \"environment\"; leave it unset with \"workflow\"."
   type = object({
     teams = list(number)
     users = list(number)
   })
+  default = null
 }
 
 variable "ledger_url" {

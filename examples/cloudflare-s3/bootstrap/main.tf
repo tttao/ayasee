@@ -23,14 +23,22 @@ variable "github_repository" {
   type = string
 }
 
+variable "gate_mechanism" {
+  description = "gate_mechanism of .ayasee.yaml; keep the two equal. \"environment\": GitHub's required reviewers on prod and prod-breakglass hold the gate. \"workflow\" (D15, a DEVIATION, for a private repository below GitHub Enterprise): no environment carries reviewers, and the iac-approve workflow checks reviewers.prod of .ayasee.yaml. ayasee init sets it from the repository's GitHub plan."
+  type        = string
+  default     = "environment"
+}
+
 variable "prod_reviewers" {
-  description = "GitHub team and user IDs that approve prod (and prod-pr-plan)."
+  description = "GitHub team and user IDs that approve prod (and prod-pr-plan). Required with gate_mechanism = \"environment\"; leave it unset with \"workflow\", whose reviewers are reviewers.prod of .ayasee.yaml."
   type        = object({ teams = list(number), users = list(number) })
+  default     = null
 }
 
 variable "breakglass_reviewers" {
-  description = "GitHub team and user IDs that approve prod-breakglass; must differ from prod_reviewers."
+  description = "GitHub team and user IDs that approve prod-breakglass; must differ from prod_reviewers. Required with gate_mechanism = \"environment\"; leave it unset with \"workflow\"."
   type        = object({ teams = list(number), users = list(number) })
+  default     = null
 }
 
 variable "repository_path" {
@@ -75,6 +83,10 @@ locals {
   # every environment that writes or reads the ledger: the stages, prod-plan, prod-breakglass and
   # the drift environments (not the pull-request plan ones)
   ledger_envs = concat(local.stages, ["prod-plan", "prod-breakglass"], [for s in local.stages : "drift-${s}"])
+  # gate_mechanism = "workflow" on a private repository on GitHub Free, which has no environment
+  # variables or secrets: the module creates the environments bare, and the ledger URL is one
+  # repository variable instead (the secrets are repository secrets: secret_commands)
+  repository_level = var.gate_mechanism == "workflow" && var.private_repository_plan == "free"
 
   # plan_encryption.key_provider of .ayasee.yaml
   key_provider = "pbkdf2"
@@ -115,11 +127,12 @@ module "environments" {
   breakglass_reviewers = var.breakglass_reviewers
   shared_units_pr_plan = local.shared_units_pr_plan
   environment_prefix   = var.environment_prefix
+  gate_mechanism       = var.gate_mechanism
 
   adopt_existing_environments = var.adopt_existing_environments
   private_repository_plan     = var.private_repository_plan
 
-  variables = { for env in local.ledger_envs : env => { AYASEE_LEDGER_URL = local.ledger_url } }
+  variables = local.repository_level ? {} : { for env in local.ledger_envs : env => { AYASEE_LEDGER_URL = local.ledger_url } }
 
   key_provider             = local.key_provider
   generate_plan_passphrase = var.generate_plan_passphrase
@@ -134,6 +147,13 @@ module "environments" {
     AYASEE_LEDGER_TOKEN = "fine-grained token, this repository only, Contents: read and write and nothing else; require pull requests on main with a ruleset (README, step 4)"
     TEAMS_WEBHOOK       = "the Teams incoming-webhook URL of the channel ayasee notifies (notify.teams)"
   }
+}
+
+resource "github_actions_variable" "ledger_url" {
+  count         = local.repository_level ? 1 : 0
+  repository    = var.github_repository
+  variable_name = "AYASEE_LEDGER_URL"
+  value         = local.ledger_url
 }
 
 output "environments" {
