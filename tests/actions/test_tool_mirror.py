@@ -144,7 +144,15 @@ def test_actions_expose_and_pass_tool_mirror(action):
 
 @pytest.mark.parametrize(
     "wf",
-    ["iac-pr", "iac-staged", "iac-nightly", "iac-breakglass", "iac-approve", "cockpit-collect"],
+    [
+        "iac-pr",
+        "iac-pr-shared",
+        "iac-staged",
+        "iac-nightly",
+        "iac-breakglass",
+        "iac-approve",
+        "cockpit-collect",
+    ],
 )
 def test_workflows_forward_tool_mirror(wf):
     doc = yaml.safe_load((REPO / ".github" / "workflows" / f"{wf}.yml").read_text())

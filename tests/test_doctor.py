@@ -1003,6 +1003,144 @@ def test_the_workflow_gate_needs_the_approve_caller(estate, capsys):
     assert "gate_mechanism: workflow, but no workflow calls iac-approve" in "\n".join(_fails(out))
 
 
+PR_SHARED_CALLER = f"""name: iac-pr-shared
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        required: true
+      sha:
+        required: true
+permissions: {{}}
+jobs:
+  plan:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+      id-token: write
+    uses: tttao/ayasee/.github/workflows/iac-pr-shared.yml@{PIN}
+    with:
+      pr: ${{{{ inputs.pr }}}}
+      sha: ${{{{ inputs.sha }}}}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{{{ secrets.CLOUDFLARE_API_TOKEN }}}}
+      AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}
+      AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}
+"""
+
+
+def _pr_shared(estate):
+    (estate / ".github" / "workflows" / "iac-pr-shared.yml").write_text(PR_SHARED_CALLER)
+
+
+def _main_only_pr_plan(state):
+    state["envs"]["prod-pr-plan"] = {
+        "name": "prod-pr-plan",
+        "protection_rules": [],
+        "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+    }
+
+
+@respx.mock
+def test_the_workflow_gate_without_iac_pr_shared_warns_that_shared_units_go_unplanned(
+    estate, capsys
+):
+    _workflow_gate(estate)
+    _mock(_workflow_state())
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    assert "shared_units are not planned in pull requests: no workflow calls iac-pr-shared" in out
+
+
+@respx.mock
+def test_the_workflow_gate_on_team_with_iac_pr_shared_checks_prod_pr_plan(estate, capsys):
+    _workflow_gate(estate)
+    _pr_shared(estate)
+    state = _workflow_state()
+    _main_only_pr_plan(state)
+    _mock(state)
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    assert "no workflow calls iac-pr-shared" not in out
+    assert "prod-pr-plan" in out.split("environments present:")[1].splitlines()[0]
+    # the read-only prod tokens are environment secrets of prod-pr-plan
+    del state["secrets"]["prod-pr-plan"]
+    _mock(state)
+    rc, out = _doctor(estate, capsys)
+    assert any(
+        f.startswith("prod-pr-plan: secret CLOUDFLARE_API_TOKEN is missing") for f in _fails(out)
+    )
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "policy, names, message",
+    [
+        (None, [], "prod-pr-plan: not restricted to main"),
+        (
+            {"protected_branches": False, "custom_branch_policies": True},
+            ["main", "*"],
+            "expected [main]",
+        ),
+    ],
+)
+def test_the_workflow_gate_needs_a_main_only_prod_pr_plan(estate, capsys, policy, names, message):
+    """With the workflow gate nothing reviews a job in prod-pr-plan: only its main-only branch
+    policy keeps other branches' workflows from its read-only prod credentials."""
+    _workflow_gate(estate)
+    _pr_shared(estate)
+    state = _workflow_state()
+    _main_only_pr_plan(state)
+    state["envs"]["prod-pr-plan"]["deployment_branch_policy"] = policy
+    state["policies"]["prod-pr-plan"] = names
+    _mock(state)
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    assert any(message in f for f in _fails(out)), out
+
+
+@respx.mock
+def test_iac_pr_shared_on_free_fails(estate, capsys):
+    _workflow_gate(estate)
+    _pr_shared(estate)
+    state = _workflow_state()
+    _main_only_pr_plan(state)
+    for env in state["envs"].values():
+        env["deployment_branch_policy"] = None
+    state["secrets"] = {}
+    state["variables"] = {}
+    state["repo_secrets"] |= {*PROVIDER, "AYASEE_PLAN_PASSPHRASE"}
+    state["repo_variables"] = {"AYASEE_LEDGER_URL"}
+    _mock(state)
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/repos/{REPO}/rulesets").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    respx.get(f"{API}/repos/{REPO}/rules/branches/main").mock(
+        return_value=httpx.Response(403, json={"message": UPGRADE})
+    )
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert rc == 1
+    (fail,) = [f for f in _fails(out) if "iac-pr-shared" in f]
+    assert "refuses to run on this plan" in fail and "any branch" in fail
+
+
+def test_iac_pr_shared_with_the_environment_gate_warns(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _pr_shared(estate)
+    rc, out = _doctor(estate, capsys)
+    assert "iac-pr-shared is called, but it refuses to run with gate_mechanism: environment" in out
+    assert not any("iac-pr-shared" in f for f in _fails(out))
+
+
 @respx.mock
 def test_the_environment_gate_on_free_points_to_the_workflow_gate(estate, capsys):
     _free_private()

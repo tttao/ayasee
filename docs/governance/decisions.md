@@ -92,8 +92,58 @@ callers on `main` can remove it. How much else holds depends on the plan:
 | Private on GitHub Pro or Team | no | yes | yes | The prod secrets reach only jobs on `main` in the prod environment; reaching the apply needs a listed reviewer, checked as above; changing the reviewers or the gate needs a pull request on `main`, which a ruleset can require a review for |
 | Private on GitHub Free | no | **no** | **no** | Every apply waits for a listed reviewer and applies only the approved plan, but the prod secrets are repository secrets that any collaborator with write access can read from a workflow of any branch, every stage reads the same secrets, and anyone with write access can push to `main`. It stops mistakes and unreviewed applies, not a collaborator who means harm: keep the collaborators with write access to the reviewers |
 
-Break-glass (D3) and the pull-request plan of shared units have no workflow-gate form yet: in this
-mode `iac-breakglass` refuses to run and `iac-pr` does not plan shared units.
+Break-glass (D3) has no workflow-gate form yet: in this mode `iac-breakglass` refuses to run.
+
+**The pull-request plan of shared units.** With the environment gate, `plan-shared` of `iac-pr`
+runs a pull request's code with a read-only prod identity after a prod reviewer approves its
+`prod-pr-plan` job. Without environment reviewers nothing can hold a job of the pull request's own
+run: that run uses the pull request's workflow file, so any check ayasee put in it could be
+removed, and an environment that accepts pull-request branches hands its credentials to whichever
+job names it. In this mode the plan therefore runs **from `main`**:
+
+- `iac-pr` does not plan shared units. When a pull request changes some, it warns and its "Shared
+  prod units plan" comment gives the pull request number and head SHA to authorise. It reads the
+  mode at the pull request and at its base commit, so a pull request cannot switch its own plan
+  back on.
+- A prod reviewer reads the diff and starts `iac-pr-shared` on `main` with `pr` and `sha`. Its
+  `verify` job (no environment, no secret) refuses unless the run is a `workflow_dispatch` on
+  `refs/heads/main` started and not re-run by one person; the configuration **of `main`** has
+  `gate_mechanism: workflow` and `shared_units` and lists that person in `reviewers.prod`; they
+  have write access; the pull request is open, from this repository (never a fork), into `main`,
+  and its head is exactly `sha`; they did not open it nor author or commit any of its commits
+  (unless `solo_mode`); and `prod-pr-plan` deploys from `main` only.
+- Its `plan` job runs in `prod-pr-plan`, which in this mode carries no reviewer and deploys from
+  `main` only: GitHub's branch policy keeps every other branch's workflows away from its read-only
+  credentials, and `main`'s workflow file is the one that runs the checks. It checks out exactly
+  `sha` and plans the shared units that commit changes, read-only, as `plan-shared` does. A push
+  after the authorisation is not planned: the comment says the pull request moved on, and the new
+  head needs a new run.
+
+| Repository | Pull-request plan of shared units with `gate_mechanism: workflow` |
+|---|---|
+| Public, or private on GitHub Enterprise | `iac-pr-shared`, as on Pro or Team; the default gate keeps it in `iac-pr` behind GitHub's reviewers |
+| Private on GitHub Pro or Team | `iac-pr-shared`: the read-only prod credentials reach only jobs on `main` in `prod-pr-plan`, and a listed reviewer, checked by ayasee, decides which head of which pull request runs with them |
+| Private on GitHub Free | **Not available.** `prod-pr-plan` cannot be restricted to `main`, so any branch's workflow could use it without these checks, and with no environment secrets or variables its credentials could not differ from the prod apply's (one repository `CLOUDFLARE_API_TOKEN`, one `AZURE_CLIENT_ID`): the reviewer would be running pull-request code with the prod write credentials. The bootstrap refuses `shared_units_pr_plan`, `iac-pr-shared` refuses to run, `ayasee doctor` fails on its caller. Shared units are first seen in `prod-plan` after the merge, at the approval issue |
+
+What it keeps: the identity, the read-only plan and the comment rules of `plan-shared`; a prod
+reviewer who is not an author of the pull request decides before its code runs with that identity,
+as with `prevent_self_review`; and the decision binds one commit.
+
+**Known limits of the pull-request plan in this mode.**
+
+- The plan job runs on `main`'s ref. The pull request's code therefore runs in a job whose Actions
+  cache scope is `main`'s (in `iac-pr` it is the pull request's merge ref), and whose OIDC token
+  carries `ref: refs/heads/main` (its subject is `environment:prod-pr-plan`). Code that escapes
+  the plan step can write to `main`'s Actions cache: ayasee's workflows on `main` restore none,
+  but another workflow of the repository that restores a cache could run what was planted. Do not
+  restore Actions caches in workflows that hold prod credentials, and never federate a prod
+  identity on a `ref:refs/heads/main` subject.
+- Who may authorise is read at `main` only, with no ledger anchor (the plan applies nothing): a
+  change that adds a reviewer reaches `main` through `main`'s rulesets.
+- Independence covers who opened the pull request and the authors and committers GitHub reports
+  for its commits. Who pushed a commit is not visible; a commit without a GitHub login is
+  reported, not refused; a pull request of 250 commits or more is refused (the API lists no more).
+- The comment is advisory: the pull request's code produced the plan it summarises.
 
 `R17`, `R52` and similar numbers in the docs and the code are rulings made during implementation:
 narrower choices that follow from these decisions. Each is explained at the place that cites it.

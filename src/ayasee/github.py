@@ -781,6 +781,13 @@ class GitHub:
             raise GitHubError(0, "unexpected pull request response")
         return data
 
+    def pull_request_commits(self, repo: str, number: int) -> list[dict[str, Any]]:
+        """``GET /repos/{repo}/pulls/{number}/commits`` (Pull requests: read). GitHub lists at
+        most 250 commits here: a caller that needs them all refuses a list of that length."""
+        return self._paginate(
+            f"/repos/{repo}/pulls/{number}/commits", {"per_page": 100}, "pull request commits"
+        )
+
     def compare_commits(self, repo: str, base: str, head: str) -> list[dict[str, Any]]:
         """Every commit of ``base...head`` (Contents: read), following the pagination."""
         return self._paginate(

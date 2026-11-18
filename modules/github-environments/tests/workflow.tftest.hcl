@@ -116,7 +116,9 @@ run "reviewers_are_refused_with_the_workflow_gate" {
   ]
 }
 
-run "no_prod_pr_plan_with_the_workflow_gate" {
+# iac-pr-shared plans the shared units of a pull request from main: prod-pr-plan carries no
+# reviewer, so only its main-only branch policy keeps other branches from its credentials
+run "the_workflow_gate_keeps_prod_pr_plan_main_only" {
   command = plan
 
   variables {
@@ -124,8 +126,39 @@ run "no_prod_pr_plan_with_the_workflow_gate" {
     shared_units_pr_plan    = true
   }
 
+  assert {
+    condition     = length(github_repository_environment.this["prod-pr-plan"].reviewers) == 0
+    error_message = "the workflow gate sets no reviewers on prod-pr-plan"
+  }
+
+  assert {
+    condition     = length(github_repository_environment.this["prod-pr-plan"].deployment_branch_policy) == 1
+    error_message = "prod-pr-plan is restricted to main with the workflow gate"
+  }
+
+  assert {
+    condition     = github_repository_environment_deployment_policy.main["prod-pr-plan"].branch_pattern == "main"
+    error_message = "prod-pr-plan deploys from main only"
+  }
+
+  assert {
+    condition     = output.pr_plan_environment == "test-plan" && length(github_repository_environment.this["test-plan"].deployment_branch_policy) == 0
+    error_message = "the first stage's pull-request plan environment still accepts every branch"
+  }
+}
+
+# GitHub Free has no branch policy to close prod-pr-plan to other branches, and no environment
+# secret to keep its credentials apart from the prod apply's
+run "no_prod_pr_plan_with_the_workflow_gate_on_free" {
+  command = plan
+
+  variables {
+    private_repository_plan = "free"
+    shared_units_pr_plan    = true
+  }
+
   expect_failures = [
-    var.shared_units_pr_plan,
+    github_repository_environment.this,
   ]
 }
 

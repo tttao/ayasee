@@ -376,8 +376,9 @@ def environment_names(cfg: Config) -> dict[str, str]:
         "prod-plan",
         "prod-breakglass",
         *(f"drift-{s}" for s in cfg.stages),
-        # the workflow gate (D15) switches the pull-request plan of shared units off
-        *(["prod-pr-plan"] if cfg.shared_units and cfg.gate_mechanism == "environment" else []),
+        # the pull-request plan of shared units: in iac-pr behind GitHub reviewers, or with the
+        # workflow gate (D15) in iac-pr-shared, started on main by a prod reviewer
+        *(["prod-pr-plan"] if cfg.shared_units else []),
     ]
     names: dict[str, str] = {}
     for name in logical:

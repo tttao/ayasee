@@ -389,7 +389,8 @@ Then:
   and the change set lists them in `shared_units`, because the stage name alone does not tell the
   reviewer the blast radius;
 - a pull request that changes one of them gets a second plan, against prod and read-only, in the
-  `prod-pr-plan` environment ([PR checks](pr-checks.md#shared-units)).
+  `prod-pr-plan` environment ([PR checks](pr-checks.md#shared-units)); with the
+  [workflow gate](#the-workflow-gate), when a prod reviewer starts `iac-pr-shared` for its head.
 
 The trade-off is explicit: a change to a shared unit, even one that only concerns a test hostname,
 reaches production only through the prod gate, and no earlier stage soaks it.
@@ -510,10 +511,13 @@ A change of the environment gate alone (both sides `environment`) keeps the in-s
   checked for independence.
 - Bootstrap trust, above, until the first approved apply.
 
-Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request plan of
-[shared units](#units-that-serve-every-stage), which needs a reviewer before pull-request code
-runs with a prod identity (`iac-pr` skips it with a warning when the configuration of the pull
-request or of its base commit says `workflow`).
+The pull-request plan of [shared units](#units-that-serve-every-stage) moves out of the pull
+request's run: `iac-pr` does not plan them in this mode (it reads the mode of the pull request and
+of its base commit), and a prod reviewer plans a pull request's head with `iac-pr-shared` on
+`main`, in a `prod-pr-plan` restricted to `main`. It is not available on GitHub Free
+([PR checks](pr-checks.md#with-the-workflow-gate-iac-pr-shared)).
+
+Not in this mode yet: break-glass (`iac-breakglass` refuses to run).
 
 **The caller.** `ayasee init` chooses this mode itself for a private repository whose plan it
 reads as GitHub Free, Pro or Team, or when given `--gate-mechanism workflow` (and `--plan`, the

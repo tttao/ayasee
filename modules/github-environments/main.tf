@@ -29,11 +29,14 @@ locals {
   # Environments the workflows use, and their reviewers (null = none).
   # <first stage>-plan and prod-pr-plan are the only ones that are not restricted to main (PR
   # plans). prod-pr-plan (opt-in) plans the shared prod units of a PR read-only; it carries the
-  # prod reviewers because the PR's code runs with a prod identity.
+  # prod reviewers because the PR's code runs with a prod identity. With the workflow gate (D15)
+  # nothing can hold a job of the PR's own run, so iac-pr-shared plans from main instead, and
+  # prod-pr-plan is a main-only environment without reviewers (workflow_pr_plan).
   pr_plan = merge(
     { (local.pr_plan_environment) = null },
     var.shared_units_pr_plan && !local.workflow_gate ? { "prod-pr-plan" = var.prod_reviewers } : {},
   )
+  workflow_pr_plan = var.shared_units_pr_plan && local.workflow_gate ? { "prod-pr-plan" = null } : {}
 
   environments = merge(
     { for s in var.stages : s => null },
@@ -44,6 +47,7 @@ locals {
       "prod-breakglass" = local.workflow_gate ? null : var.breakglass_reviewers
     },
     local.pr_plan,
+    local.workflow_pr_plan,
   )
 
   self_reviewed = ["prod", "prod-breakglass", "prod-pr-plan"]
@@ -182,6 +186,10 @@ resource "github_repository_environment" "this" {
     precondition {
       condition     = (each.value == null || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies || local.bare)
       error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${each.value == null ? "a main-only deployment branch policy" : "required reviewers"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, move it to GitHub Enterprise and set private_repository_plan = \"enterprise\", or use gate_mechanism = \"workflow\" (D15, a DEVIATION: ayasee enforces the gate, not GitHub; docs/guides/adopt.md#what-you-need)."
+    }
+    precondition {
+      condition     = !(local.bare && contains(keys(local.workflow_pr_plan), each.key))
+      error_message = "shared_units_pr_plan with gate_mechanism = \"workflow\" on GitHub Free: \"${local.github_name[each.key]}\" would accept every branch (no deployment branch policies) and hold no secret of its own (no environment secrets), so a workflow of any branch could run with the repository's prod credentials. iac-pr-shared refuses such an environment; set shared_units_pr_plan = false (D15)."
     }
     precondition {
       condition     = !local.bare || (length(var.variables) == 0 && !var.generate_plan_passphrase)

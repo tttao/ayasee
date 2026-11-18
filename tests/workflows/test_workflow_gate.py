@@ -266,7 +266,7 @@ def test_the_authorize_step_maps_refusals_and_notes(tmp_path):
     assert out.read_text() == ""  # a refusal hands nothing to the apply job
 
 
-# ---- iac-pr: no shared-unit plan with the workflow gate ----------------------------------------
+# ---- iac-pr: the shared-unit plan moves to iac-pr-shared with the workflow gate -----------------
 
 
 def _git(*args, cwd):
@@ -325,6 +325,7 @@ def test_shared_changes_switches_the_plan_off_with_the_workflow_gate(tmp_path, b
     assert proc.returncode == 0, proc.stderr
     got = _outputs(out)
     assert got["units"] == ("edge" if planned else "")
+    assert got["pending"] == ("false" if planned else "true")  # a reviewer starts iac-pr-shared
     assert ("::warning::gate_mechanism: workflow" in proc.stdout) is not planned
 
 

@@ -117,6 +117,9 @@ def test_bootstrap_creates_the_environments_and_the_ledger_variable():
     assert 'stages     = ["test", "prod"]' in text
     assert "stages               = local.stages" in text
     assert "shared_units_pr_plan = true" in text
+    # no prod-pr-plan on GitHub Free with the workflow gate: it could not be main-only (D15)
+    assert "pr_plan_shared       = local.shared_units_pr_plan && !local.repository_level" in text
+    assert "shared_units_pr_plan = local.pr_plan_shared" in text
     assert "git-branch://${local.workspace}?branch=ayasee-ledger&remote=origin" in text
     assert (
         'ledger_envs = concat(local.stages, ["prod-plan", "prod-breakglass"], '

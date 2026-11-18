@@ -39,9 +39,9 @@ result to small jobs that run no PR code (R39).
 | `resolve` | `contents: read` | No environment, no identity. Checks out the PR head and prints the environment `plan-first-stage` runs in with `ayasee config pr-plan-environment`: `<environment_prefix><first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test, prod]`, `iac-test-plan` with `environment_prefix: iac-`). It fails when the configuration does not load, the first stage is `prod` or a stage name is reserved (`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`); `plan-first-stage` is then skipped, `plan-dev` fails and `comment` posts "the configuration was refused". |
 | `plan-first-stage` | `contents: read`, `id-token: write` | Environment `<first stage>-plan`, from `resolve` (a job's environment is fixed before its steps run). Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives that environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text, headed "Plan of `<stage>`", to artifact `ayasee-pr-comment` (1 day). |
 | `plan-dev` | none | The verdict of the pull-request plan, and the check to require. No checkout, no environment, no identity. It runs whenever `resolve` ran, also after a failure, and fails unless `resolve` succeeded and `plan-first-stage` succeeded. A skipped job counts as passed in branch protection, so requiring `plan-first-stage` alone would let a refused configuration merge. |
-| `shared-changes` | `contents: read` | Only when `shared_units` is set. No environment, no identity: works out which shared prod units the PR changes (`ayasee changed-units --env prod --shared ...`). |
+| `shared-changes` | `contents: read` | Only when `shared_units` is set. No environment, no identity: works out which shared prod units the PR changes (`ayasee changed-units --env prod --shared ...`). With `gate_mechanism: workflow` it hands none to `plan-shared` and sets `pending` instead ([iac-pr-shared](#with-the-workflow-gate-iac-pr-shared)). |
 | `plan-shared` | `contents: read`, `id-token: write` | Only when `shared-changes` found some. Environment `prod-pr-plan`. Plans those units against prod (`binding-mode: replan`, `encrypt: false`, `lock: false`; never applied, the plan files are deleted), runs the pack (stage `prod`) and keeps the comment text as `ayasee-pr-comment-shared`. See [shared units](#shared-units). |
-| `comment-shared` | `contents: read`, `pull-requests: write` | Like `comment`, for a second sticky comment (`--marker pr-plan-shared`), so the first stage's comment never waits for the `prod-pr-plan` approval. |
+| `comment-shared` | `contents: read`, `pull-requests: write` | Like `comment`, for a second sticky comment (`--marker pr-plan-shared`), so the first stage's comment never waits for the `prod-pr-plan` approval. When `pending`, a fixed text: which pull request and head SHA a prod reviewer authorises with `iac-pr-shared`. |
 | `comment` | `contents: read`, `pull-requests: write` | No OIDC and no PR code: checks out only the **base** commit (`persist-credentials: false`; never the PR head, R39), which also gives the in-repo `--local` form its `./actions`. Installs ayasee from the action, downloads only `ayasee-pr-comment` (or, when `resolve` failed, writes a fixed "the configuration was refused" text) and runs `ayasee pr-comment`. `plan-first-stage` refuses settings that are not supported yet before its Azure login. |
 
 ### Required checks
@@ -142,11 +142,74 @@ example). The reviewer approval on `prod-pr-plan` is what stands between an open
 approve only after reading the diff. If that is not acceptable, leave `prod-pr-plan` out: the job
 then waits and the change is seen first at the prod gate.
 
-With `gate_mechanism: workflow` ([D15](../governance/decisions.md#d15-the-workflow-gate)) there
-is no `prod-pr-plan` environment and so no reviewer before pull-request code runs with a prod
-identity: `shared-changes` reports no unit, warns, and `plan-shared` does not run. The mode is read
-from the pull request's configuration and from its base commit's, so a pull request cannot switch
-the plan back on. The shared units are planned by `prod-plan` after the merge.
+### With the workflow gate: `iac-pr-shared`
+
+With `gate_mechanism: workflow` ([D15](../governance/decisions.md#d15-the-workflow-gate)) GitHub
+has no reviewer to hold `plan-shared`, and nothing in the pull request's own run can: the pull
+request controls that run's workflow file, and an environment open to pull-request branches hands
+its credentials to any job that names it. So `iac-pr` never plans shared units in this mode. When
+the pull request changes some, `shared-changes` warns and outputs `pending`, and `comment-shared`
+writes the "Shared prod units plan" comment with the pull request number and head SHA to
+authorise. The mode is read from the pull request's configuration and from its base commit's, so
+a pull request cannot switch `plan-shared` back on. Each push rewrites the comment.
+
+A prod reviewer who has read the diff then starts **`iac-pr-shared` on `main`**
+(`gh workflow run iac-pr-shared.yml --ref main -f pr=<n> -f sha=<head sha>`):
+
+| Job | Permissions | What it does |
+|---|---|---|
+| `verify` | `contents: read`, `pull-requests: read`, `actions: read` | No environment, no secret; checks out `main`. `ayasee pr-shared authorize` refuses unless the run is a `workflow_dispatch` on `refs/heads/main` and `github.actor` is `github.triggering_actor` (never re-run by someone else); the configuration **of `main`** has `gate_mechanism: workflow` and `shared_units` and lists the actor in `reviewers.prod`; the actor has write access; the pull request is open, from this repository (no fork), into `main`, and its head is exactly `sha`; the actor did not open it nor author or commit any of its commits (unless `solo_mode`, NON-COMPLIANT; a commit without a GitHub login is reported; 250 commits or more are refused); and `<environment_prefix>prod-pr-plan` deploys from `main` only. |
+| `plan` | `contents: read`, `id-token: write` | Environment `prod-pr-plan` (named by `verify`, so the prefix is `main`'s). Refuses an attempt started by anyone but the reviewer `verify` accepted, checks out exactly `sha` (`persist-credentials: false`) and refuses any other checkout, then works like `plan-shared`: the changed shared units against the merge base with `main`, the plan (`binding-mode: replan`, `encrypt: false`, `lock: false`; never applied), the pack (stage `prod`) and the comment text as `ayasee-pr-comment-shared`. With no shared unit changed it neither logs in nor plans. |
+| `comment` | `contents: read`, `pull-requests: write` | No pull-request code: checks out `main`. `ayasee pr-shared comment` posts the text as the `pr-plan-shared` sticky comment, headed by the commit planned and the reviewer (named, not mentioned), and says so when the pull request has moved on since: a new head needs a new run. |
+
+Here `prod-pr-plan` carries **no reviewer and deploys from `main` only**: the branch policy,
+which GitHub enforces, keeps every other branch's workflows away from its credentials, and the
+checks run in `main`'s workflow file. Create it with `shared_units_pr_plan = true` and
+`gate_mechanism = "workflow"` in the
+[`github-environments`](../../modules/github-environments/README.md) module, with the same
+read-only identity as above. This needs deployment branch policies: a public repository, or a
+private one on GitHub Pro, Team or Enterprise. **On GitHub Free it is not available**: there
+`prod-pr-plan` would accept every branch and could hold no credential of its own (no environment
+secrets or variables), so the plan would run pull-request code with the prod apply's credentials.
+The module refuses `shared_units_pr_plan` there, `iac-pr-shared` refuses to run and `ayasee doctor`
+fails on its caller; the shared units are first seen at the prod approval issue after the merge.
+
+The plan job runs on `main`'s ref, so the pull request's code runs in a job whose Actions cache
+scope and OIDC `ref` claim are `main`'s: do not restore Actions caches in workflows that hold prod
+credentials, and never federate a prod identity on a `ref:refs/heads/main` subject
+([D15 known limits](../governance/decisions.md#d15-the-workflow-gate)).
+
+`ayasee init` does not scaffold the caller; add it by hand, with the read-only secrets of
+`prod-pr-plan` when `identity: secrets`:
+
+```yaml
+# .github/workflows/iac-pr-shared.yml
+name: iac-pr-shared
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the pull request.
+        required: true
+      sha:
+        description: Full head SHA of the pull request, as read.
+        required: true
+permissions: {}
+jobs:
+  plan:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+      id-token: write
+    uses: tttao/ayasee/.github/workflows/iac-pr-shared.yml@<release SHA>
+    with:
+      pr: ${{ inputs.pr }}
+      sha: ${{ inputs.sha }}
+    secrets:
+      # identity: secrets only: environment secrets of prod-pr-plan, read-only
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
 
 ## Fork pull requests
 

@@ -848,11 +848,14 @@ def test_the_workflow_gate_is_labelled_as_a_deviation():
     )
 
 
-def test_the_workflow_gate_has_no_prod_pr_plan_environment():
+def test_prod_pr_plan_exists_with_shared_units_in_both_gates():
+    """The workflow gate plans the shared units of a pull request with iac-pr-shared, in the same
+    prod-pr-plan environment (main only there, D15)."""
     text = "shared_units: [edge]\n"
     assert "prod-pr-plan" in config.environment_names(config.parse_config_text(text))
     cfg = config.parse_config_text(text + WORKFLOW_GATE)
-    assert "prod-pr-plan" not in config.environment_names(cfg)
+    assert "prod-pr-plan" in config.environment_names(cfg)
+    assert "prod-pr-plan" not in config.environment_names(config.parse_config_text(WORKFLOW_GATE))
 
 
 def test_config_show_carries_the_gate(tmp_path, monkeypatch, capsys):
