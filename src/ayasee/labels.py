@@ -5,3 +5,4 @@ APPLY_FAILED_LABEL = "ayasee:apply-failed"  # lets nightly drift skip an env wit
 DRIFT_LABEL = "ayasee:drift"
 POST_APPROVAL_LABEL = "ayasee:post-approval"  # break-glass use awaiting after-the-fact approval
 PROD_APPROVAL_LABEL = "ayasee:prod-approval"  # gate_mechanism: workflow, a prod plan to approve
+BREAKGLASS_APPROVAL_LABEL = "ayasee:breakglass-approval"  # workflow gate, a break-glass plan

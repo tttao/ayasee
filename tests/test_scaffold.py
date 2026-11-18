@@ -717,6 +717,12 @@ def test_the_workflow_gate_scaffolds_the_approve_caller_and_a_refused_placeholde
                     "description": "manifest-digest from the prod approval issue.",
                     "required": True,
                 },
+                # a break-glass approval of the workflow gate (#40)
+                "incident": {
+                    "description": "Only to approve a break-glass request, its incident.",
+                    "required": False,
+                    "default": "",
+                },
             }
         }
     }
@@ -740,7 +746,9 @@ def test_the_approve_caller_holds_exactly_what_the_reusable_jobs_need(tmp_path):
     (job,) = caller["jobs"].values()
     assert job["permissions"] == needed
     call = reusable[True]["workflow_call"]
-    assert set(job["with"]) == {k for k, v in call["inputs"].items() if v.get("required")}
+    # the required inputs, and incident for a break-glass approval (#40)
+    required = {k for k, v in call["inputs"].items() if v.get("required")}
+    assert set(job["with"]) == required | {"incident"}
     assert set(job["secrets"]) <= set(call["secrets"])
     staged = yaml.safe_load((tmp_path / ".github/workflows/iac-staged.yml").read_text())
     (staged_job,) = staged["jobs"].values()

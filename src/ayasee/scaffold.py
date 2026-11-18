@@ -96,6 +96,11 @@ reviewers:
   # The GitHub logins that may approve a prod apply. ayasee refuses this file until the
   # placeholder is replaced: no run, no doctor pass, no approval.
   prod: [{REVIEWER_PLACEHOLDER}]
+  # The GitHub logins that may approve a break-glass request (iac-breakglass, then iac-approve
+  # with the incident). They may share people with prod, not be the same list. Without them
+  # break-glass refuses to run and ayasee doctor warns.
+  # docs/compliance/dora-art17.md#break-glass-with-the-workflow-gate
+  # breakglass: [oncall-login]
 """
 
 

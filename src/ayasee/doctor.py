@@ -25,11 +25,13 @@ instead of failed jobs found one at a time:
   its ``environment_prefix`` name, and carries the ``AYASEE_MANAGED`` marker of the bootstrap (a
   warning when not); prod,
   prod-breakglass and prod-pr-plan have required reviewers and prevent self-review (unless
-  ``solo_mode``), or, with ``gate_mechanism: workflow``, every login of ``reviewers.prod`` has
-  write access to the repository; the environments are restricted to ``main`` except the
-  pull-request plan ones (``<first stage>-plan``, and ``prod-pr-plan`` with the environment gate
-  only: with the workflow gate it is main-only, since no reviewer guards it; not checked on GitHub
-  Free with the workflow gate, which has no branch policies);
+  ``solo_mode``), or, with ``gate_mechanism: workflow``, every login of ``reviewers.prod`` and
+  ``reviewers.breakglass`` has write access to the repository (break-glass in that mode also needs
+  ``reviewers.breakglass`` and an ``iac-approve`` caller that passes ``incident``); the
+  environments are restricted to ``main`` except the pull-request plan ones
+  (``<first stage>-plan``, and ``prod-pr-plan`` with the environment gate only: with the
+  workflow gate it is main-only, since no reviewer guards it; not checked on GitHub Free
+  with the workflow gate, which has no branch policies);
   each secret a caller passes exists where its jobs read it (provider, plan-key and ``s3://``
   ledger-key secrets as environment secrets of each environment that reads them, never at
   repository level); the variables the
@@ -155,6 +157,7 @@ class Caller:
     ref: str
     secrets: dict[str, str | None] | None  # input name -> repository secret name; None: inherit
     pr_paths: bool = False
+    inputs: frozenset[str] = frozenset()  # the with: keys the caller passes
 
 
 # ---- configuration ---------------------------------------------------------------------------
@@ -193,7 +196,8 @@ def check_config(report: Report, config_path: str, root: Path) -> Config | None:
             WARN,
             sec,
             "gate_mechanism: workflow: DEVIATION, ayasee enforces the prod gate, not GitHub "
-            f"(reviewers.prod: {', '.join(cfg.reviewers.prod)})",
+            f"(reviewers.prod: {', '.join(cfg.reviewers.prod)}; reviewers.breakglass: "
+            f"{', '.join(cfg.reviewers.breakglass) or 'none'})",
         )
     return cfg
 
@@ -243,6 +247,10 @@ def find_callers(report: Report, root: Path) -> list[Caller]:
                 rel, str(name), m["kind"], m["repo"], m["ref"], _secrets(job.get("secrets"))
             )
             caller.pr_paths = m["kind"] == "iac-pr" and _pr_has_paths(doc)
+            given = job.get("with")
+            caller.inputs = (
+                frozenset(str(k) for k in given) if isinstance(given, dict) else frozenset()
+            )
             callers.append(caller)
     return callers
 
@@ -257,7 +265,7 @@ def check_callers(report: Report, callers: list[Caller], cfg: Config | None = No
         ("iac-nightly", WARN),
         ("iac-breakglass", WARN),
     ):
-        if kind not in kinds and not (workflow_gate and kind == "iac-breakglass"):
+        if kind not in kinds:
             report.add(level, sec, f"no workflow calls {kind}")
     if workflow_gate and "iac-approve" not in kinds:
         report.add(
@@ -266,9 +274,25 @@ def check_callers(report: Report, callers: list[Caller], cfg: Config | None = No
             "gate_mechanism: workflow, but no workflow calls iac-approve: nothing can apply prod",
         )
     if workflow_gate and "iac-breakglass" in kinds:
-        report.add(
-            WARN, sec, "iac-breakglass refuses to run with gate_mechanism: workflow (not built yet)"
-        )
+        # D15: a break-glass request is approved by reviewers.breakglass with iac-approve
+        assert cfg is not None
+        if not cfg.reviewers.breakglass:
+            # a warning, not a failure: init writes the caller in every mode, and the run itself
+            # refuses (fail closed); the emergency path is simply not there until it is listed
+            report.add(
+                WARN,
+                sec,
+                "iac-breakglass is called with gate_mechanism: workflow, but reviewers.breakglass "
+                "is empty: it refuses every request, so there is no emergency path",
+            )
+        approvers = [c for c in callers if c.kind == "iac-approve"]
+        if approvers and not any("incident" in c.inputs for c in approvers):
+            report.add(
+                FAIL,
+                sec,
+                "the iac-approve caller does not pass incident: a break-glass request cannot be "
+                "approved (add an incident input, docs/concepts/staged-run.md#the-workflow-gate)",
+            )
     if not workflow_gate and cfg is not None and "iac-approve" in kinds:
         report.add(
             WARN,
@@ -415,10 +439,14 @@ def _logical_environments_of(kind: str, cfg: Config) -> list[str]:
         return [pr_plan_environment(cfg.stages)] + (["prod-pr-plan"] if shared else [])
     if kind == "iac-nightly":
         return [f"drift-{s}" for s in cfg.stages]
+    workflow_breakglass = cfg.gate_mechanism == "workflow" and bool(cfg.reviewers.breakglass)
     if kind == "iac-approve":
-        return ["prod"]
+        # a break-glass approval applies in prod-breakglass (D15)
+        return ["prod", "prod-breakglass"] if workflow_breakglass else ["prod"]
     if kind == "iac-pr-shared":
         return ["prod-pr-plan"] if cfg.shared_units else []
+    if cfg.gate_mechanism == "workflow":
+        return ["prod-plan", "prod-breakglass"]  # the request plans in prod-plan
     return ["prod-breakglass"]
 
 
@@ -429,12 +457,11 @@ def environments_of(kind: str, cfg: Config) -> list[str]:
 
 
 def _plan_key_envs(kind: str, cfg: Config) -> list[str]:
-    logical = {
-        "iac-staged": ["prod-plan", "prod"],
-        "iac-breakglass": ["prod-breakglass"],
-        "iac-approve": ["prod"],
-    }
-    return [cfg.environment_prefix + e for e in logical.get(kind, [])]
+    if kind not in ("iac-staged", "iac-breakglass", "iac-approve"):
+        return []
+    # every environment of these that plans or applies prod holds the plan key
+    keyed = {cfg.environment_prefix + e for e in ("prod-plan", "prod", "prod-breakglass")}
+    return [e for e in environments_of(kind, cfg) if e in keyed]
 
 
 def _reviewers(env: dict[str, Any]) -> tuple[int, bool | None]:
@@ -472,8 +499,6 @@ def check_github(
     pr_envs = {pfx + pr_plan_environment(cfg.stages)} | (set() if workflow_gate else {pr_plan})
     wanted: dict[str, None] = {}  # ordered set
     for kind in ("iac-staged", "iac-pr", *sorted({c.kind for c in callers})):
-        if workflow_gate and kind == "iac-breakglass":
-            continue  # refused in this mode; its environment is not needed
         for env in environments_of(kind, cfg):
             wanted[env] = None
     try:
@@ -575,22 +600,27 @@ def check_github(
 
 
 def _check_reviewer_access(report: Report, gh: GitHub, repo: str, cfg: Config, sec: str) -> None:
-    """Every login of ``reviewers.prod`` can approve: write access or more (D15)."""
-    for login in cfg.reviewers.prod:
-        try:
-            perm = gh.collaborator_permission(repo, login)
-        except GitHubError as exc:
-            report.add(FAIL, sec, f"reviewers.prod: cannot read the access of {login}: {exc}")
-            continue
-        if perm in ("admin", "write"):
-            report.add(OK, sec, f"reviewers.prod: {login} has {perm} access")
-        else:
-            report.add(
-                FAIL,
-                sec,
-                f"reviewers.prod: {login} has {perm} access; iac-approve refuses a reviewer "
-                "without write access",
-            )
+    """Every login of ``reviewers.prod`` and ``reviewers.breakglass`` can approve: write access
+    or more (D15)."""
+    for where, logins in (
+        ("reviewers.prod", cfg.reviewers.prod),
+        ("reviewers.breakglass", cfg.reviewers.breakglass),
+    ):
+        for login in logins:
+            try:
+                perm = gh.collaborator_permission(repo, login)
+            except GitHubError as exc:
+                report.add(FAIL, sec, f"{where}: cannot read the access of {login}: {exc}")
+                continue
+            if perm in ("admin", "write"):
+                report.add(OK, sec, f"{where}: {login} has {perm} access")
+            else:
+                report.add(
+                    FAIL,
+                    sec,
+                    f"{where}: {login} has {perm} access; iac-approve refuses a reviewer "
+                    "without write access",
+                )
 
 
 MARKER = "AYASEE_MANAGED"
@@ -736,7 +766,9 @@ def _check_secrets_and_variables(
         for kind in kinds & {"iac-staged", "iac-nightly"}:
             for env in environments_of(kind, cfg):
                 need_var[(env, "AYASEE_LEDGER_URL")] = "no ledger.url in the configuration"
-    if "iac-breakglass" in kinds:
+    # the environment gate's break-glass job reads only its environment's variable; the workflow
+    # gate's request and approval fall back to ledger.url
+    if "iac-breakglass" in kinds and (cfg.gate_mechanism != "workflow" or not cfg.ledger.url):
         need_var[(cfg.environment_prefix + "prod-breakglass", "AYASEE_LEDGER_URL")] = (
             "the break-glass run needs it"
         )

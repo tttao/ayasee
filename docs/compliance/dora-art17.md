@@ -55,8 +55,9 @@ changes is who enforces it: ayasee's own workflow, not GitHub's environment prot
 GitHub Free a collaborator with write access can reach the prod secrets outside it. An auditor
 should weigh it as a compensating control, which is why every run prints
 `DEVIATION: gate enforced by ayasee, not by GitHub environment protection` and the cockpit tags
-the repository `workflow gate · deviation`. Break-glass (point (1)(g)) is not available in this
-mode yet.
+the repository `workflow gate · deviation`. Break-glass (point (1)(g)) is a request approved by a
+separate list, `reviewers.breakglass`
+([below](#break-glass-with-the-workflow-gate)).
 
 ## Break-glass in practice
 
@@ -101,6 +102,37 @@ completed after the fact:
 - [ ] Drift check clean
 
 Each use opens a new issue. Close it only when every box is ticked.
+
+## Break-glass with the workflow gate
+
+With `gate_mechanism: workflow` on `main` ([D15](../governance/decisions.md#break-glass-with-the-workflow-gate))
+there are no environment reviewers, so the same `iac-breakglass` dispatch (same inputs) is a
+**request**, and a second person **approves** it:
+
+1. The requester starts `iac-breakglass`. `validate` refuses unless `main` lists
+   `reviewers.breakglass`. The `request` job, in `prod-plan` with the plan identity, checks the
+   ancestry and the rollback rule, plans the whole prod tree (encrypted, `binding-mode:
+   encrypted_plan`), runs the policy pack (stage `prod`) and keeps the plan, its manifest and
+   `request.json` as `ayasee-breakglass-plan-<sha>` (7 days). `request-issue` opens the issue
+   `break-glass approval: <incident> <sha>` (labels `ayasee:breakglass-approval` and `env:prod`)
+   with the incident, the SHA, the manifest digest, the requester, the counts and the command to
+   approve. Nothing is applied.
+2. A login of `reviewers.breakglass` who is not the requester, and did not write or merge the
+   change (unless `solo_mode`), runs
+   `gh workflow run iac-approve.yml --ref main -f incident=<incident> -f sha=<sha> -f manifest-digest=<digest>`.
+   The `iac-approve` caller must pass `incident` ([the caller](../concepts/staged-run.md#the-workflow-gate)).
+3. `verify` (no secret) checks the approver, the plan and its request; the `breakglass` job, in
+   `prod-breakglass`, checks the rollback rule and the ledger again, applies exactly the approved
+   plan, writes the ledger record with the incident, the approver and the **requester**, closes the
+   approval issue, opens the stop-the-line issue if the apply failed and the post-approval issue in
+   every case where the apply started, and notifies `breakglass_used`.
+
+The approver sees the counts and the run before anything is applied, which the environment gate
+cannot offer. In exchange it takes two people and two dispatches, and a cascading change (R52) is
+refused at the request: land the upstream unit first, or set `allow_cascade`. Stop-the-line is
+still not enforced. A plan is refused once prod changed after its request started (any apply since): start
+`iac-breakglass` again. With `solo_mode` the requester may approve their own request
+(NON-COMPLIANT, as above).
 
 ## Setting up the `prod-breakglass` environment
 

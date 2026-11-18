@@ -60,6 +60,7 @@ def post_approval_body(
     approvers: list[str],
     counts: dict | None = None,
     rollback_from: str | None = None,
+    requester: str | None = None,
 ) -> str:
     """Issue body for a break-glass use: identifiers, links and counts only, never values."""
     boxes = "\n".join(f"- [ ] {item}" for item in CHECKLIST)
@@ -69,6 +70,8 @@ def post_approval_body(
         f"- Run: {run_url}",
         f"- Approvers of the break-glass run: {', '.join(approvers)}",
     ]
+    if requester:
+        lines.append(f"- Requested by: {requester}")
     if rollback_from:
         lines.append(f"- Rollback from `{rollback_from[:12]}`")
     if counts is not None:
@@ -90,6 +93,18 @@ def _counts_from_changeset(path: str) -> dict:
     return {**cs["risk"], "total": len(cs["items"])}
 
 
+def _counts_from_json(path: str) -> dict:
+    """The counts kept with a break-glass request of the workflow gate (critical, high, medium,
+    total), non-negative integers only."""
+    doc = json.loads(Path(path).read_text())
+    keys = [key for _, key in _COUNT_FACTS]
+    if not isinstance(doc, dict) or set(doc) != set(keys):
+        raise ValueError("unexpected counts")
+    if not all(type(doc[k]) is int and doc[k] >= 0 for k in keys):
+        raise ValueError("unexpected counts")
+    return doc
+
+
 def _post_approval(args: argparse.Namespace) -> int:
     """Open a new post-approval issue (one per break-glass use, never merged into another)."""
     approvers = [a for a in args.approvers.split(",") if a]
@@ -104,6 +119,10 @@ def _post_approval(args: argparse.Namespace) -> int:
         problem = "run-url must be an https URL"
     elif not approvers or not all(_LOGIN_RE.fullmatch(a) for a in approvers):
         problem = "approvers must be a comma-separated list of logins"
+    elif args.requester is not None and not _LOGIN_RE.fullmatch(args.requester):
+        problem = "requester must be a login"
+    elif args.changeset and args.counts_json:
+        problem = "pass --changeset or --counts-json, not both"
     if problem:
         print(f"issue: error: {problem}", file=sys.stderr)
         return 2
@@ -114,6 +133,12 @@ def _post_approval(args: argparse.Namespace) -> int:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"issue: error: cannot read changeset: {type(exc).__name__}", file=sys.stderr)
             return 2
+    elif args.counts_json:
+        try:
+            counts = _counts_from_json(args.counts_json)
+        except (OSError, ValueError) as exc:
+            print(f"issue: error: cannot read the counts: {type(exc).__name__}", file=sys.stderr)
+            return 2
     gh: GitHub | None = None
     try:
         gh = GitHub.from_env()
@@ -121,7 +146,13 @@ def _post_approval(args: argparse.Namespace) -> int:
             args.repo,
             f"post-approval: break-glass {args.incident}",
             post_approval_body(
-                args.incident, args.sha, args.run_url, approvers, counts, args.rollback_from
+                args.incident,
+                args.sha,
+                args.run_url,
+                approvers,
+                counts,
+                args.rollback_from,
+                args.requester,
             ),
             [POST_APPROVAL_LABEL, "env:prod"],
         )
@@ -169,6 +200,10 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--approvers", required=True, help="comma-separated logins")
     p.add_argument("--changeset", help="changeset JSON; only its counts go into the issue")
     p.add_argument("--rollback-from", help="live prod SHA that this run rolls back from")
+    p.add_argument(
+        "--counts-json", help="change counts (critical, high, medium, total) instead of a changeset"
+    )
+    p.add_argument("--requester", help="who asked for the break-glass change (workflow gate)")
     p.set_defaults(handler=_post_approval)
     p = sub.add_parser("open-count", help="print the number of open issues with all given labels")
     p.add_argument("--repo", required=True, help="owner/name")

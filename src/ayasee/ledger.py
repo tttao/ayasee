@@ -76,9 +76,12 @@ class LedgerRecord:
     approver: str | None
     breakglass_incident: str | None
     recorded_at: str  # RFC 3339 UTC, microsecond precision, e.g. 2026-11-06T12:00:00.000001Z
+    # who asked for a break-glass change of the workflow gate (D15); absent from older records
+    # and from every other record, which keep their shape
+    requester: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "repo": self.repo,
             "env": self.env,
             "sha": self.sha,
@@ -93,6 +96,9 @@ class LedgerRecord:
             "breakglass_incident": self.breakglass_incident,
             "recorded_at": self.recorded_at,
         }
+        if self.requester is not None:
+            out["requester"] = self.requester
+        return out
 
     @classmethod
     def from_dict(cls, d: Any) -> LedgerRecord:
@@ -110,6 +116,7 @@ class LedgerRecord:
                 approver=_opt_str(d["approver"]),
                 breakglass_incident=_opt_str(d["breakglass_incident"]),
                 recorded_at=_str(d["recorded_at"]),
+                requester=_opt_str(d.get("requester")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise LedgerError(f"malformed ledger record ({type(exc).__name__})") from None
@@ -168,6 +175,7 @@ def record_from_run(
     approver: str | None = None,
     breakglass_incident: str | None = None,
     now: str | None = None,
+    requester: str | None = None,
 ) -> LedgerRecord:
     """Build a record. ``converged`` is true iff every unit converged (so an empty plan,
     all ``no_changes``, records the environment as in sync at ``sha``). ``units`` must not be
@@ -185,6 +193,7 @@ def record_from_run(
         approver=approver,
         breakglass_incident=breakglass_incident,
         recorded_at=now or now_rfc3339(),
+        requester=requester,
     )
 
 
@@ -777,6 +786,7 @@ def _write(args: argparse.Namespace) -> int:
         units=_load_units(args.units_json),
         approver=args.approver,
         breakglass_incident=args.breakglass_incident,
+        requester=args.requester,
     )
     open_store(args.store).append(rec)
     if args.mirror_deployments:
@@ -861,6 +871,7 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--approver")
     p.add_argument("--breakglass-incident")
+    p.add_argument("--requester", help="who asked for a break-glass change (workflow gate)")
     p.add_argument(
         "--mirror-deployments", action="store_true", help="also post a GitHub deployment"
     )

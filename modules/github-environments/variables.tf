@@ -52,7 +52,7 @@ variable "prod_reviewers" {
 }
 
 variable "breakglass_reviewers" {
-  description = "Required reviewers of prod-breakglass. Must not be empty and must differ from prod_reviewers. Left unset (null) with gate_mechanism = \"workflow\", whose break-glass path is not available yet."
+  description = "Required reviewers of prod-breakglass. Must not be empty and must differ from prod_reviewers. Left unset (null) with gate_mechanism = \"workflow\", whose break-glass approvers are reviewers.breakglass of .ayasee.yaml (checked by iac-approve)."
   type = object({
     teams = list(number)
     users = list(number)
@@ -66,7 +66,7 @@ variable "breakglass_reviewers" {
 
   validation {
     condition     = var.gate_mechanism != "workflow" || var.breakglass_reviewers == null
-    error_message = "gate_mechanism = \"workflow\" sets no reviewers on prod-breakglass: leave breakglass_reviewers unset (D15)."
+    error_message = "gate_mechanism = \"workflow\" sets no reviewers on prod-breakglass: leave breakglass_reviewers unset and list the break-glass approvers in reviewers.breakglass of .ayasee.yaml (D15)."
   }
 
   validation {
@@ -86,7 +86,7 @@ variable "variables" {
 }
 
 variable "gate_mechanism" {
-  description = "gate_mechanism of .ayasee.yaml (keep the two equal). \"environment\" (the default): prod and prod-breakglass carry required reviewers, which GitHub enforces. \"workflow\" (D15, a DEVIATION): no environment carries reviewers; ayasee's iac-approve workflow checks reviewers.prod of .ayasee.yaml instead. The environments keep their main-only deployment branch policy where the plan has one; a private repository on GitHub Free (private_repository_plan = \"free\") has neither branch policies nor environment secrets and variables, so its environments are created bare and its secrets are repository secrets."
+  description = "gate_mechanism of .ayasee.yaml (keep the two equal). \"environment\" (the default): prod and prod-breakglass carry required reviewers, which GitHub enforces. \"workflow\" (D15, a DEVIATION): no environment carries reviewers; ayasee's iac-approve workflow checks reviewers.prod (and, for break-glass, reviewers.breakglass) of .ayasee.yaml instead. The environments keep their main-only deployment branch policy where the plan has one; a private repository on GitHub Free (private_repository_plan = \"free\") has neither branch policies nor environment secrets and variables, so its environments are created bare and its secrets are repository secrets."
   type        = string
   default     = "environment"
 

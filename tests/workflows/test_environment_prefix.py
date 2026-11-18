@@ -31,6 +31,8 @@ ALLOWED = [
     r"\$\{\{ needs\.resolve\.outputs\.pr-plan-environment \}\}",
     r"\$\{\{ needs\.resolve\.outputs\.environment-prefix \}\}drift-\$\{\{ matrix\.env \}\}",
     r"\$\{\{ needs\.validate\.outputs\.environment-prefix \}\}prod-breakglass",
+    # break-glass of the workflow gate (D15): the request plans in prod-plan
+    r"\$\{\{ needs\.validate\.outputs\.environment-prefix \}\}prod-plan",
     r"\$\{\{ needs\.shared-changes\.outputs\.environment-prefix \}\}prod-pr-plan",
     # iac-pr-shared: `ayasee pr-shared authorize` prints environment_prefix (of main) + prod-pr-plan
     r"\$\{\{ needs\.verify\.outputs\.environment \}\}",

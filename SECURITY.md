@@ -111,6 +111,14 @@ credentials go (`LD_*`, `BASH_ENV`, `GITHUB_*`, `TF_CLI_ARGS`, `AWS_*`, `CLOUDFL
   not write, checked before any secret; its `prod-pr-plan` environment deploys from `main` only.
   It is refused on GitHub Free, where that environment could be neither closed to other branches
   nor given credentials apart from the prod apply's.
+- **Break-glass with the workflow gate** is a request and an approval: `iac-breakglass` only plans
+  (in `prod-plan`, with the plan identity) and keeps the encrypted plan; `iac-approve` with the
+  incident applies it in `prod-breakglass` after the same checks, by a login of
+  `reviewers.breakglass` of `main` (also listed at the last approved apply) who is not the
+  requester and did not write or merge the change (unless `solo_mode`), for exactly that plan
+  (digest and `request.json`), refused once prod changed after the request started. The ledger
+  records the incident, the requester and the approver
+  ([D3 with the workflow gate](docs/governance/decisions.md#break-glass-with-the-workflow-gate)).
 
 **Supply chain.** Third-party actions are pinned by commit SHA; callers pin ayasee by SHA; callers
 never use `secrets: inherit`. Tools downloaded by the actions are verified by SHA-256. CI runs

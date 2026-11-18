@@ -29,6 +29,7 @@ One record is written when a stage finishes:
 | `converged` | True only if every unit converged |
 | `approver` | The distinct approved logins of the environment gate, sorted and comma-joined, or null (R36) |
 | `breakglass_incident` | The incident reference of a break-glass deployment, or null |
+| `requester` | Only on a break-glass record of the workflow gate (D15): who started the `iac-breakglass` request; the key is absent from every other record |
 | `recorded_at` | RFC 3339 UTC with microseconds |
 
 A failed apply is still written (the units that did apply are recorded) and then the job fails.

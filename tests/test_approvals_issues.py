@@ -376,3 +376,40 @@ def test_apply_failure_without_any_rejection(monkeypatch):
 def test_missing_job_in_the_latest_attempt_is_an_error(monkeypatch):
     rc, _ = _rejected_cli(monkeypatch, [_a("x", state="rejected")], [_job("staged / dev", [])])
     assert rc == 2
+
+
+@respx.mock
+def test_cli_post_approval_of_the_workflow_gate_takes_counts_and_the_requester(
+    monkeypatch, tmp_path
+):
+    """Break-glass of the workflow gate (issue #40): the apply job has no change set, only the
+    counts kept with the request; the requester is named next to the approver."""
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+    monkeypatch.setenv("GITHUB_API_URL", BASE)
+    counts = tmp_path / "counts.json"
+    counts.write_text(json.dumps({"critical": 1, "high": 0, "medium": 2, "total": 5}))
+    create = respx.post(f"{BASE}/repos/o/n/issues").mock(
+        return_value=httpx.Response(201, json={"number": 4})
+    )
+    argv = _post_approval_argv(**{"--counts-json": str(counts), "--requester": "ron"})
+    assert cli.main(argv) == 0
+    body = json.loads(create.calls[0].request.content)["body"]
+    assert "Changes applied: critical 1, high 0, medium 2, total 5" in body
+    assert "Requested by: ron" in body
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"critical": 1}',
+        '{"critical": "x", "high": 0, "medium": 0, "total": 0}',
+        '{"critical": -1, "high": 0, "medium": 0, "total": 0}',
+        "[]",
+    ],
+)
+def test_cli_post_approval_refuses_bad_counts(monkeypatch, tmp_path, content):
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+    counts = tmp_path / "counts.json"
+    counts.write_text(content)
+    assert cli.main(_post_approval_argv(**{"--counts-json": str(counts)})) == 2
+    assert cli.main(_post_approval_argv(**{"--requester": "bo b"})) == 2

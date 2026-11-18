@@ -51,7 +51,9 @@ issue, and a reviewer listed in `reviewers.prod` of `.ayasee.yaml` applies the p
 `--gate-mechanism workflow --plan free|pro|team`: `gate_mechanism: workflow` and a
 `reviewers.prod` placeholder in `.ayasee.yaml`, `gate_mechanism = "workflow"` and
 `private_repository_plan` in the bootstrap (which then takes no reviewer variables), and the
-`iac-approve` caller. Know what the plan still gives you:
+`iac-approve` caller (with its `incident` input). For break-glass, list its approvers in
+`reviewers.breakglass` ([break-glass in this mode](../compliance/dora-art17.md#break-glass-with-the-workflow-gate)).
+Know what the plan still gives you:
 
 - **GitHub Pro or Team**: the environments stay restricted to `main` and keep their own secrets,
   so only a job on `main` reaches the prod secrets, and a ruleset on `main` can make every change

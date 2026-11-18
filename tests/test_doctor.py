@@ -1147,3 +1147,106 @@ def test_the_environment_gate_on_free_points_to_the_workflow_gate(estate, capsys
     rc, out = _doctor(estate, capsys)
     assert rc == 1
     assert "gate_mechanism: workflow (D15" in "\n".join(_plan_lines(out))
+
+
+# ---- break-glass with the workflow gate (issue #40) ------------------------------------------
+
+BG_INPUT = """      incident:
+        required: false
+"""
+
+
+def _workflow_breakglass(estate, reviewers="[bruno]", incident=True):
+    """The workflow gate with the example's iac-breakglass caller kept, and an iac-approve caller
+    that passes incident (a break-glass approval)."""
+    cfg = estate / ".ayasee.yaml"
+    text = cfg.read_text() + "\ngate_mechanism: workflow\nreviewers:\n  prod: [rita]\n"
+    if reviewers:
+        text += f"  breakglass: {reviewers}\n"
+    cfg.write_text(text)
+    caller = APPROVE_CALLER
+    if incident:
+        caller = caller.replace(
+            "      manifest-digest:\n        required: true\n",
+            "      manifest-digest:\n        required: true\n" + BG_INPUT,
+        )
+        caller = caller.replace(
+            "      manifest-digest: ${{ inputs.manifest-digest }}\n",
+            "      manifest-digest: ${{ inputs.manifest-digest }}\n"
+            "      incident: ${{ inputs.incident }}\n",
+        )
+    (estate / ".github" / "workflows" / "iac-approve.yml").write_text(caller)
+
+
+def _workflow_breakglass_state():
+    state = _workflow_state()
+    state["envs"]["prod-breakglass"] = {
+        "name": "prod-breakglass",
+        "protection_rules": [],
+        "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+    }
+    return state
+
+
+def _bruno(perm="write"):
+    respx.get(f"{API}/repos/{REPO}/collaborators/bruno/permission").mock(
+        return_value=httpx.Response(200, json={"permission": perm})
+    )
+
+
+@respx.mock
+def test_breakglass_of_the_workflow_gate_on_team_has_no_failure(estate, capsys):
+    _workflow_breakglass(estate)
+    _mock(_workflow_breakglass_state())
+    _org_plan("team")
+    _permission()
+    _bruno()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out
+    assert "reviewers.breakglass: bruno has write access" in out
+    assert "refuses to run" not in out
+    assert "no workflow calls iac-breakglass" not in out
+
+
+@respx.mock
+def test_breakglass_of_the_workflow_gate_needs_its_environment(estate, capsys):
+    _workflow_breakglass(estate)
+    _mock(_workflow_state())  # no prod-breakglass
+    _org_plan("team")
+    _permission()
+    _bruno()
+    rc, out = _doctor(estate, capsys)
+    assert "environment prod-breakglass is missing (run the bootstrap)" in _fails(out)
+
+
+@respx.mock
+def test_breakglass_of_the_workflow_gate_needs_its_reviewers(estate, capsys):
+    _workflow_breakglass(estate, reviewers="")
+    _mock(_workflow_breakglass_state())
+    _org_plan("team")
+    _permission()
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out  # the run refuses; doctor says there is no emergency path
+    assert "reviewers.breakglass is empty: it refuses every request" in out
+
+
+@respx.mock
+def test_a_breakglass_reviewer_without_write_access_fails(estate, capsys):
+    _workflow_breakglass(estate)
+    _mock(_workflow_breakglass_state())
+    _org_plan("team")
+    _permission()
+    _bruno("read")
+    rc, out = _doctor(estate, capsys)
+    assert any(f.startswith("reviewers.breakglass: bruno has read access") for f in _fails(out))
+
+
+@respx.mock
+def test_breakglass_of_the_workflow_gate_needs_an_approve_caller_with_incident(estate, capsys):
+    _workflow_breakglass(estate, incident=False)
+    _mock(_workflow_breakglass_state())
+    _org_plan("team")
+    _permission()
+    _bruno()
+    rc, out = _doctor(estate, capsys)
+    assert any("does not pass incident" in f for f in _fails(out)), out

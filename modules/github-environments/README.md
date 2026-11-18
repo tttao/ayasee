@@ -41,11 +41,13 @@ repositories on other plans are not supported by the default gate
 Keep it equal to `gate_mechanism` of `.ayasee.yaml` (decision
 [D15](../../docs/governance/decisions.md#d15-the-workflow-gate)). With `"workflow"` no environment
 carries reviewers: leave `prod_reviewers` and `breakglass_reviewers` unset (the reviewers are
-`reviewers.prod` of `.ayasee.yaml`, which `iac-approve` checks). `shared_units_pr_plan` creates
+`reviewers.prod` and `reviewers.breakglass` of `.ayasee.yaml`, which `iac-approve` checks). `shared_units_pr_plan` creates
 `prod-pr-plan` without reviewers and restricted to `main`: `iac-pr-shared`, which a prod reviewer
 starts on `main`, plans the shared units of a pull request there, and the branch policy is what
 keeps other branches from its credentials. It is refused with `private_repository_plan = "free"`,
-which can neither restrict it to `main` nor give it secrets of its own. The environments keep their main-only deployment branch policy where the plan has one
+which can neither restrict it to `main` nor give it secrets of its own. `prod-breakglass` stays
+a main-only environment like `prod`: a break-glass request plans in `prod-plan` and its approved
+plan is applied in `prod-breakglass`, with that environment's own identity and secrets. The environments keep their main-only deployment branch policy where the plan has one
 (public, or private on Pro, Team or Enterprise). `private_repository_plan = "free"` is then
 accepted: GitHub Free has no branch policies, environment secrets or environment variables, so
 the environments are created bare (no branch policy, no `AYASEE_MANAGED` variable), `variables`
