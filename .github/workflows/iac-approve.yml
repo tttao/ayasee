@@ -154,7 +154,7 @@ jobs:
         with:
           fetch-depth: 0 # the commit to approve must be in main's history
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Label deviations from the compliant defaults
@@ -293,7 +293,7 @@ jobs:
           rc=0
           git merge-base --is-ancestor "$SHA" origin/main || rc=$?
           [ "$rc" -eq 0 ] || { echo "::error::$SHA is not an ancestor of origin/main (git exit $rc)"; exit 1; }
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -327,7 +327,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - id: guard
-        uses: OWNER/ayasee/actions/guard@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/guard@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         env:
           GITHUB_TOKEN: ${{ github.token }}
           AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
@@ -383,7 +383,7 @@ jobs:
           ayasee approve digest --manifest "$RUNNER_TEMP/ayasee-prod-plan/manifest.json" \
             --digest "$DIGEST" --sha "$SHA"
       - id: apply
-        uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/apply@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         env:
           SG_SHA: ${{ inputs.sha }} # the binding checks the manifest against this commit
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -426,7 +426,7 @@ jobs:
         run: |
           echo "::error::nothing was applied (stale or mismatched plan, or init/decrypt failed); re-run the staged run from prod-plan and approve the new digest."
           echo "### Prod not applied: re-run prod-plan and approve again" >>"$GITHUB_STEP_SUMMARY"
-      - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/ledger@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ always() && steps.units.outputs.units-json != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -462,7 +462,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: ayasee issue stop-the-line --repo "$REPO" --env prod --sha "$SHA" --run-url "$RUN_URL"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ success() }}
         with:
           event: prod_deployed
@@ -472,7 +472,7 @@ jobs:
           run-url: ${{ env.RUN_URL }}
           approver: ${{ needs.verify.outputs.approver }}
           teams-webhook: ${{ secrets.teams-webhook }}
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ failure() && steps.guard.outcome != 'failure' }}
         with:
           event: prod_failed
@@ -538,7 +538,7 @@ jobs:
           rc=0
           git merge-base --is-ancestor "$SHA" origin/main || rc=$?
           [ "$rc" -eq 0 ] || { echo "::error::$SHA is not an ancestor of origin/main (git exit $rc)"; exit 1; }
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -675,7 +675,7 @@ jobs:
           done <"$err"
           exit "$rc"
       - id: apply
-        uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/apply@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         env:
           SG_SHA: ${{ inputs.sha }} # the binding checks the manifest against this commit
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -718,7 +718,7 @@ jobs:
         run: |
           echo "::error::nothing was applied (stale or mismatched plan, or init/decrypt failed); start iac-breakglass again and approve the new digest."
           echo "### Prod not applied: request break-glass again and approve the new plan" >>"$GITHUB_STEP_SUMMARY"
-      - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/ledger@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ always() && steps.units.outputs.units-json != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -772,7 +772,7 @@ jobs:
           [ -z "$COUNTS" ] || args+=(--counts-json "$COUNTS")
           [ -z "$ROLLBACK_FROM" ] || args+=(--rollback-from "$ROLLBACK_FROM")
           ayasee issue post-approval "${args[@]}"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ always() && steps.apply.outcome != 'skipped' }}
         with:
           event: breakglass_used
@@ -782,7 +782,7 @@ jobs:
           run-url: ${{ env.RUN_URL }}
           approver: ${{ needs.verify.outputs.approver }}
           teams-webhook: ${{ secrets.teams-webhook }}
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@38eefcd0cbe4056f8bcb03418b18d689b40a5302 # AYASEE_REF
         if: ${{ failure() }}
         with:
           event: prod_failed
