@@ -77,9 +77,11 @@ def test_uses_breakglass_environment(wf):
     job = wf["jobs"][JOB]
     env_name = "${{ needs.validate.outputs.environment-prefix }}prod-breakglass"
     assert job["environment"] == env_name
+    # the request of the workflow gate (D15) plans in prod-plan, with the plan identity only
+    plan_env = "${{ needs.validate.outputs.environment-prefix }}prod-plan"
     for name, j in wf["jobs"].items():
         env = j.get("environment")
-        assert env in (None, env_name), name
+        assert env in (None, plan_env if name == "request" else env_name), name
     assert "environment: prod\n" not in TEXT
     assert job["concurrency"] == {
         "group": "ayasee-${{ github.repository }}-prod",
@@ -303,6 +305,7 @@ def test_every_uses_is_sha_or_owner_pinned(wf):
     assert seen == {
         "actions/checkout",
         "azure/login",
+        "actions/upload-artifact",  # the request of the workflow gate keeps its plan
         *(
             f"OWNER/ayasee/actions/{a}"
             for a in ("setup", "plan", "policy", "apply", "ledger", "notify")

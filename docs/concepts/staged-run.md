@@ -488,7 +488,8 @@ watch.
 
 **A change of the gate settings always needs an approval.** With the workflow gate on either side
 (the commit planned, or the last approved commit), a change of `gate_mechanism`,
-`reviewers.prod` or `solo_mode` against the last approved commit is never promoted in sync, even
+`reviewers.prod`, `reviewers.breakglass` or `solo_mode` against the last approved commit is never
+promoted in sync, even
 when its plan is empty: `prod-plan` reports `gate-changed` and the run goes to `prod-approval` (or,
 when the commit sets the environment gate, to the `prod` job and its GitHub reviewers). The
 approval is recorded in the ledger and becomes the new anchor. So:
@@ -517,7 +518,19 @@ of its base commit), and a prod reviewer plans a pull request's head with `iac-p
 `main`, in a `prod-pr-plan` restricted to `main`. It is not available on GitHub Free
 ([PR checks](pr-checks.md#with-the-workflow-gate-iac-pr-shared)).
 
-Not in this mode yet: break-glass (`iac-breakglass` refuses to run).
+**Break-glass** ([D3 with the workflow gate](../governance/decisions.md#break-glass-with-the-workflow-gate)).
+`iac-breakglass` (same caller, same inputs) becomes a request when `main` has
+`gate_mechanism: workflow`: its `request` job plans the whole prod tree in `prod-plan`, runs the
+policy pack and the rollback rule, and keeps the encrypted plan with a `request.json` as
+`ayasee-breakglass-plan-<sha>`; `request-issue` opens an `ayasee:breakglass-approval` issue. A
+login of `reviewers.breakglass` (on `main`, and at the last approved apply), who is not the
+requester, approves it with
+`gh workflow run iac-approve.yml --ref main -f incident=... -f sha=... -f manifest-digest=...`:
+`verify` runs the checks above with the break-glass role, and the `breakglass` job applies the plan
+in `prod-breakglass` without the guard, after the rollback rule and the ledger checks (which also
+refuse a plan whose request started before the newest prod record), then writes the ledger (incident, approver,
+requester) and opens the post-approval issue ([break-glass in practice](../compliance/dora-art17.md#break-glass-with-the-workflow-gate)).
+Without `reviewers.breakglass` on `main`, `iac-breakglass` refuses to run in this mode.
 
 **The caller.** `ayasee init` chooses this mode itself for a private repository whose plan it
 reads as GitHub Free, Pro or Team, or when given `--gate-mechanism workflow` (and `--plan`, the
@@ -544,6 +557,10 @@ on:
       manifest-digest:
         description: manifest-digest from the prod approval issue.
         required: true
+      incident:
+        description: Only to approve a break-glass request, its incident.
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -560,6 +577,7 @@ jobs:
     with:
       sha: ${{ inputs.sha }}
       manifest-digest: ${{ inputs.manifest-digest }}
+      incident: ${{ inputs.incident }}
     secrets:
       teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}
       ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}

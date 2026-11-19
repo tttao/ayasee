@@ -15,6 +15,7 @@ terraform {
 
 locals {
   # gate_mechanism = "workflow" (D15): no environment carries reviewers; iac-approve checks them
+  # (reviewers.prod, and reviewers.breakglass for the prod-breakglass apply of a break-glass request)
   workflow_gate = var.gate_mechanism == "workflow"
 
   # Everything below is keyed by the logical environment name (dev, prod-plan, drift-prod, ...), the

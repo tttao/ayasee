@@ -2,6 +2,8 @@
 # main with the sha and manifest-digest of the prod approval issue (Actions tab, "Run workflow",
 # or gh workflow run iac-approve.yml --ref main -f sha=... -f manifest-digest=...). With the
 # default gate_mechanism: environment it refuses to run: ayasee init writes it only with workflow.
+# A reviewer of reviewers.breakglass also approves a break-glass request with it, adding
+# -f incident=... (the break-glass approval issue gives the command).
 name: iac-approve
 
 on:
@@ -13,6 +15,10 @@ on:
       manifest-digest:
         description: manifest-digest from the prod approval issue.
         required: true
+      incident:
+        description: Only to approve a break-glass request, its incident.
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -29,6 +35,7 @@ jobs:
     with:
       sha: ${{ inputs.sha }}
       manifest-digest: ${{ inputs.manifest-digest }}
+      incident: ${{ inputs.incident }}
     secrets:
       teams-webhook: ${{ secrets.TEAMS_WEBHOOK }}
       ledger-token: ${{ secrets.AYASEE_LEDGER_TOKEN }}

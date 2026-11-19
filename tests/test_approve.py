@@ -273,6 +273,7 @@ def _run(run_id, **kw):
         "event": "push",
         "status": "completed",
         "conclusion": "success",
+        "run_started_at": "2026-11-14T09:50:00Z",
         "actor": {"login": "pusher"},
         "triggering_actor": {"login": "pusher"},
         "referenced_workflows": [
@@ -299,7 +300,9 @@ def test_the_newest_plan_of_the_sha_is_found(gh):
         _artifact(3, 30, sha="b" * 40, created="2026-11-15T10:00:00Z"),
     )
     _run(20)
-    assert approve.find_plan(gh, REPO, SHA) == approve.PlanRun(20, 2, ("pusher", "pusher"))
+    assert approve.find_plan(gh, REPO, SHA) == approve.PlanRun(
+        20, 2, ("pusher", "pusher"), "2026-11-14T09:50:00Z"
+    )
 
 
 @respx.mock
@@ -843,6 +846,11 @@ def test_the_authorize_cli_prints_outputs_and_refusals(monkeypatch, capsys, hist
         "solo-mode=false",
         "environment-prefix=",
         "env-prod=prod",
+        "env-breakglass=prod-breakglass",
+        "kind=prod",
+        "artifact=ayasee-prod-plan",
+        "plan-started-at=2026-11-14T09:50:00Z",
+        "requester=pusher",
     ]
     args[args.index("--triggering-actor") + 1] = "mallory"
     assert _cli(monkeypatch, *args) == 1
@@ -875,3 +883,478 @@ def test_the_gate_change_cli_reads_the_anchor_from_the_contents_api(tmp_path, mo
     respx.get(f"{API}/repos/{REPO}/contents/.ayasee.yaml").mock(return_value=httpx.Response(500))
     assert _cli(monkeypatch, *args) == 1
     assert "gate-changed" not in capsys.readouterr().out
+
+
+# ---- break-glass with the workflow gate (issue #40) ------------------------------------------
+#
+# A requester starts iac-breakglass: it plans prod and keeps ayasee-breakglass-plan-<sha>. A
+# reviewer of reviewers.breakglass, who is not the requester, starts iac-approve with the
+# incident: the same checks, with the break-glass reviewers and the request run.
+
+BG = "gate_mechanism: workflow\nreviewers: {prod: [rita], breakglass: [bruno, rita]}\n"
+BG_ENV = "iac-prod-breakglass"
+
+
+def _bg_artifact(art_id, run_id, *, sha=SHA, created="2026-11-14T10:00:00Z", expired=False):
+    # a dispatch runs on main's tip: the artifact's head_sha is not the commit planned
+    return {
+        "id": art_id,
+        "name": f"ayasee-breakglass-plan-{sha}",
+        "expired": expired,
+        "created_at": created,
+        "workflow_run": {"id": run_id, "head_sha": "c" * 40, "head_branch": "main"},
+    }
+
+
+def _bg_run(run_id, **kw):
+    base = {
+        "head_sha": "c" * 40,
+        "event": "workflow_dispatch",
+        "actor": {"login": "ron"},
+        "triggering_actor": {"login": "ron"},
+        "referenced_workflows": [
+            {"path": "tttao/ayasee/.github/workflows/iac-breakglass.yml@" + "f" * 40}
+        ],
+    }
+    base.update(kw)
+    _run(run_id, **base)
+
+
+def test_breakglass_reviewers_come_from_their_own_list():
+    cfg = parse_config_text(BG)
+    approve.check_reviewer(cfg, "Bruno", "breakglass")
+    with pytest.raises(Refused, match="ron is not in reviewers.breakglass"):
+        approve.check_reviewer(cfg, "ron", "breakglass")
+    with pytest.raises(Refused, match="reviewers.breakglass of the configuration on main is empty"):
+        approve.check_reviewer(parse_config_text(WORKFLOW), "rita", "breakglass")
+    with pytest.raises(Refused, match="prod-breakglass environment of iac-breakglass"):
+        approve.check_reviewer(parse_config_text(""), "rita", "breakglass")
+
+
+@pytest.mark.parametrize("incident", ["inc123", "INC", "ABC-", "ABC-1\n", "../x"])
+def test_a_malformed_incident_is_refused(incident):
+    with pytest.raises(Refused, match="incident must look like"):
+        approve.check_request(**_ok(incident=incident))
+
+
+@respx.mock
+def test_the_newest_breakglass_plan_of_the_sha_is_found(gh):
+    respx.get(
+        f"{API}/repos/{REPO}/actions/artifacts", params={"name": f"ayasee-breakglass-plan-{SHA}"}
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "artifacts": [
+                    _bg_artifact(1, 10, created="2026-11-13T10:00:00Z"),
+                    _bg_artifact(2, 20, created="2026-11-14T10:00:00Z"),
+                ]
+            },
+        )
+    )
+    _bg_run(20, triggering_actor={"login": "rerunner"})
+    plan = approve.find_plan(gh, REPO, SHA, "breakglass")
+    assert plan == approve.PlanRun(20, 2, ("ron", "rerunner"), "2026-11-14T09:50:00Z")
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "run, message",
+    [
+        ({"head_branch": "feature"}, "did not run on main"),
+        ({"event": "push"}, "not by a dispatch"),
+        ({"event": "workflow_run"}, "not by a dispatch"),
+        ({"conclusion": "failure"}, "not completed successfully"),
+        # a staged run's artifact cannot stand in for a break-glass request
+        (
+            {
+                "referenced_workflows": [
+                    {"path": "o/a/.github/workflows/iac-staged.yml@" + "f" * 40}
+                ]
+            },
+            "not a run of the ayasee iac-breakglass",
+        ),
+        ({"actor": None, "triggering_actor": None}, "no actor"),
+    ],
+)
+def test_a_breakglass_plan_from_the_wrong_run_is_refused(gh, run, message):
+    respx.get(f"{API}/repos/{REPO}/actions/artifacts").mock(
+        return_value=httpx.Response(200, json={"artifacts": [_bg_artifact(2, 20)]})
+    )
+    _bg_run(20, **run)
+    with pytest.raises(Refused, match=message):
+        approve.find_plan(gh, REPO, SHA, "breakglass")
+
+
+@respx.mock
+def test_a_missing_expired_or_undated_breakglass_plan_is_refused(gh):
+    route = respx.get(f"{API}/repos/{REPO}/actions/artifacts")
+    route.mock(
+        return_value=httpx.Response(200, json={"artifacts": [_bg_artifact(2, 20, sha="b" * 40)]})
+    )
+    with pytest.raises(Refused, match="no break-glass plan .* start iac-breakglass again"):
+        approve.find_plan(gh, REPO, SHA, "breakglass")
+    route.mock(
+        return_value=httpx.Response(200, json={"artifacts": [_bg_artifact(2, 20, expired=True)]})
+    )
+    with pytest.raises(Refused, match="expired"):
+        approve.find_plan(gh, REPO, SHA, "breakglass")
+    route.mock(return_value=httpx.Response(200, json={"artifacts": [_bg_artifact(2, 20)]}))
+    for started in (None, "", "2026-11-14 09:50"):
+        _bg_run(20, run_started_at=started)  # the replay check needs when the request started
+        with pytest.raises(Refused, match="run 20 has no readable time"):
+            approve.find_plan(gh, REPO, SHA, "breakglass")
+    route.mock(return_value=httpx.Response(502))
+    with pytest.raises(Refused, match="cannot list the break-glass plans"):
+        approve.find_plan(gh, REPO, SHA, "breakglass")
+
+
+def _bg_green(c2, author="alice", merged_by="mergy", requester="ron"):
+    respx.get(f"{API}/repos/{REPO}/collaborators/bruno/permission").mock(
+        return_value=httpx.Response(200, json={"permission": "write"})
+    )
+    respx.get(f"{API}/repos/{REPO}/environments/{BG_ENV}").mock(
+        return_value=httpx.Response(
+            200, json={"protection_rules": [], "deployment_branch_policy": CUSTOM}
+        )
+    )
+    respx.get(f"{API}/repos/{REPO}/environments/{BG_ENV}/deployment-branch-policies").mock(
+        return_value=httpx.Response(200, json={"branch_policies": [{"name": "main"}]})
+    )
+    respx.get(f"{API}/repos/{REPO}/actions/artifacts").mock(
+        return_value=httpx.Response(200, json={"artifacts": [_bg_artifact(2, 20, sha=c2)]})
+    )
+    _bg_run(20, actor={"login": requester}, triggering_actor={"login": requester})
+    respx.get(f"{API}/repos/{REPO}/commits/{c2}").mock(
+        return_value=httpx.Response(200, json={"author": {"login": author}, "committer": None})
+    )
+    respx.get(f"{API}/repos/{REPO}/commits/{c2}/pulls").mock(
+        return_value=httpx.Response(
+            200, json=[{"number": 7, "user": {"login": author}, "base": {"ref": "main"}}]
+        )
+    )
+    respx.get(f"{API}/repos/{REPO}/pulls/7").mock(
+        return_value=httpx.Response(200, json={"merged_by": {"login": merged_by}})
+    )
+
+
+def _bg_authorize(gh, history, cfg_text=BG, actor="bruno", incident="INC42"):
+    root, (_c1, c2, c3, _side, _c4) = history
+    return approve.authorize(
+        gh,
+        repo=REPO,
+        **_ok(sha=c2, actor=actor),
+        head=c3,
+        cfg=parse_config_text(cfg_text),
+        environment=BG_ENV,
+        root=root,
+        incident=incident,
+    )
+
+
+@respx.mock
+def test_a_breakglass_approval_runs_every_check(gh, history):
+    _bg_green(history[1][1])
+    plan, notes = _bg_authorize(gh, history)
+    assert plan.run_id == 20 and plan.pushers == ("ron", "ron") and notes == []
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "who, kw",
+    [
+        ("bruno", {"requester": "bruno"}),  # the requester never approves their own request
+        ("bruno", {"merged_by": "bruno"}),
+        ("bruno", {"author": "bruno"}),
+    ],
+    ids=["requester", "merger", "author"],
+)
+def test_a_breakglass_approver_is_independent_unless_solo_mode(gh, history, who, kw):
+    _bg_green(history[1][1], **kw)
+    with pytest.raises(Refused, match=f"{who} requested, wrote or merged it"):
+        _bg_authorize(gh, history, actor=who)
+    plan, notes = _bg_authorize(gh, history, BG + "solo_mode: true\n", actor=who)
+    assert notes[0].startswith("NON-COMPLIANT")
+
+
+@respx.mock
+def test_a_prod_reviewer_alone_cannot_approve_breakglass(gh, history):
+    # no route is mocked: refused before any API call
+    with pytest.raises(Refused, match="ron is not in reviewers.breakglass"):
+        _bg_authorize(gh, history, cfg_text=BG.replace("[rita]", "[ron]"), actor="ron")
+
+
+def _request(tmp_path, **kw):
+    doc = {
+        "schema": "ayasee.breakglass-request/v1",
+        "incident": "INC42",
+        "sha": SHA,
+        "allow_rollback": False,
+        "counts": {"critical": 0, "high": 1, "medium": 2, "total": 4},
+    }
+    doc.update(kw)
+    path = tmp_path / "request.json"
+    path.write_text(__import__("json").dumps(doc))
+    return path
+
+
+def test_the_breakglass_request_binds_the_incident_and_the_sha(tmp_path):
+    req = approve.check_request_file(_request(tmp_path), incident="INC42", sha=SHA)
+    assert req.allow_rollback is False and req.counts["total"] == 4
+    req = approve.check_request_file(
+        _request(tmp_path, allow_rollback=True), incident="INC42", sha=SHA
+    )
+    assert req.allow_rollback is True
+    with pytest.raises(Refused, match="another incident"):
+        approve.check_request_file(_request(tmp_path), incident="INC43", sha=SHA)
+    with pytest.raises(Refused, match="not for"):
+        approve.check_request_file(_request(tmp_path), incident="INC42", sha="b" * 40)
+    for bad in (
+        {"schema": "x"},
+        {"allow_rollback": "true"},
+        {"counts": {"critical": 0}},
+        {"counts": {"critical": -1, "high": 0, "medium": 0, "total": 0}},
+        {"counts": {"critical": True, "high": 0, "medium": 0, "total": 0}},
+    ):
+        with pytest.raises(Refused, match="malformed"):
+            approve.check_request_file(_request(tmp_path, **bad), incident="INC42", sha=SHA)
+    with pytest.raises(Refused, match="cannot read"):
+        approve.check_request_file(tmp_path / "missing.json", incident="INC42", sha=SHA)
+
+
+def test_the_request_cli_prints_allow_rollback_and_writes_counts(tmp_path, monkeypatch, capsys):
+    counts = tmp_path / "counts.json"
+    args = ["request", "--request", str(_request(tmp_path, allow_rollback=True))]
+    args += ["--incident", "INC42", "--sha", SHA, "--counts-out", str(counts)]
+    assert _cli(monkeypatch, *args) == 0
+    assert capsys.readouterr().out.strip() == "allow-rollback=true"
+    assert __import__("json").loads(counts.read_text())["medium"] == 2
+    args[args.index("--incident") + 1] = "INC43"
+    assert _cli(monkeypatch, *args) == 1
+    assert "allow-rollback" not in capsys.readouterr().out
+
+
+# ---- break-glass against the ledger ----------------------------------------------------------
+
+WF_BG_RITA = "gate_mechanism: workflow\nreviewers: {prod: [ron], breakglass: [rita]}\n"
+
+
+def _bg_history(tmp_path, anchor_text):
+    """main: c1 (the anchor's configuration) -> c2 (main adds bruno to reviewers.breakglass)."""
+    root = tmp_path / "bg"
+    root.mkdir()
+    _git("init", "-q", "-b", "main", cwd=root)
+    _git("config", "user.email", "t@example.invalid", cwd=root)
+    _git("config", "user.name", "t", cwd=root)
+    shas = []
+    for text in (anchor_text, anchor_text.replace("[rita]", "[rita, bruno]")):
+        (root / ".ayasee.yaml").write_text(text)
+        _git("add", ".", cwd=root)
+        _git("commit", "-q", "-m", "c", cwd=root)
+        shas.append(_git("rev-parse", "HEAD", cwd=root))
+    return root, shas
+
+
+def _bg_baseline(gh, store, root, sha, actor="rita", created="2026-11-06T13:00:00Z", solo=False):
+    return approve.baseline(
+        gh,
+        store,
+        repo=REPO,
+        sha=sha,
+        actor=actor,
+        run_id=20,
+        main_solo=solo,
+        config_path=".ayasee.yaml",
+        root=root,
+        role="breakglass",
+        plan_started_at=created,
+    )
+
+
+@respx.mock
+def test_breakglass_baseline_is_anchored_on_the_last_approved_apply(gh, tmp_path):
+    root, (c1, c2) = _bg_history(tmp_path, WF_BG_RITA)
+    store = _ledger(tmp_path, (c1, "ron"))
+    _compare(c1, c2, "alice")
+    assert _bg_baseline(gh, store, root, c2) == []
+    # bruno is listed on main only: the change that adds them cannot be their own approval
+    with pytest.raises(Refused, match="bruno was not in reviewers.breakglass at the last approved"):
+        _bg_baseline(gh, store, root, c2, actor="bruno")
+
+
+@respx.mock
+def test_breakglass_may_reapply_the_live_commit(gh, tmp_path):
+    root, (c1, _c2) = _bg_history(tmp_path, WF_BG_RITA)
+    store = _ledger(tmp_path, (c1, "ron"))
+    _compare(c1, c1)
+    assert _bg_baseline(gh, store, root, c1) == []  # a drift is undone with the live commit
+
+
+@respx.mock
+def test_breakglass_baseline_refuses_a_plan_older_than_the_prod_ledger(gh, tmp_path):
+    """A replay of an old approval, or a race with a newer apply: prod changed after the plan
+    was made (the ledger record is newer than the artifact)."""
+    root, (c1, c2) = _bg_history(tmp_path, WF_BG_RITA)
+    store = _ledger(tmp_path, (c1, "ron"))  # recorded 2026-11-06T12:00:00.000001Z
+    with pytest.raises(Refused, match="prod changed after this break-glass request started"):
+        _bg_baseline(gh, store, root, c2, created="2026-11-06T12:00:00Z")
+    for bad in ("", "yesterday", "2026-11-06T13:00:00"):
+        with pytest.raises(Refused, match="no readable time"):
+            _bg_baseline(gh, store, root, c2, created=bad)
+
+
+@respx.mock
+def test_breakglass_baseline_refuses_the_author_of_a_commit_since_the_anchor(gh, tmp_path):
+    root, (c1, c2) = _bg_history(tmp_path, WF_BG_RITA)
+    store = _ledger(tmp_path, (c1, "ron"))
+    _compare(c1, c2, "rita")
+    with pytest.raises(Refused, match="rita wrote a commit since"):
+        _bg_baseline(gh, store, root, c2)
+
+
+@respx.mock
+def test_breakglass_baseline_without_an_anchor_is_bootstrap_trust(gh, tmp_path):
+    root, (_c1, c2) = _bg_history(tmp_path, WF_BG_RITA)
+    (note,) = _bg_baseline(gh, FileStore(tmp_path / "empty"), root, c2)
+    assert note.startswith("DEVIATION: bootstrap trust") and "reviewers.breakglass" in note
+
+
+@respx.mock
+def test_breakglass_baseline_refuses_an_unreadable_ledger(gh, tmp_path, monkeypatch):
+    root, (_c1, c2) = _bg_history(tmp_path, WF_BG_RITA)
+    store = FileStore(tmp_path / "ledger")
+
+    def boom(*_a, **_k):
+        raise approve.LedgerError("unreachable")
+
+    monkeypatch.setattr(store, "current", boom)
+    with pytest.raises(Refused, match="cannot read the prod ledger"):
+        _bg_baseline(gh, store, root, c2)
+
+
+def test_a_change_of_the_breakglass_reviewers_is_a_gate_change(tmp_path):
+    anchor = "a" * 40
+    store = _ledger(tmp_path, (anchor, "rita"))
+    read = {anchor: WF_BG_RITA}.get
+    cfg = parse_config_text(WF_BG_RITA.replace("[rita]", "[rita, mallory]"))
+    changed, notes = approve.gate_change(store, REPO, cfg, read)
+    assert changed and "reviewers.breakglass" in notes[0]
+    assert approve.gate_change(store, REPO, parse_config_text(WF_BG_RITA), read) == (False, [])
+
+
+# ---- the break-glass approval issue ----------------------------------------------------------
+
+BG_ISSUE_ARGS = [
+    "breakglass-issue",
+    "--repo",
+    REPO,
+    "--incident",
+    "INC42",
+    "--sha",
+    SHA,
+    "--digest",
+    DIGEST,
+    "--run-url",
+    "https://github.com/acme/estate/actions/runs/21",
+    "--requester",
+    "ron",
+    "--critical",
+    "0",
+    "--high",
+    "1",
+    "--medium",
+    "2",
+    "--total",
+    "4",
+]
+
+
+@respx.mock
+def test_the_breakglass_issue_is_opened_then_rewritten(monkeypatch):
+    respx.get(f"{API}/repos/{REPO}/issues").mock(return_value=httpx.Response(200, json=[]))
+    created = respx.post(f"{API}/repos/{REPO}/issues").mock(
+        return_value=httpx.Response(201, json={"number": 8})
+    )
+    assert _cli(monkeypatch, *BG_ISSUE_ARGS, "--rollback-from", "b" * 40) == 0
+    sent = created.calls.last.request.content.decode()
+    assert "ayasee:breakglass-approval" in sent and "INC42" in sent and DIGEST in sent
+    assert "-f incident=INC42" in sent and "Rollback" in sent and "@ron" in sent
+    respx.get(f"{API}/repos/{REPO}/issues").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"number": 6, "title": "break-glass approval: INC4 aaaaaaaaaaaa"},
+                {"number": 8, "title": "break-glass approval: INC42 aaaaaaaaaaaa"},
+            ],
+        )
+    )
+    patched = respx.patch(f"{API}/repos/{REPO}/issues/8").mock(return_value=httpx.Response(200))
+    respx.post(f"{API}/repos/{REPO}/issues/8/comments").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+    assert _cli(monkeypatch, *BG_ISSUE_ARGS) == 0
+    assert "Rollback" not in patched.calls.last.request.content.decode()
+
+
+@pytest.mark.parametrize(
+    "flag, value",
+    [
+        ("--incident", SENTINEL),
+        ("--requester", SENTINEL + " x"),
+        ("--total", SENTINEL),
+        ("--run-url", "javascript:x"),
+        ("--digest", "x"),
+    ],
+)
+def test_the_breakglass_issue_refuses_anything_but_identifiers(monkeypatch, capsys, flag, value):
+    args = list(BG_ISSUE_ARGS)
+    args[args.index(flag) + 1] = value
+    assert _cli(monkeypatch, *args) == 1
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.out + captured.err
+
+
+@respx.mock
+def test_close_issue_closes_the_breakglass_issue_by_its_label(monkeypatch):
+    listed = respx.get(f"{API}/repos/{REPO}/issues").mock(
+        return_value=httpx.Response(200, json=[{"number": 8, "body": f"{SHA} {DIGEST}"}])
+    )
+    closed = respx.patch(f"{API}/repos/{REPO}/issues/8").mock(return_value=httpx.Response(200))
+    respx.post(f"{API}/repos/{REPO}/issues/8/comments").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+    args = ["close-issue", "--repo", REPO, "--sha", SHA, "--digest", DIGEST, "--breakglass"]
+    args += ["--run-url", "https://github.com/acme/estate/actions/runs/9", "--approver", "bruno"]
+    assert _cli(monkeypatch, *args) == 0
+    assert closed.called
+    assert "ayasee%3Abreakglass-approval" in str(listed.calls.last.request.url)
+
+
+@respx.mock
+def test_the_authorize_cli_names_the_breakglass_outputs(monkeypatch, capsys, history):
+    root, (_c1, c2, c3, _side, _c4) = history
+    (root / ".ayasee.yaml").write_text(BG)  # main's configuration, read from the working tree
+    _bg_green(c2)
+    for path in ("", "/deployment-branch-policies"):
+        respx.get(f"{API}/repos/{REPO}/environments/prod-breakglass{path}").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "protection_rules": [],
+                    "deployment_branch_policy": CUSTOM,
+                    "branch_policies": [{"name": "main"}],
+                },
+            )
+        )
+    monkeypatch.chdir(root)
+    args = ["authorize", "--repo", REPO, "--sha", c2, "--digest", DIGEST]
+    args += ["--ref", "refs/heads/main", "--event", "workflow_dispatch", "--actor", "bruno"]
+    args += ["--triggering-actor", "bruno", "--head", c3, "--config-path", ".ayasee.yaml"]
+    assert _cli(monkeypatch, *args, "--incident", "INC42") == 0
+    out = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())
+    assert out["kind"] == "breakglass" and out["requester"] == "ron"
+    assert out["artifact"] == f"ayasee-breakglass-plan-{c2}"
+    assert out["env-breakglass"] == "prod-breakglass"
+    assert out["plan-started-at"] == "2026-11-14T09:50:00Z"
+    assert _cli(monkeypatch, *args, "--incident", "nope") == 1
+    assert "incident must look like" in capsys.readouterr().err

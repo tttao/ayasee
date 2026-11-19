@@ -87,9 +87,13 @@ class PlanEncryptionConfig:
 @dataclass
 class ReviewersConfig:
     """The reviewers ayasee checks itself with ``gate_mechanism: workflow`` (D15). Read from the
-    configuration of ``main``, never from the commit being approved."""
+    configuration of ``main``, never from the commit being approved. ``breakglass`` approves a
+    break-glass request in that mode; it is optional (the break-glass run refuses without it), may
+    share people with ``prod``, but is not the same list (unless ``solo_mode``), as the bootstrap
+    requires of the two environments' reviewers."""
 
     prod: list[str] = field(default_factory=list)
+    breakglass: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -287,13 +291,22 @@ def _parse(raw: Any) -> Config:
                 "reviewers: only with gate_mechanism: workflow (with the environment gate the "
                 "reviewers are those of the prod environment, set by the bootstrap)"
             )
-        section = _mapping(top["reviewers"], "reviewers", {"prod"})
+        section = _mapping(top["reviewers"], "reviewers", {"prod", "breakglass"})
         if "prod" in section:
             cfg.reviewers.prod = _logins(section["prod"], "reviewers.prod")
+        if "breakglass" in section:
+            cfg.reviewers.breakglass = _logins(section["breakglass"], "reviewers.breakglass")
     if cfg.gate_mechanism == "workflow" and not cfg.reviewers.prod:
         raise ConfigError(
             "reviewers.prod: gate_mechanism: workflow needs at least one GitHub login that may "
             "approve a prod apply"
+        )
+    same = {x.lower() for x in cfg.reviewers.breakglass} == {x.lower() for x in cfg.reviewers.prod}
+    if cfg.reviewers.breakglass and same and not cfg.solo_mode:
+        raise ConfigError(
+            "reviewers.breakglass: must differ from reviewers.prod (unless solo_mode): the "
+            "emergency path has reviewers of its own, as prod-breakglass does with the "
+            "environment gate"
         )
     return cfg
 

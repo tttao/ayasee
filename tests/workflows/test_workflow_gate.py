@@ -1,6 +1,7 @@
 """gate_mechanism: workflow (issue #40, D15) in the workflows: iac-staged stops after prod-plan
 and opens an approval issue, iac-approve checks the reviewer before any secret and applies the
-bound plan, iac-pr switches the shared-unit plan off, iac-breakglass refuses."""
+bound plan, iac-pr switches the shared-unit plan off, iac-breakglass requests a break-glass plan
+that iac-approve applies with the incident."""
 
 import json
 import os
@@ -142,9 +143,11 @@ def test_iac_approve_is_only_callable():
     assert set(on["workflow_call"]["inputs"]) == {
         "sha",
         "manifest-digest",
+        "incident",
         "tool-mirror",
         "config-path",
     }
+    assert on["workflow_call"]["inputs"]["incident"]["default"] == ""
     staged_secrets = set(STAGED[True]["workflow_call"]["secrets"])
     assert set(on["workflow_call"]["secrets"]) <= staged_secrets
     assert all(v["required"] is False for v in on["workflow_call"]["secrets"].values())
@@ -185,6 +188,8 @@ def test_apply_runs_in_prod_after_verify_with_the_checks_before_any_secret():
     assert job["needs"] == "verify"
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "needs.verify.result == 'success'" in job["if"]
+    assert "inputs.incident == ''" in job["if"]
+    assert "needs.verify.outputs.kind == 'prod'" in job["if"]
     assert job["environment"] == "${{ needs.verify.outputs.env-prod }}"
     assert job["concurrency"] == {
         "group": "ayasee-${{ github.repository }}-prod",  # one queue with the staged prod jobs
@@ -329,25 +334,280 @@ def test_shared_changes_switches_the_plan_off_with_the_workflow_gate(tmp_path, b
     assert ("::warning::gate_mechanism: workflow" in proc.stdout) is not planned
 
 
-# ---- iac-breakglass: refused with the workflow gate --------------------------------------------
+# ---- iac-breakglass with the workflow gate: a request, approved with iac-approve -------------
+
+BG_CFG = "gate_mechanism: workflow\nreviewers: {prod: [rita], breakglass: [bruno]}\n"
 
 
-def test_breakglass_refuses_the_workflow_gate(tmp_path):
+@pytest.mark.parametrize(
+    "text, rc, gate",
+    [
+        ("", 0, "environment"),
+        (BG_CFG, 0, "workflow"),
+        (WORKFLOW, 1, None),  # nobody could approve: refused before anything runs
+    ],
+)
+def test_breakglass_reads_the_gate_and_its_reviewers_from_main(tmp_path, text, rc, gate):
     step = next(s for s in _steps(BREAKGLASS, "validate") if s.get("id") == "prefix")
     cfg = tmp_path / "ayasee.yaml"
+    cfg.write_text(text)
     out = tmp_path / "out.txt"
-    for text, rc in (("", 0), (WORKFLOW, 1)):
-        cfg.write_text(text)
-        out.write_text("")
-        proc = _run(
-            tmp_path,
-            step["run"],
-            CONFIG_PATH=str(cfg),
-            RUNNER_TEMP=str(tmp_path),
-            GITHUB_OUTPUT=str(out),
+    out.write_text("")
+    proc = _run(
+        tmp_path,
+        step["run"],
+        CONFIG_PATH=str(cfg),
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_OUTPUT=str(out),
+    )
+    assert proc.returncode == rc, proc.stderr
+    if gate:
+        assert _outputs(out)["gate-mechanism"] == gate
+    else:
+        assert "::error::gate_mechanism: workflow, but reviewers.breakglass" in proc.stdout
+
+
+def test_breakglass_jobs_split_on_the_gate_of_main():
+    jobs = BREAKGLASS["jobs"]
+    assert jobs["validate"]["outputs"]["gate-mechanism"] == (
+        "${{ steps.prefix.outputs.gate-mechanism }}"
+    )
+    # anything but workflow (an empty output included) keeps the environment gate and its check
+    assert jobs["breakglass"]["if"] == "${{ needs.validate.outputs.gate-mechanism != 'workflow' }}"
+    reviewers = next(
+        s for s in _steps(BREAKGLASS, "validate") if "require-reviewers" in s.get("run", "")
+    )
+    assert reviewers["if"] == "${{ steps.prefix.outputs.gate-mechanism != 'workflow' }}"
+    assert jobs["request"]["if"] == "${{ needs.validate.outputs.gate-mechanism == 'workflow' }}"
+    assert "needs.validate.outputs.gate-mechanism == 'workflow'" in jobs["request-issue"]["if"]
+
+
+def test_the_request_plans_with_the_plan_identity_and_applies_nothing():
+    job = BREAKGLASS["jobs"]["request"]
+    assert job["environment"] == "${{ needs.validate.outputs.environment-prefix }}prod-plan"
+    assert job["permissions"] == {"id-token": "write", "contents": "read"}
+    assert job["concurrency"]["group"] == "ayasee-${{ github.repository }}-prod-plan"
+    steps = job["steps"]
+    uses = [s.get("uses", "") for s in steps]
+    assert not any("/actions/apply@" in u or "/actions/ledger@" in u for u in uses)
+    ancestor = _index(
+        steps, lambda s: 'merge-base --is-ancestor "$SHA" origin/main' in s.get("run", "")
+    )
+    live = _index(steps, lambda s: s.get("id") == "live")
+    plan = _index(steps, lambda s: "/actions/plan@" in s.get("uses", ""))
+    policy = _index(steps, lambda s: "/actions/policy@" in s.get("uses", ""))
+    summary = _index(steps, lambda s: s.get("id") == "summary")
+    upload = _index(steps, lambda s: "upload-artifact" in s.get("uses", ""))
+    assert ancestor < live < plan < policy < summary < upload
+    assert steps[plan]["with"]["binding-mode"] == "encrypted_plan"
+    assert steps[plan]["with"]["encrypt"] == "true"
+    assert steps[plan]["with"]["expect-sha"] == "true"
+    assert "only-units" not in steps[plan]["with"]  # R71: the whole prod tree
+    assert steps[upload]["with"]["name"] == (
+        "ayasee-breakglass-plan-${{ needs.validate.outputs.sha }}"
+    )
+    assert "request-path" in steps[upload]["with"]["path"]
+    assert "json-dir" not in steps[upload]["with"]["path"]  # plan JSON never leaves the job
+    # provider and plan-key secrets reach the plan step only; ledger keys the rollback check
+    for i, step in enumerate(steps):
+        names = set(re.findall(r"secrets\.([A-Za-z_-]+)", json.dumps(step)))
+        if i == plan:
+            continue
+        assert names <= {
+            "ledger-token",
+            "AYASEE_LEDGER_AWS_ACCESS_KEY_ID",
+            "AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY",
+        }, (step.get("name") or step.get("uses"), names)
+        if names:
+            assert i == live
+
+
+def test_the_request_issue_job_has_no_environment_and_no_plan_secret():
+    job = BREAKGLASS["jobs"]["request-issue"]
+    assert "environment" not in job
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert set(re.findall(r"secrets\.([A-Za-z_-]+)", json.dumps(job))) <= {"teams-webhook"}
+    step = next(s for s in job["steps"] if "breakglass-issue" in s.get("run", ""))
+    assert step["env"]["DIGEST"] == "${{ needs.request.outputs.manifest-digest }}"
+    assert step["env"]["REQUESTER"] == "${{ github.actor }}"
+
+
+def test_the_request_summary_writes_counts_and_the_digest_only(tmp_path):
+    """Sentinel: the change set holds a value-like marker; request.json and the outputs carry
+    the incident, the SHA, allow-rollback, counts and the manifest's SHA-256 only."""
+    import hashlib
+
+    step = next(s for s in _steps(BREAKGLASS, "request") if s.get("id") == "summary")
+    changeset = tmp_path / "changeset.json"
+    changeset.write_text(
+        json.dumps(
+            {
+                "risk": {"critical": 1, "high": 0, "medium": 2},
+                "items": [{"address": f"x.{SENTINEL}", "after": SENTINEL}, {"address": "y"}],
+            }
         )
-        assert proc.returncode == rc, proc.stderr
-    assert "::error::break-glass is not available with gate_mechanism: workflow" in proc.stdout
+    )
+    plan_dir = tmp_path / "prod"
+    plan_dir.mkdir()
+    manifest = plan_dir / "manifest.json"
+    manifest.write_text('{"units": {"u": {}}}\n')
+    out = tmp_path / "out.txt"
+    out.write_text("")
+    sha = "a" * 40
+    proc = _run(
+        tmp_path,
+        step["run"],
+        "exit 1\n",
+        CHANGESET=str(changeset),
+        MANIFEST=str(manifest),
+        INCIDENT="INC42",
+        SHA=sha,
+        ALLOW_ROLLBACK="true",
+        GITHUB_OUTPUT=str(out),
+    )
+    assert proc.returncode == 0, proc.stderr
+    got = _outputs(out)
+    assert got["manifest-digest"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert (got["critical"], got["high"], got["medium"], got["total"]) == ("1", "0", "2", "2")
+    request = json.loads((plan_dir / "request.json").read_text())
+    assert request == {
+        "schema": "ayasee.breakglass-request/v1",
+        "incident": "INC42",
+        "sha": sha,
+        "allow_rollback": True,
+        "counts": {"critical": 1, "high": 0, "medium": 2, "total": 2},
+    }
+    from ayasee.approve import check_request_file
+
+    assert check_request_file(plan_dir / "request.json", incident="INC42", sha=sha).allow_rollback
+    text = out.read_text() + proc.stdout + proc.stderr + (plan_dir / "request.json").read_text()
+    assert SENTINEL not in text
+
+
+def test_breakglass_approval_runs_in_prod_breakglass_with_the_checks_before_any_secret():
+    job = APPROVE["jobs"]["breakglass"]
+    assert job["needs"] == "verify"
+    for cond in (
+        "github.ref == 'refs/heads/main'",
+        "needs.verify.result == 'success'",
+        "inputs.incident != ''",
+        "needs.verify.outputs.kind == 'breakglass'",
+    ):
+        assert cond in job["if"]
+    assert job["environment"] == "${{ needs.verify.outputs.env-breakglass }}"
+    assert job["concurrency"] == {
+        "group": "ayasee-${{ github.repository }}-prod",
+        "cancel-in-progress": False,
+    }
+    assert job["permissions"] == APPROVE["jobs"]["apply"]["permissions"]
+    steps = job["steps"]
+    assert steps[0]["name"] == "Refuse a re-run by another person"
+    assert steps[0]["run"] == APPROVE["jobs"]["apply"]["steps"][0]["run"]
+    # no guard: stop-the-line is not enforced on the emergency path, as with the environment gate
+    assert not any("/actions/guard@" in s.get("uses", "") for s in steps)
+    ancestor = _index(
+        steps, lambda s: 'merge-base --is-ancestor "$SHA" origin/main' in s.get("run", "")
+    )
+    download = _index(steps, lambda s: "download-artifact" in s.get("uses", ""))
+    request = _index(steps, lambda s: s.get("id") == "request")
+    live = _index(steps, lambda s: s.get("id") == "live")
+    baseline = _index(steps, lambda s: "approve baseline" in s.get("run", ""))
+    apply = _index(steps, lambda s: "/actions/apply@" in s.get("uses", ""))
+    ledger = _index(steps, lambda s: "/actions/ledger@" in s.get("uses", ""))
+    post = _index(steps, lambda s: "issue post-approval" in s.get("run", ""))
+    assert ancestor < download < request < live < baseline < apply < ledger < post
+    assert steps[download]["with"]["name"] == "${{ needs.verify.outputs.artifact }}"
+    assert steps[download]["with"]["run-id"] == "${{ needs.verify.outputs.run-id }}"
+    assert "approve digest" in steps[request]["run"] and "approve request" in steps[request]["run"]
+    assert "--role breakglass" in steps[baseline]["run"]
+    assert (
+        steps[baseline]["env"]["PLAN_STARTED_AT"] == "${{ needs.verify.outputs.plan-started-at }}"
+    )
+    assert steps[live]["env"]["ALLOW_ROLLBACK"] == "${{ steps.request.outputs.allow-rollback }}"
+    assert steps[apply]["with"]["binding-mode"] == "encrypted_plan"
+    assert steps[apply]["env"]["SG_SHA"] == "${{ inputs.sha }}"
+    w = steps[ledger]["with"]
+    assert w["approver"] == "${{ needs.verify.outputs.approver }}"
+    assert w["requester"] == "${{ needs.verify.outputs.requester }}"
+    assert w["breakglass-incident"] == "${{ inputs.incident }}"
+    assert (
+        "always()" in steps[post]["if"] and "steps.apply.outcome != 'skipped'" in steps[post]["if"]
+    )
+    ledger_keys = {"ledger-token", "AYASEE_LEDGER_AWS_ACCESS_KEY_ID"}
+    ledger_keys.add("AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY")
+    for i, step in enumerate(steps):
+        names = set(re.findall(r"secrets\.([A-Za-z_-]+)", json.dumps(step)))
+        if i == apply:
+            continue
+        if names - {"teams-webhook"}:
+            assert names <= ledger_keys, (step.get("name") or step.get("uses"), names)
+            assert i in (live, baseline, ledger)
+
+
+def test_verify_downloads_the_artifact_that_authorize_named():
+    steps = APPROVE["jobs"]["verify"]["steps"]
+    authorize = next(s for s in steps if s.get("id") == "authorize")
+    assert authorize["env"]["INCIDENT"] == "${{ inputs.incident }}"
+    assert '--incident "$INCIDENT"' in authorize["run"]
+    download = next(s for s in steps if "download-artifact" in s.get("uses", ""))
+    assert download["with"]["name"] == "${{ steps.authorize.outputs.artifact }}"
+    outputs = APPROVE["jobs"]["verify"]["outputs"]
+    for key in ("kind", "artifact", "plan-started-at", "requester", "env-breakglass"):
+        assert outputs[key] == f"${{{{ steps.authorize.outputs.{key} }}}}"
+
+
+@pytest.mark.parametrize(
+    "kind, incident, body, rc",
+    [
+        ("prod", "", "exit 0\n", 0),
+        ("prod", "INC1", "exit 0\n", 1),  # a prod plan is never approved as a break-glass one
+        ("breakglass", "INC1", "exit 0\n", 0),
+        ("breakglass", "INC1", 'if [ "$2" = request ]; then exit 1; fi\n', 1),
+        ("", "", "exit 0\n", 1),
+    ],
+)
+def test_verify_checks_the_request_of_a_breakglass_plan(tmp_path, kind, incident, body, rc):
+    step = next(
+        s for s in APPROVE["jobs"]["verify"]["steps"] if "approve digest" in s.get("run", "")
+    )
+    # the shim gets "approve <action> ...": $1 is approve, $2 the action
+    proc = _run(
+        tmp_path,
+        step["run"],
+        body,
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_STEP_SUMMARY=str(tmp_path / "summary.md"),
+        GITHUB_ACTOR="bruno",
+        SHA="a" * 40,
+        DIGEST="d" * 64,
+        INCIDENT=incident,
+        KIND=kind,
+    )
+    assert proc.returncode == rc, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize(
+    "out, rc",
+    [("allow-rollback=true", 0), ("allow-rollback=false", 0), ("allow-rollback=maybe", 1)],
+)
+def test_the_breakglass_request_step_fails_closed(tmp_path, out, rc):
+    step = next(s for s in APPROVE["jobs"]["breakglass"]["steps"] if s.get("id") == "request")
+    gh_out = tmp_path / "out.txt"
+    gh_out.write_text("")
+    body = f'if [ "$2" = request ]; then echo "{out}"; fi\nexit 0\n'
+    proc = _run(
+        tmp_path,
+        step["run"],
+        body,
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_OUTPUT=str(gh_out),
+        SHA="a" * 40,
+        DIGEST="d" * 64,
+        INCIDENT="INC1",
+    )
+    assert proc.returncode == rc
+    if rc == 0:
+        assert _outputs(gh_out)["allow-rollback"] == out.split("=")[1]
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,42 @@ released version into the GitHub release notes.
 
 ### Added
 
+- **Break-glass with `gate_mechanism: workflow`** (#40, decisions
+  [D3 and D15](docs/governance/decisions.md#break-glass-with-the-workflow-gate)): the emergency
+  path no longer refuses to run in that mode. It is a request and an approval, with the guarantees
+  of the prod gate of that mode.
+  - `.ayasee.yaml`: `reviewers.breakglass`, the GitHub logins that may approve a break-glass
+    request (only with `workflow`; `iac-breakglass` refuses without it). It may share people with
+    `reviewers.prod` but not be the same list, unless `solo_mode`. A change of it is a change of
+    the gate settings, which always needs a prod approval.
+  - **`iac-breakglass`**, in this mode (read from `main`): a `request` job plans the whole prod tree
+    in `prod-plan` (the plan identity), runs the policy pack and the rollback rule, and keeps the
+    encrypted plan, its manifest and `request.json` (incident, SHA, allow-rollback, counts) as
+    `ayasee-breakglass-plan-<sha>`; a `request-issue` job (no environment, no secret) opens an
+    `ayasee:breakglass-approval` issue with the digest. Nothing is applied. The job of the
+    environment gate is unchanged.
+  - **`iac-approve`** gains an optional `incident` input: with it, the run approves a break-glass
+    request. `verify` checks the reviewer in `reviewers.breakglass` of `main`, the newest plan of a
+    successful `iac-breakglass` dispatch on `main`, its digest and `request.json`, and that the
+    approver is not the requester (the request run's actor or triggering actor) and did not write
+    or merge the change, unless `solo_mode`. A new `breakglass` job applies in `prod-breakglass`:
+    no guard (as before), the rollback rule again, the ledger checks of the break-glass role
+    (listed at the last approved apply too; no commit since; the plan is refused once prod changed
+    after it was made, so an old approval cannot be replayed), the apply of exactly that plan, the
+    ledger record with the incident, the approver and the requester, and the post-approval issue.
+  - The ledger record gains an optional `requester` (`ayasee ledger write --requester`, `requester`
+    input of the ledger action); records without it keep their shape.
+  - New `ayasee approve request` and `ayasee approve breakglass-issue`; `approve authorize
+    --incident`, `approve baseline --role breakglass --plan-started-at`, `approve close-issue
+    --breakglass`, `issue post-approval --counts-json --requester`.
+  - `ayasee doctor`: every login of `reviewers.breakglass` needs write access; an `iac-breakglass`
+    caller without `reviewers.breakglass` is a warning (no emergency path), and one whose
+    `iac-approve` caller does not pass `incident` a failure; the
+    environments, secrets and variables of the request (`prod-plan`) and of the break-glass apply
+    (`prod-breakglass`) are checked. `github-environments` keeps `prod-breakglass` main-only and
+    bare of reviewers, as before. The example `iac-approve` callers (written by `ayasee init`)
+    pass `incident`, and the scaffolded `.ayasee.yaml` of the workflow gate shows
+    `reviewers.breakglass` as a comment.
 - **The pull-request plan of shared units with `gate_mechanism: workflow`** (#40, adopter
   blocker 3, [D15](docs/governance/decisions.md#d15-the-workflow-gate)): a new reusable workflow,
   **`iac-pr-shared`**, that a prod reviewer starts on `main` with a pull request's number and
@@ -69,9 +105,8 @@ released version into the GitHub release notes.
   - `github-environments`: new `gate_mechanism`. With `workflow`, no environment carries
     reviewers (`prod_reviewers` and `breakglass_reviewers` are left unset), and
     `private_repository_plan = "free"` is accepted: the environments are created bare (no branch policy, no marker variable) and `secret_commands` lists repository secrets.
-  - Not in this mode yet: break-glass (`iac-breakglass` refuses to run); `iac-pr` never plans
-    shared units in this mode (it reads the mode of the base commit too, so a pull request cannot
-    switch its own plan back on; see `iac-pr-shared` above).
+  - `iac-pr` never plans shared units in this mode (it reads the mode of the base commit too, so
+    a pull request cannot switch its own plan back on; see `iac-pr-shared` above).
 - **`ayasee init` chooses the prod gate from the GitHub plan** (#40): a private repository it
   reads as GitHub Free, Pro or Team gets `gate_mechanism: workflow`, the `iac-approve` caller
   (pinned like the other callers, with exactly the permissions of the reusable workflow's jobs

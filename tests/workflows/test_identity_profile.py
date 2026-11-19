@@ -151,7 +151,9 @@ def test_deviations_are_labelled_in_the_run_summary(name):
                 assert step["env"]["CONFIG_PATH"] == "${{ inputs.config-path }}"
                 assert '"::warning::$line"' in run and "$GITHUB_STEP_SUMMARY" in run
                 assert "if" not in step and "continue-on-error" not in step
-    assert len(labelled) == 1, labelled
+    # iac-breakglass: the job of the environment gate, or the request of the workflow gate
+    expected = ["breakglass", "request"] if name == "iac-breakglass.yml" else labelled[:1]
+    assert labelled == expected, labelled
 
 
 def test_label_step_behaviour(tmp_path):

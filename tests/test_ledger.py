@@ -13,6 +13,7 @@ from ayasee.ledger import (
     FileStore,
     GitBranchStore,
     LedgerError,
+    LedgerRecord,
     UnitResult,
     open_store,
     record_from_run,
@@ -794,3 +795,25 @@ def test_record_from_dict_wrong_shape_is_ledger_error():
     for bad in ([1, 2], "x", None, {"repo": 1}):
         with pytest.raises(LedgerError):
             LedgerRecord.from_dict(bad)
+
+
+def test_a_breakglass_record_carries_the_requester(tmp_path, units_file, capsys):
+    """Break-glass of the workflow gate (issue #40): the record names who asked for the change
+    as well as who approved it. A record without a requester keeps its old shape."""
+    import ayasee.ledger  # noqa: F401
+
+    extra = ("--approver", "rita", "--breakglass-incident", "INC7", "--requester", "ron")
+    assert cli.main(_write_args(tmp_path, units_file, *extra)) == 0
+    capsys.readouterr()
+    store = f"file://{tmp_path / 'st'}"
+    assert cli.main(["ledger", "show", "--store", store, "--repo", REPO, "--env", "prod"]) == 0
+    cur = json.loads(capsys.readouterr().out)
+    assert (cur["approver"], cur["requester"]) == ("rita", "ron")
+    assert cur["breakglass_incident"] == "INC7"
+    rec = LedgerRecord.from_dict(cur)
+    assert rec.requester == "ron" and rec.to_dict() == cur
+    old = {k: v for k, v in cur.items() if k != "requester"}
+    rec = LedgerRecord.from_dict(old)
+    assert rec.requester is None and rec.to_dict() == old
+    with pytest.raises(LedgerError, match="malformed"):
+        LedgerRecord.from_dict({**cur, "requester": 7})

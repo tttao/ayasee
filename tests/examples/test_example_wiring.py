@@ -176,7 +176,10 @@ def test_triggers():
     assert set(bg["workflow_dispatch"]["inputs"]) == {"incident", "sha", "allow-rollback"}
     approve = _on(_yaml(CALLERS / "iac-approve.yml"))
     assert set(approve) == {"workflow_dispatch"}
-    assert set(approve["workflow_dispatch"]["inputs"]) == {"sha", "manifest-digest"}
+    # incident: a break-glass approval of the workflow gate (#40); optional, empty for prod
+    inputs = approve["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"sha", "manifest-digest", "incident"}
+    assert inputs["incident"]["required"] is False and inputs["incident"]["default"] == ""
     for caller in CALLS:
         assert "pull_request_target" not in _on(_yaml(CALLERS / caller)), caller
 
@@ -202,6 +205,8 @@ def _called_environments() -> set[str]:
                     found.add(pr_plan_environment(stages))
                 elif env == "${{ needs.verify.outputs.env-prod }}":  # iac-approve
                     found.add("prod")
+                elif env == "${{ needs.verify.outputs.env-breakglass }}":  # its break-glass
+                    found.add("prod-breakglass")
                 elif env in (
                     "${{ needs.resolve.outputs.env-prod-plan }}",
                     "${{ needs.resolve.outputs.env-prod }}",

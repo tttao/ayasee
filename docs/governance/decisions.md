@@ -9,7 +9,7 @@ the reason and the trade-off (see [governance](../../GOVERNANCE.md#how-decisions
 |---|---|---|---|
 | D1 | Prod plan binding | (a) encrypted saved plan and hash; (b) re-plan with strict equality, including a hash of the non-sensitive `after` values; (c) re-plan and accept a subset | **(a)**, with (b) as the fallback where encryption keys are not available; (c) is dropped |
 | D2 | Approval independence | Self-approval allowed or prevented | **Prevented**, admin bypass disallowed; `solo_mode: true` is an opt-in, labelled non-compliant for DORA, SOX and ISO |
-| D3 | Break-glass path | Admin bypass; a dedicated `prod-breakglass` environment with its own reviewers and an incident reference; none | **Dedicated environment**, which always opens a post-implementation approval issue (DORA RTS Art. 17(1)(g)) |
+| D3 | Break-glass path | Admin bypass; a dedicated `prod-breakglass` environment with its own reviewers and an incident reference; none | **Dedicated environment**, which always opens a post-implementation approval issue (DORA RTS Art. 17(1)(g)); with the workflow gate (D15), a request and an approval by `reviewers.breakglass` ([details](#break-glass-with-the-workflow-gate)) |
 | D4 | Concurrency | `queue: single` (newest wins) or `queue: max` (first in, first out) | **single**, with whole-tree applies and rejection of a stale SHA; `max` only after GHES parity is verified |
 | D5 | Source of truth for the live SHA | Deployments API or a backend ledger | **Backend ledger** written by the stage identity; GitHub deployments are a projection of it |
 | D6 | Engines | OpenTofu only; OpenTofu and Terraform; plus Terragrunt | **OpenTofu and Terragrunt first** (plan encryption needs OpenTofu); plain Terraform as a secondary profile using D1(b) |
@@ -54,7 +54,8 @@ watch.
 
 **A change of the gate settings always needs an approval.** With the workflow gate on either side
 (the commit planned, or the last approved commit), a change of `gate_mechanism`,
-`reviewers.prod` or `solo_mode` against the last approved commit is never promoted in sync, even
+`reviewers.prod`, `reviewers.breakglass` or `solo_mode` against the last approved commit is never
+promoted in sync, even
 when its plan is empty: `prod-plan` reports `gate-changed` and the run goes to `prod-approval` (or,
 when the commit sets the environment gate, to the `prod` job and its GitHub reviewers). The
 approval is recorded in the ledger and becomes the new anchor. So:
@@ -91,8 +92,6 @@ callers on `main` can remove it. How much else holds depends on the plan:
 | Public, or private on GitHub Enterprise | yes | yes | yes | Everything below, but the default gate is stronger: use `environment` |
 | Private on GitHub Pro or Team | no | yes | yes | The prod secrets reach only jobs on `main` in the prod environment; reaching the apply needs a listed reviewer, checked as above; changing the reviewers or the gate needs a pull request on `main`, which a ruleset can require a review for |
 | Private on GitHub Free | no | **no** | **no** | Every apply waits for a listed reviewer and applies only the approved plan, but the prod secrets are repository secrets that any collaborator with write access can read from a workflow of any branch, every stage reads the same secrets, and anyone with write access can push to `main`. It stops mistakes and unreviewed applies, not a collaborator who means harm: keep the collaborators with write access to the reviewers |
-
-Break-glass (D3) has no workflow-gate form yet: in this mode `iac-breakglass` refuses to run.
 
 **The pull-request plan of shared units.** With the environment gate, `plan-shared` of `iac-pr`
 runs a pull request's code with a read-only prod identity after a prod reviewer approves its
@@ -144,6 +143,43 @@ as with `prevent_self_review`; and the decision binds one commit.
   for its commits. Who pushed a commit is not visible; a commit without a GitHub login is
   reported, not refused; a pull request of 250 commits or more is refused (the API lists no more).
 - The comment is advisory: the pull request's code produced the plan it summarises.
+
+### Break-glass with the workflow gate
+
+D3 rests on the reviewers of the `prod-breakglass` environment, which the workflow gate does not
+have. So in this mode break-glass is a request and an approval, with the guarantees of the prod
+gate above and its own reviewer list, `reviewers.breakglass`:
+
+- **The request.** Anyone with write access starts `iac-breakglass` on `main` with an incident,
+  a commit of `main` and `allow-rollback`, as with the environment gate. Since nobody approves
+  before the plan exists, the plan is made first, in `prod-plan` with the plan identity (never the
+  apply identity of `prod-breakglass`): the whole prod tree, encrypted, checked by the policy pack
+  and the rollback rule. It is kept as the artifact `ayasee-breakglass-plan-<sha>` with a
+  `request.json` (incident, SHA, allow-rollback, change counts), and an `ayasee:breakglass-approval`
+  issue gives the digest of its manifest. Nothing is applied.
+- **The approval.** A login of `reviewers.breakglass` starts `iac-approve` with that incident, SHA
+  and digest. `verify` runs every check of the prod gate with the break-glass role: the list is
+  read at `main` and must also hold the approver at the last approved apply (a prod or a
+  break-glass approval, the same anchor), the plan is the newest of a successful `iac-breakglass`
+  dispatch on `main` and has exactly that digest, `request.json` names the same incident and
+  commit, and the approver is not the requester (the request run's actor or triggering actor) and
+  did not write or merge the change nor any commit since the anchor, unless `solo_mode` (at both
+  commits, as for prod). The `breakglass` job then applies exactly that plan in `prod-breakglass`
+  (D1) and records the incident, the approver and the requester in the ledger. The post-approval
+  issue is opened as with the environment gate.
+- **Replay and races.** The plan is refused once the prod ledger has a record as new as or newer
+  than the start of the request run (`run_started_at` of its latest attempt, which precedes the
+  plan): after any apply since, an old approval cannot be replayed, and a request that lost a race
+  with another apply is made again. OpenTofu's stale-plan check stands behind it.
+- **What stays as with the environment gate.** No guard: stop-the-line is not enforced, so an
+  emergency fix ships while a stage is red. The rollback rule, the policy pack, `main` only, the
+  incident format and the whole prod tree (R71).
+- **What differs.** The plan is reviewed before the apply (the approver sees the change counts and
+  the run), which the environment gate cannot do. A cascading change (R52) is refused, as for any
+  saved prod plan. `reviewers.breakglass` may share people with `reviewers.prod` but not be the
+  same list, unless `solo_mode`, as the bootstrap requires of the two environments. A break-glass
+  approval is an approval: it becomes the anchor of the gate settings, so a commit that changes
+  them and goes live by break-glass was approved by an independent break-glass reviewer.
 
 `R17`, `R52` and similar numbers in the docs and the code are rulings made during implementation:
 narrower choices that follow from these decisions. Each is explained at the place that cites it.

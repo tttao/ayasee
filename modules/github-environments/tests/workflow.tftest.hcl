@@ -40,6 +40,17 @@ run "a_private_repository_on_team_keeps_main_only_environments" {
     error_message = "prod deploys from main"
   }
 
+  # break-glass of the workflow gate applies in prod-breakglass: main only, like prod
+  assert {
+    condition     = length(github_repository_environment.this["prod-breakglass"].deployment_branch_policy) == 1 && github_repository_environment_deployment_policy.main["prod-breakglass"].branch_pattern == "main"
+    error_message = "prod-breakglass stays restricted to main"
+  }
+
+  assert {
+    condition     = strcontains(output.secret_commands, "gh secret set AYASEE_PLAN_PASSPHRASE --env prod-breakglass")
+    error_message = "the break-glass apply holds the plan key"
+  }
+
   assert {
     condition     = strcontains(output.secret_commands, "gh secret set AYASEE_PLAN_PASSPHRASE --env prod")
     error_message = "the plan key stays an environment secret where the plan has them"

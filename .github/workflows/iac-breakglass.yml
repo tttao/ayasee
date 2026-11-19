@@ -11,6 +11,16 @@
 # deny rules fail the run) as the machine check standing in for the review of the plan; Trivy is not run.
 # The post-approval issue is the record.
 #
+# gate_mechanism: workflow (D15, issue #40), read from main: there are no environment reviewers to
+# wait for, so this run is the REQUEST half of break-glass. The `request` job plans the whole prod
+# tree in prod-plan (the plan identity, never the apply one), runs the policy pack, checks the
+# rollback rule and keeps the encrypted plan, its manifest and request.json (incident, sha,
+# allow-rollback, counts) as the artifact ayasee-breakglass-plan-<sha>; `request-issue` (no
+# environment, no secret) opens an ayasee:breakglass-approval issue with the manifest digest. A
+# login of reviewers.breakglass of main, who is not the requester, then applies exactly that plan
+# with iac-approve and the incident (docs/compliance/dora-art17.md). Main must list
+# reviewers.breakglass; nothing here applies anything.
+#
 # Break-glass always plans and applies the whole prod tree (R71): unchanged units are no-ops, so the
 # ledger record of prod stays truthful for every unit.
 #
@@ -184,6 +194,8 @@ jobs:
       sha: ${{ steps.validate.outputs.sha }}
       allow-rollback: ${{ steps.validate.outputs.allow-rollback }}
       environment-prefix: ${{ steps.prefix.outputs.environment-prefix }}
+      gate-mechanism: ${{ steps.prefix.outputs.gate-mechanism }}
+      ledger-url: ${{ steps.prefix.outputs.ledger-url }}
     steps:
       - name: Require the main branch
         env:
@@ -228,22 +240,32 @@ jobs:
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: prefix
-        name: Read environment_prefix from main
+        name: Read environment_prefix and the gate from main
         env:
           CONFIG_PATH: ${{ inputs.config-path }}
         run: |
           ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
-          echo "environment-prefix=$(jq -r '.environment_prefix' "$RUNNER_TEMP/ayasee-config.json")" >>"$GITHUB_OUTPUT"
-          # D15: break-glass rests on the reviewers of prod-breakglass; with gate_mechanism:
-          # workflow there are none, and the break-glass path of that mode is not built yet
-          gate="$(jq -er '.gate_mechanism' "$RUNNER_TEMP/ayasee-config.json")"
-          [ "$gate" = environment ] || {
-            echo "::error::break-glass is not available with gate_mechanism: workflow yet (issue #40); apply prod through the staged run and iac-approve"
-            exit 1
-          }
+          cfg="$RUNNER_TEMP/ayasee-config.json"
+          gate="$(jq -er '.gate_mechanism' "$cfg")"
+          {
+            echo "environment-prefix=$(jq -r '.environment_prefix' "$cfg")"
+            echo "gate-mechanism=$gate"
+            echo "ledger-url=$(jq -r '.ledger.url // ""' "$cfg")"
+          } >>"$GITHUB_OUTPUT"
+          # D15: with gate_mechanism: workflow there are no environment reviewers; a login of
+          # reviewers.breakglass of main approves the plan with iac-approve, so main must list one
+          if [ "$gate" = workflow ]; then
+            n="$(jq -er '.reviewers.breakglass | length' "$cfg")"
+            [ "$n" -gt 0 ] || {
+              echo "::error::gate_mechanism: workflow, but reviewers.breakglass of .ayasee.yaml on main is empty: nobody could approve a break-glass request. Add it by a pull request (a change of the gate settings, approved like a prod change)"
+              exit 1
+            }
+          fi
       # issue #39: the break-glass job is gated only by the reviewers of its environment; without
-      # them (none set, not created yet, or a plan that ignores them) it would apply unapproved
+      # them (none set, not created yet, or a plan that ignores them) it would apply unapproved.
+      # Anything but workflow (an empty output included) keeps this check.
       - name: Refuse a break-glass environment without required reviewers
+        if: ${{ steps.prefix.outputs.gate-mechanism != 'workflow' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -259,9 +281,10 @@ jobs:
           [ -z "$notes" ] || while IFS= read -r line; do echo "::notice::$line"; done <<<"$notes"
 
   breakglass:
-    # plan and apply in one job behind the prod-breakglass reviewers
+    # plan and apply in one job behind the prod-breakglass reviewers (the environment gate)
     name: breakglass
     needs: validate
+    if: ${{ needs.validate.outputs.gate-mechanism != 'workflow' }}
     runs-on: ubuntu-latest
     environment: ${{ needs.validate.outputs.environment-prefix }}prod-breakglass
     permissions:
@@ -551,4 +574,281 @@ jobs:
           env: prod
           sha: ${{ needs.validate.outputs.sha }}
           run-url: ${{ env.RUN_URL }}
+          teams-webhook: ${{ secrets.teams-webhook }}
+
+  request:
+    # gate_mechanism: workflow (D15): plan the whole prod tree with the plan identity and keep the
+    # encrypted plan for a reviewer of reviewers.breakglass; nothing is applied here
+    name: request
+    needs: validate
+    if: ${{ needs.validate.outputs.gate-mechanism == 'workflow' }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.validate.outputs.environment-prefix }}prod-plan
+    permissions:
+      id-token: write # OIDC login to Azure and Databricks
+      contents: read # check out the code
+    concurrency:
+      group: ayasee-${{ github.repository }}-prod-plan
+      cancel-in-progress: false
+    outputs:
+      manifest-digest: ${{ steps.summary.outputs.manifest-digest }}
+      critical: ${{ steps.summary.outputs.critical }}
+      high: ${{ steps.summary.outputs.high }}
+      medium: ${{ steps.summary.outputs.medium }}
+      total: ${{ steps.summary.outputs.total }}
+      rollback-from: ${{ steps.live.outputs.rollback-from }}
+    env:
+      AYASEE_LEDGER_URL: ${{ vars.AYASEE_LEDGER_URL || needs.validate.outputs.ledger-url }}
+    steps:
+      - name: Require a ledger URL
+        run: |
+          [ -n "$AYASEE_LEDGER_URL" ] || {
+            echo "::error::no ledger URL: set AYASEE_LEDGER_URL on the prod-plan environment or ledger.url in .ayasee.yaml"
+            exit 1
+          }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Refuse a commit that is not on main
+        env:
+          SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          git rev-parse --verify --quiet "refs/remotes/origin/main^{commit}" >/dev/null || {
+            echo "::error::origin/main was not fetched; cannot check that $SHA is on main"
+            exit 1
+          }
+          rc=0
+          git merge-base --is-ancestor "$SHA" origin/main || rc=$?
+          case "$rc" in
+            0) ;;
+            1) echo "::error::$SHA is not an ancestor of origin/main; break-glass only deploys reviewed, merged commits"
+               exit 1 ;;
+            *) echo "::error::cannot check whether $SHA is on main (git exit $rc)"
+               exit 1 ;;
+          esac
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - name: Refuse settings that are not supported yet (R35, R73)
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          if ! problems="$(ayasee config check-supported --path "$CONFIG_PATH" 2>&1)"; then
+            while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
+            exit 1
+          fi
+      - name: Label deviations from the compliant defaults
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          # gate_mechanism: workflow (D15) is itself a deviation; say so on every run
+          labels="$(ayasee config labels --path "$CONFIG_PATH")"
+          [ -n "$labels" ] || exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$labels"
+      - id: cfg
+        name: Read the configuration
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          ayasee config show --path "$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-config.json"
+          cfg="$RUNNER_TEMP/ayasee-config.json"
+          {
+            echo "units-root=$(jq -er '.units_root' "$cfg")"
+            echo "engine=$(jq -er '.engine' "$cfg")"
+            echo "identity=$(jq -er '.identity' "$cfg")"
+            echo "provider-env-names=$(jq -r '.provider_env | join(",")' "$cfg")"
+            echo "key-provider=$(jq -er '.plan_encryption.key_provider' "$cfg")"
+            echo "shared-units=$(jq -r '.shared_units | join(",")' "$cfg")"
+            echo "allow-cascade=$(jq -r '.allow_cascade' "$cfg")"
+          } >>"$GITHUB_OUTPUT"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ steps.cfg.outputs.identity == 'oidc' }}
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - id: live
+        name: Refuse a rollback unless allow-rollback is true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
+          GIT_CONFIG_COUNT: ${{ secrets.ledger-token && '1' || '0' }}
+          GIT_CONFIG_KEY_0: credential.${{ github.server_url }}.helper
+          GIT_CONFIG_VALUE_0: '!f() { echo username=x-access-token; echo "password=$AYASEE_LEDGER_TOKEN"; }; f'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AYASEE_LEDGER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_LEDGER_AWS_SECRET_ACCESS_KEY }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.validate.outputs.sha }}
+          ALLOW_ROLLBACK: ${{ needs.validate.outputs.allow-rollback }}
+        run: |
+          # checked again against the ledger when the plan is approved (iac-approve)
+          ayasee ledger show --store "$AYASEE_LEDGER_URL" --repo "$REPO" --env prod \
+            >"$RUNNER_TEMP/ledger-prod.json"
+          live="$(jq -r '.sha // ""' "$RUNNER_TEMP/ledger-prod.json")"
+          if [ -z "$live" ]; then
+            echo "::notice::no ledger record for prod; first deploy, no rollback check"
+            echo "rollback-from=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$live" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::the ledger record of prod has no valid commit SHA"
+            exit 1
+          }
+          git cat-file -e "$live^{commit}" 2>/dev/null || {
+            echo "::error::the commit live in prod ($live) is not in this repository's history"
+            exit 1
+          }
+          rc=0
+          git merge-base --is-ancestor "$live" "$SHA" || rc=$?
+          case "$rc" in
+            0) echo "rollback-from=" >>"$GITHUB_OUTPUT" ;;
+            1)
+              [ "$ALLOW_ROLLBACK" = true ] || {
+                echo "::error::$SHA is older than the commit live in prod (${live:0:12}); set allow-rollback to true to roll back"
+                exit 1
+              }
+              echo "::warning::rollback from ${live:0:12} to ${SHA:0:12}: the target is older than the commit live in prod"
+              echo "rollback-from=$live" >>"$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::cannot compare $SHA with the live commit (git exit $rc)"
+              exit 1 ;;
+          esac
+      - id: plan
+        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          env: prod
+          units-root: ${{ steps.cfg.outputs.units-root }}
+          engine: ${{ steps.cfg.outputs.engine }}
+          encrypt: "true"
+          binding-mode: encrypted_plan # D1: the approver applies exactly this plan
+          shared-units: ${{ steps.cfg.outputs.shared-units }}
+          allow-cascade: ${{ steps.cfg.outputs.allow-cascade }} # UNSAFE when true (R52)
+          lock-timeout: 10m
+          expect-sha: "true" # fail unless the checkout really is the sha to deploy
+          key-provider: ${{ steps.cfg.outputs.key-provider }}
+          key-vault-key-id: ${{ vars.AYASEE_KEY_VAULT_KEY_ID }}
+          kms-key-id: ${{ vars.AYASEE_KMS_KEY_ID }}
+          gcp-kms-key-name: ${{ vars.AYASEE_GCP_KMS_KEY_NAME }}
+          openbao-key-url: ${{ vars.AYASEE_OPENBAO_KEY_URL }}
+        env:
+          AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ steps.cfg.outputs.provider-env-names }}
+          AYASEE_PLAN_PASSPHRASE: ${{ secrets.AYASEE_PLAN_PASSPHRASE }} # pbkdf2 only
+          AYASEE_KMS_ACCESS_KEY_ID: ${{ secrets.AYASEE_KMS_ACCESS_KEY_ID }} # aws_kms only
+          AYASEE_KMS_SECRET_ACCESS_KEY: ${{ secrets.AYASEE_KMS_SECRET_ACCESS_KEY }} # aws_kms only
+          AYASEE_GCP_KMS_CREDENTIALS: ${{ secrets.AYASEE_GCP_KMS_CREDENTIALS }} # gcp_kms only
+          AYASEE_OPENBAO_TOKEN: ${{ secrets.AYASEE_OPENBAO_TOKEN }} # openbao only
+          SG_SHA: ${{ needs.validate.outputs.sha }}
+          # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+          ARM_USE_OIDC: ${{ steps.cfg.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
+      - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          plan-json: ${{ steps.plan.outputs.json-dir }}
+          stage: prod
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: summary
+        name: Summarise the plan and write the request
+        env:
+          CHANGESET: ${{ steps.plan.outputs.changeset-path }}
+          MANIFEST: ${{ steps.plan.outputs.manifest-path }}
+          INCIDENT: ${{ needs.validate.outputs.incident }}
+          SHA: ${{ needs.validate.outputs.sha }}
+          ALLOW_ROLLBACK: ${{ needs.validate.outputs.allow-rollback }}
+        run: |
+          # counts and the manifest's SHA-256 only (D15: an approval names this digest)
+          critical="$(jq -e '.risk.critical' "$CHANGESET")"
+          high="$(jq -e '.risk.high' "$CHANGESET")"
+          medium="$(jq -e '.risk.medium' "$CHANGESET")"
+          total="$(jq -e '.items | length' "$CHANGESET")"
+          digest="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::cannot hash the manifest"; exit 1; }
+          jq -n --arg incident "$INCIDENT" --arg sha "$SHA" --argjson rollback "$ALLOW_ROLLBACK" \
+            --argjson critical "$critical" --argjson high "$high" --argjson medium "$medium" \
+            --argjson total "$total" '{schema: "ayasee.breakglass-request/v1", incident: $incident,
+              sha: $sha, allow_rollback: $rollback,
+              counts: {critical: $critical, high: $high, medium: $medium, total: $total}}' \
+            >"$(dirname "$MANIFEST")/request.json"
+          {
+            echo "critical=$critical"
+            echo "high=$high"
+            echo "medium=$medium"
+            echo "total=$total"
+            echo "manifest-digest=$digest"
+            echo "request-path=$(dirname "$MANIFEST")/request.json"
+          } >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ayasee-breakglass-plan-${{ needs.validate.outputs.sha }}
+          path: |
+            ${{ steps.plan.outputs.plan-dir }}
+            ${{ steps.plan.outputs.manifest-path }}
+            ${{ steps.summary.outputs.request-path }}
+          retention-days: 7
+          if-no-files-found: error
+
+  request-issue:
+    # gate_mechanism: workflow (D15): the approval issue, with identifiers and counts only. No
+    # environment and no secret.
+    name: request-issue
+    needs: [validate, request]
+    if: ${{ needs.validate.outputs.gate-mechanism == 'workflow' && needs.request.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code (in-repo actions)
+      issues: write # the break-glass approval issue
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - name: Open the break-glass approval issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INCIDENT: ${{ needs.validate.outputs.incident }}
+          SHA: ${{ needs.validate.outputs.sha }}
+          DIGEST: ${{ needs.request.outputs.manifest-digest }}
+          REQUESTER: ${{ github.actor }}
+          CRITICAL: ${{ needs.request.outputs.critical }}
+          HIGH: ${{ needs.request.outputs.high }}
+          MEDIUM: ${{ needs.request.outputs.medium }}
+          TOTAL: ${{ needs.request.outputs.total }}
+          ROLLBACK_FROM: ${{ needs.request.outputs.rollback-from }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ayasee approve breakglass-issue --repo "$REPO" --incident "$INCIDENT" --sha "$SHA" \
+            --digest "$DIGEST" --run-url "$RUN_URL" --requester "$REQUESTER" \
+            --critical "$CRITICAL" --high "$HIGH" --medium "$MEDIUM" --total "$TOTAL" \
+            --rollback-from "$ROLLBACK_FROM"
+          {
+            echo "### Break-glass waits for approval (gate_mechanism: workflow)"
+            echo
+            echo "A reviewer listed in reviewers.breakglass, not the requester, starts **iac-approve** on main with:"
+            echo
+            echo "- incident: \`$INCIDENT\`"
+            echo "- sha: \`$SHA\`"
+            echo "- manifest-digest: \`$DIGEST\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          event: prod_waiting
+          repo: ${{ github.repository }}
+          env: prod
+          sha: ${{ needs.validate.outputs.sha }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           teams-webhook: ${{ secrets.teams-webhook }}

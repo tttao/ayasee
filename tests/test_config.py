@@ -818,7 +818,11 @@ def test_the_workflow_gate_needs_prod_reviewers():
         ("gate_mechanism: workflow\nreviewers: {prod: [-bad]}\n", "not a GitHub login"),
         ("gate_mechanism: workflow\nreviewers: {prod: ['a b']}\n", "not a GitHub login"),
         ("gate_mechanism: workflow\nreviewers: {prod: [Alice, alice]}\n", "unique"),
-        ("gate_mechanism: workflow\nreviewers: {prod: [alice], breakglass: [bob]}\n", "unknown"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [alice], deploy: [bob]}\n", "unknown"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [alice], breakglass: [-x]}\n", "login"),
+        ("gate_mechanism: workflow\nreviewers: {prod: [a], breakglass: [B, b]}\n", "unique"),
+        # the same list on both sides: like the bootstrap, the break-glass set must differ
+        ("gate_mechanism: workflow\nreviewers: {prod: [a, b], breakglass: [B, A]}\n", "differ"),
         ("gate_mechanism: workflow\nreviewers: [alice]\n", "expected a mapping"),
     ],
 )
@@ -862,4 +866,21 @@ def test_config_show_carries_the_gate(tmp_path, monkeypatch, capsys):
     p = write(tmp_path, WORKFLOW_GATE)
     assert _cli(monkeypatch, "show", "--path", str(p)) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["gate_mechanism"] == "workflow" and out["reviewers"] == {"prod": ["alice"]}
+    assert out["gate_mechanism"] == "workflow"
+    assert out["reviewers"] == {"prod": ["alice"], "breakglass": []}
+
+
+def test_breakglass_reviewers_are_optional_and_may_overlap_prod():
+    """Break-glass of the workflow gate (issue #40): reviewers.breakglass is optional (the
+    break-glass run refuses without it); it may share people with reviewers.prod, but not be
+    the very same list, unless solo_mode."""
+    cfg = config.parse_config_text(WORKFLOW_GATE)
+    assert cfg.reviewers.breakglass == []
+    cfg = config.parse_config_text(
+        "gate_mechanism: workflow\nreviewers: {prod: [alice, bob], breakglass: [bob, carol]}\n"
+    )
+    assert cfg.reviewers.breakglass == ["bob", "carol"]
+    cfg = config.parse_config_text(
+        "gate_mechanism: workflow\nsolo_mode: true\nreviewers: {prod: [solo], breakglass: [solo]}\n"
+    )
+    assert cfg.reviewers.breakglass == ["solo"]

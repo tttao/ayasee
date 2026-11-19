@@ -35,11 +35,18 @@ EXPECTED = {
         ("prod-in-sync", "ledger"),
     ],
     "iac-nightly.yml": [("drift", "ledger show")],
-    "iac-breakglass.yml": [("breakglass", "ledger show"), ("breakglass", "ledger")],
+    "iac-breakglass.yml": [
+        ("breakglass", "ledger show"),
+        ("breakglass", "ledger"),
+        ("request", "ledger show"),  # the rollback rule of the workflow gate's request
+    ],
     "iac-approve.yml": [
         ("apply", "guard"),
         ("apply", "Check the approval against the ledger"),
         ("apply", "ledger"),
+        ("breakglass", "ledger show"),
+        ("breakglass", "Check the approval against the ledger"),
+        ("breakglass", "ledger"),
     ],
 }
 
