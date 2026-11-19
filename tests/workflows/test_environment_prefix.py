@@ -17,7 +17,13 @@ from ayasee.config import Config
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
-REUSABLE = ["iac-staged.yml", "iac-pr.yml", "iac-nightly.yml", "iac-breakglass.yml"]
+REUSABLE = [
+    "iac-staged.yml",
+    "iac-pr.yml",
+    "iac-pr-shared.yml",
+    "iac-nightly.yml",
+    "iac-breakglass.yml",
+]
 # the only shapes of `environment:` a reusable workflow may have: a name built from outputs that the
 # resolve step derived from the configuration (which carry environment_prefix)
 ALLOWED = [
@@ -26,6 +32,8 @@ ALLOWED = [
     r"\$\{\{ needs\.resolve\.outputs\.environment-prefix \}\}drift-\$\{\{ matrix\.env \}\}",
     r"\$\{\{ needs\.validate\.outputs\.environment-prefix \}\}prod-breakglass",
     r"\$\{\{ needs\.shared-changes\.outputs\.environment-prefix \}\}prod-pr-plan",
+    # iac-pr-shared: `ayasee pr-shared authorize` prints environment_prefix (of main) + prod-pr-plan
+    r"\$\{\{ needs\.verify\.outputs\.environment \}\}",
 ]
 
 

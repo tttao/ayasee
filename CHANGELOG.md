@@ -9,6 +9,31 @@ released version into the GitHub release notes.
 
 ### Added
 
+- **The pull-request plan of shared units with `gate_mechanism: workflow`** (#40, adopter
+  blocker 3, [D15](docs/governance/decisions.md#d15-the-workflow-gate)): a new reusable workflow,
+  **`iac-pr-shared`**, that a prod reviewer starts on `main` with a pull request's number and
+  head SHA. Its `verify` job (no environment, no secret) checks the dispatch (on
+  `refs/heads/main`, not re-run by someone else), the reviewer (in `reviewers.prod` of `main`'s
+  configuration, write access), the pull request (open, same repository, into `main`, head
+  exactly that SHA), independence (not its author nor an author or committer of its commits,
+  unless `solo_mode`) and `prod-pr-plan` (deploys from `main` only). Its `plan` job checks out
+  exactly that SHA in `prod-pr-plan` and plans the changed shared units read-only, like
+  `plan-shared`; its `comment` job (no pull-request code) posts the `pr-plan-shared` comment,
+  naming the commit and the reviewer, and says when the pull request has moved on. Not
+  available on a private repository on GitHub Free, where `prod-pr-plan` could be neither
+  restricted to `main` nor given credentials apart from the prod apply's: the run refuses it,
+  the bootstrap refuses `shared_units_pr_plan` and `ayasee doctor` fails on the caller. New
+  `ayasee pr-shared authorize|comment`.
+  - `iac-pr` in this mode: `shared-changes` now works out the changed shared units and, when
+    there are some, sets the new `pending` output instead of planning them; `comment-shared`
+    then says which pull request and head SHA a prod reviewer authorises.
+  - `github-environments`: with `gate_mechanism = "workflow"`, `shared_units_pr_plan` creates
+    `prod-pr-plan` without reviewers and restricted to `main` (refused with
+    `private_repository_plan = "free"`).
+  - `ayasee doctor` knows the `iac-pr-shared` caller: with the workflow gate it checks that
+    `prod-pr-plan` exists, deploys from `main` only and holds the secrets the caller passes, and
+    warns when `shared_units` are set but nothing calls `iac-pr-shared`. `ayasee config
+    environments` lists `prod-pr-plan` whenever `shared_units` are set.
 - **`gate_mechanism: workflow`, a prod gate that ayasee enforces itself** (#40, decision
   [D15](docs/governance/decisions.md#d15-the-workflow-gate)): for a private repository below
   GitHub Enterprise, which has no required reviewers on environments. Opt-in, labelled
@@ -42,12 +67,11 @@ released version into the GitHub release notes.
     secrets and variables are checked at repository level. With the environment gate, a plan
     without reviewers now points to `gate_mechanism: workflow`.
   - `github-environments`: new `gate_mechanism`. With `workflow`, no environment carries
-    reviewers (`prod_reviewers` and `breakglass_reviewers` are left unset), `prod-pr-plan` is
-    refused, and `private_repository_plan = "free"` is accepted: the environments are created
-    bare (no branch policy, no marker variable) and `secret_commands` lists repository secrets.
-  - Not in this mode yet: break-glass (`iac-breakglass` refuses to run) and the pull-request
-    plan of shared units (`iac-pr` skips it with a warning, reading the mode of the base commit
-    too, so a pull request cannot switch it back on).
+    reviewers (`prod_reviewers` and `breakglass_reviewers` are left unset), and
+    `private_repository_plan = "free"` is accepted: the environments are created bare (no branch policy, no marker variable) and `secret_commands` lists repository secrets.
+  - Not in this mode yet: break-glass (`iac-breakglass` refuses to run); `iac-pr` never plans
+    shared units in this mode (it reads the mode of the base commit too, so a pull request cannot
+    switch its own plan back on; see `iac-pr-shared` above).
 - **`ayasee init` chooses the prod gate from the GitHub plan** (#40): a private repository it
   reads as GitHub Free, Pro or Team gets `gate_mechanism: workflow`, the `iac-approve` caller
   (pinned like the other callers, with exactly the permissions of the reusable workflow's jobs

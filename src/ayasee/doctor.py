@@ -10,12 +10,15 @@ instead of failed jobs found one at a time:
   them and points to ``gate_mechanism: workflow`` (D15), and the GitHub settings below are then
   not checked one by one; a plan that cannot be confirmed fails too. With ``gate_mechanism:
   workflow`` the plan decides what the gate keeps: Pro or Team keep the main-only environments and
-  their secrets (ok), Free keeps neither (a warning that says so);
+  their secrets (ok), Free keeps neither (a warning that says so, and a failure when
+  ``iac-pr-shared`` is called: it refuses to run there);
 - **configuration**: ``.ayasee.yaml`` loads, uses only supported settings, fits the staged job
   slots, matches ``shared_units`` on disk, and has a directory per stage under ``units_root``;
 - **callers**: the workflows under ``.github/workflows`` that call the ayasee reusable workflows
   pin one full release SHA (no ``OWNER`` placeholder, no all-zero SHA), the ``iac-staged`` and
-  ``iac-pr`` callers exist, and the pull-request caller has no ``paths:`` filter;
+  ``iac-pr`` callers exist, and the pull-request caller has no ``paths:`` filter; with
+  ``gate_mechanism: workflow`` and ``shared_units``, a warning when no workflow calls
+  ``iac-pr-shared`` (the shared units are then not planned in pull requests);
 - **environments**: no workflow that is not an ayasee caller names an environment ayasee uses
   (``environment_prefix`` keeps them apart, issue #31);
 - **GitHub** (with ``GITHUB_TOKEN``, read-only): every environment the callers use exists, under
@@ -24,7 +27,9 @@ instead of failed jobs found one at a time:
   prod-breakglass and prod-pr-plan have required reviewers and prevent self-review (unless
   ``solo_mode``), or, with ``gate_mechanism: workflow``, every login of ``reviewers.prod`` has
   write access to the repository; the environments are restricted to ``main`` except the
-  pull-request plan ones (not checked on GitHub Free with the workflow gate, which has none);
+  pull-request plan ones (``<first stage>-plan``, and ``prod-pr-plan`` with the environment gate
+  only: with the workflow gate it is main-only, since no reviewer guards it; not checked on GitHub
+  Free with the workflow gate, which has no branch policies);
   each secret a caller passes exists where its jobs read it (provider, plan-key and ``s3://``
   ledger-key secrets as environment secrets of each environment that reads them, never at
   repository level); the variables the
@@ -83,7 +88,7 @@ OK, WARN, FAIL, SKIP = "ok", "warn", "FAIL", "skip"
 
 _CALLER = re.compile(
     r"^(?P<repo>[^/@\s]+/[^/@\s]+)/\.github/workflows/"
-    r"(?P<kind>iac-(?:staged|pr|nightly|breakglass|approve))\.ya?ml@(?P<ref>\S+)$"
+    r"(?P<kind>iac-(?:staged|pr-shared|pr|nightly|breakglass|approve))\.ya?ml@(?P<ref>\S+)$"
 )
 _SECRET_REF = re.compile(r"^\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -270,6 +275,21 @@ def check_callers(report: Report, callers: list[Caller], cfg: Config | None = No
             sec,
             "iac-approve is called, but it refuses to run with gate_mechanism: environment",
         )
+    if workflow_gate and cfg.shared_units and "iac-pr-shared" not in kinds:
+        report.add(
+            WARN,
+            sec,
+            "gate_mechanism: workflow: shared_units are not planned in pull requests: no workflow "
+            "calls iac-pr-shared (a prod reviewer starts it on main for a pull request's head; "
+            "docs/concepts/pr-checks.md#shared-units)",
+        )
+    if not workflow_gate and cfg is not None and "iac-pr-shared" in kinds:
+        report.add(
+            WARN,
+            sec,
+            "iac-pr-shared is called, but it refuses to run with gate_mechanism: environment "
+            "(iac-pr plans the shared units in prod-pr-plan, behind its reviewers)",
+        )
     for c in callers:
         where = f"{c.file} ({c.job} -> {c.kind})"
         if c.source.split("/")[0] == "OWNER" or set(c.ref) == {"0"}:
@@ -397,6 +417,8 @@ def _logical_environments_of(kind: str, cfg: Config) -> list[str]:
         return [f"drift-{s}" for s in cfg.stages]
     if kind == "iac-approve":
         return ["prod"]
+    if kind == "iac-pr-shared":
+        return ["prod-pr-plan"] if cfg.shared_units else []
     return ["prod-breakglass"]
 
 
@@ -445,7 +467,9 @@ def check_github(
     gated = set() if workflow_gate else {pfx + e for e in GATED}
     prod_env = pfx + "prod"
     pr_plan = pfx + "prod-pr-plan"
-    pr_envs = {pfx + pr_plan_environment(cfg.stages), pr_plan}
+    # environments a pull request's own run plans in, which accept every branch; with the
+    # workflow gate prod-pr-plan is used by iac-pr-shared on main and is main-only (D15)
+    pr_envs = {pfx + pr_plan_environment(cfg.stages)} | (set() if workflow_gate else {pr_plan})
     wanted: dict[str, None] = {}  # ordered set
     for kind in ("iac-staged", "iac-pr", *sorted({c.kind for c in callers})):
         if workflow_gate and kind == "iac-breakglass":
@@ -473,6 +497,15 @@ def check_github(
             "main, and the secrets are repository secrets that any collaborator with write access "
             "can read from any branch (D15)",
         )
+        if any(c.kind == "iac-pr-shared" for c in callers):
+            report.add(
+                FAIL,
+                sec,
+                "iac-pr-shared is called, but it refuses to run on this plan: prod-pr-plan cannot "
+                "be restricted to main, so any branch could use its credentials, and there are no "
+                "environment secrets to keep them apart from the prod apply's. Remove the caller "
+                "and any prod-pr-plan credential (D15)",
+            )
 
     for env in present:
         data = found[env]

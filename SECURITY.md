@@ -105,6 +105,12 @@ credentials go (`LD_*`, `BASH_ENV`, `GITHUB_*`, `TF_CLI_ARGS`, `AWS_*`, `CLOUDFL
   SHA-256 of its manifest; then the guard. What it protects depends on the plan: on GitHub Free
   the prod secrets are repository secrets that any collaborator with write access can read
   ([D15](docs/governance/decisions.md#d15-the-workflow-gate)).
+- In that mode no job of a pull request's own run gets a prod identity: the pull request controls
+  that run's workflow file. The read-only plan of shared prod units runs in `iac-pr-shared`, which
+  a prod reviewer starts on `main` for one head SHA of one same-repository pull request they did
+  not write, checked before any secret; its `prod-pr-plan` environment deploys from `main` only.
+  It is refused on GitHub Free, where that environment could be neither closed to other branches
+  nor given credentials apart from the prod apply's.
 
 **Supply chain.** Third-party actions are pinned by commit SHA; callers pin ayasee by SHA; callers
 never use `secrets: inherit`. Tools downloaded by the actions are verified by SHA-256. CI runs
@@ -127,6 +133,10 @@ token is limited to the data repository (R62). Hosting is a confidentiality deci
   to them can remove it, and only a ruleset on `main` (GitHub Pro, Team or Enterprise for a private
   repository) makes such a change need a review. On GitHub Free there is none, and a collaborator
   with write access can read every secret from a branch.
+- `iac-pr-shared` runs pull-request code (after a reviewer's dispatch) in a job on `main`'s ref:
+  code that escapes its plan step can write to `main`'s Actions cache, and its OIDC token says
+  `ref: refs/heads/main`. ayasee's workflows restore no cache on `main`; keep it so in workflows
+  that hold prod credentials, and federate prod identities on environment subjects only.
 - GitHub Enterprise Server behaviour is unverified, and the end-to-end sandbox scenarios have not run
   against a real repository ([known limitations](docs/concepts/architecture.md#known-limitations)).
 - The Databricks policy pack and risk rules are a defence in depth, not a complete model of every

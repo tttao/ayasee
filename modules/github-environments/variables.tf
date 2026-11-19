@@ -97,14 +97,9 @@ variable "gate_mechanism" {
 }
 
 variable "shared_units_pr_plan" {
-  description = "Create prod-pr-plan: the environment of the iac-pr job that plans shared prod units (shared_units in .ayasee.yaml) read-only. It accepts pull-request branches and carries prod_reviewers, so a prod reviewer approves before PR code runs with the read-only prod identity."
+  description = "Create prod-pr-plan: the environment of the job that plans the shared prod units (shared_units in .ayasee.yaml) of a pull request read-only. With gate_mechanism = \"environment\" it is the plan-shared job of iac-pr: the environment accepts pull-request branches and carries prod_reviewers, so a prod reviewer approves before PR code runs with the read-only prod identity. With \"workflow\" (D15) it is iac-pr-shared, which a prod reviewer starts on main: the environment carries no reviewer and deploys from main only, and it is refused on GitHub Free (private_repository_plan = \"free\"), which can neither restrict it to main nor give it secrets of its own."
   type        = bool
   default     = false
-
-  validation {
-    condition     = !var.shared_units_pr_plan || var.gate_mechanism == "environment"
-    error_message = "gate_mechanism = \"workflow\" has no prod-pr-plan: the pull-request plan of shared units needs a reviewer that GitHub enforces (D15)."
-  }
 }
 
 variable "solo_mode" {

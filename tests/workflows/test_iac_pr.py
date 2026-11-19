@@ -604,7 +604,7 @@ def test_plan_shared_plans_read_only_against_prod_and_never_applies(wf):
 
 def test_shared_plan_has_its_own_sticky_comment(wf):
     job = wf["jobs"]["comment-shared"]
-    assert job["needs"] == "plan-shared"
+    assert job["needs"] == ["shared-changes", "plan-shared"]
     assert job["permissions"] == {"contents": "read", "pull-requests": "write"}
     steps = job["steps"]
     co = [s for s in steps if "actions/checkout@" in _uses(s)]

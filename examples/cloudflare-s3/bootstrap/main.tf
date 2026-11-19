@@ -91,8 +91,10 @@ locals {
   # plan_encryption.key_provider of .ayasee.yaml
   key_provider = "pbkdf2"
   # shared_units: plan the tunnel and Access changes of a pull request read-only against prod, in
-  # prod-pr-plan
+  # prod-pr-plan (with gate_mechanism = "workflow", from main with iac-pr-shared). Not on GitHub
+  # Free with the workflow gate: prod-pr-plan could not be restricted to main (D15)
   shared_units_pr_plan = true
+  pr_plan_shared       = local.shared_units_pr_plan && !local.repository_level
 
   # The provider tokens each environment needs (README, step 3), for the secret_commands output:
   # every environment ayasee doctor checks with identity: secrets. Cloudflare tokens are scoped to
@@ -125,7 +127,7 @@ module "environments" {
   stages               = local.stages
   prod_reviewers       = var.prod_reviewers
   breakglass_reviewers = var.breakglass_reviewers
-  shared_units_pr_plan = local.shared_units_pr_plan
+  shared_units_pr_plan = local.pr_plan_shared
   environment_prefix   = var.environment_prefix
   gate_mechanism       = var.gate_mechanism
 
@@ -141,7 +143,7 @@ module "environments" {
       CLOUDFLARE_API_TOKEN  = s.cf
       AWS_ACCESS_KEY_ID     = s.s3
       AWS_SECRET_ACCESS_KEY = s.s3
-    } if env != "prod-pr-plan" || local.shared_units_pr_plan
+    } if env != "prod-pr-plan" || local.pr_plan_shared
   }
   repository_secret_scopes = {
     AYASEE_LEDGER_TOKEN = "fine-grained token, this repository only, Contents: read and write and nothing else; require pull requests on main with a ruleset (README, step 4)"

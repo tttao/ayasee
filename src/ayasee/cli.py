@@ -75,6 +75,7 @@ def entrypoint() -> None:
     import ayasee.notify  # noqa: F401  (registers its subcommand)
     import ayasee.prcomment  # noqa: F401  (registers its subcommand)
     import ayasee.providerenv  # noqa: F401  (registers its subcommand)
+    import ayasee.prshared  # noqa: F401  (registers its subcommand)
     import ayasee.reviewgate  # noqa: F401  (registers its subcommand)
     import ayasee.sarif  # noqa: F401  (registers its subcommand)
     import ayasee.scaffold  # noqa: F401  (registers its subcommand)

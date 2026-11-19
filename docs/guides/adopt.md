@@ -55,7 +55,9 @@ issue, and a reviewer listed in `reviewers.prod` of `.ayasee.yaml` applies the p
 
 - **GitHub Pro or Team**: the environments stay restricted to `main` and keep their own secrets,
   so only a job on `main` reaches the prod secrets, and a ruleset on `main` can make every change
-  to the reviewers or the callers go through a reviewed pull request.
+  to the reviewers or the callers go through a reviewed pull request. With `shared_units`, add the
+  `iac-pr-shared` caller too: a prod reviewer plans a pull request's shared units with it
+  ([how](../concepts/pr-checks.md#with-the-workflow-gate-iac-pr-shared)).
 - **GitHub Free**: no environment secrets, environment variables, branch policies or rulesets.
   With `private_repository_plan = "free"` the environments are created bare, and every secret and
   variable is a repository one (the Cloudflare profile's bootstrap then sets `AYASEE_LEDGER_URL`
@@ -63,7 +65,8 @@ issue, and a reviewer listed in `reviewers.prod` of `.ayasee.yaml` applies the p
   through environment variables, cannot run there). Any collaborator with write access can read the prod secrets from
   a workflow on any branch and push to `main`, and every stage reads the same provider tokens. The
   gate then stops mistakes and unreviewed applies, not a collaborator who means harm: keep the
-  collaborators with write access to the reviewers.
+  collaborators with write access to the reviewers. Shared units are not planned in pull
+  requests: no environment could keep that plan's credentials apart from the prod apply's.
 
 ## 1. Scaffold: `ayasee init`
 

@@ -10,7 +10,7 @@ Providers: `integrations/github` (`~> 6.12`), `hashicorp/random`.
 | `prod-plan` | `main` only | none |
 | `drift-<stage>` per stage | `main` only | none |
 | `prod-breakglass` | `main` only | `breakglass_reviewers` |
-| `prod-pr-plan` (only with `shared_units_pr_plan = true`) | all | `prod_reviewers` |
+| `prod-pr-plan` (only with `shared_units_pr_plan = true`) | all (`main` only with `gate_mechanism = "workflow"`) | `prod_reviewers` (none with `"workflow"`) |
 
 The pull-request plan environment is named after the first stage, so `stages = ["test", "prod"]`
 gives `test-plan`, matching `prod-plan` (output `pr_plan_environment`). The first stage must not be
@@ -41,8 +41,11 @@ repositories on other plans are not supported by the default gate
 Keep it equal to `gate_mechanism` of `.ayasee.yaml` (decision
 [D15](../../docs/governance/decisions.md#d15-the-workflow-gate)). With `"workflow"` no environment
 carries reviewers: leave `prod_reviewers` and `breakglass_reviewers` unset (the reviewers are
-`reviewers.prod` of `.ayasee.yaml`, which `iac-approve` checks), and `shared_units_pr_plan` is
-refused. The environments keep their main-only deployment branch policy where the plan has one
+`reviewers.prod` of `.ayasee.yaml`, which `iac-approve` checks). `shared_units_pr_plan` creates
+`prod-pr-plan` without reviewers and restricted to `main`: `iac-pr-shared`, which a prod reviewer
+starts on `main`, plans the shared units of a pull request there, and the branch policy is what
+keeps other branches from its credentials. It is refused with `private_repository_plan = "free"`,
+which can neither restrict it to `main` nor give it secrets of its own. The environments keep their main-only deployment branch policy where the plan has one
 (public, or private on Pro, Team or Enterprise). `private_repository_plan = "free"` is then
 accepted: GitHub Free has no branch policies, environment secrets or environment variables, so
 the environments are created bare (no branch policy, no `AYASEE_MANAGED` variable), `variables`
@@ -91,7 +94,9 @@ that person can approve their own change. Reviewers are still required and admin
 bypass, so every prod apply still waits for a deliberate approval.
 
 `shared_units_pr_plan` (default `false`) adds `prod-pr-plan`, where `iac-pr` plans the shared prod
-units of a pull request read-only ([shared units](../../docs/concepts/pr-checks.md#shared-units)).
+units of a pull request read-only ([shared units](../../docs/concepts/pr-checks.md#shared-units)),
+or, with `gate_mechanism = "workflow"`, `iac-pr-shared` does from `main`
+([iac-pr-shared](../../docs/concepts/pr-checks.md#with-the-workflow-gate-iac-pr-shared)).
 
 ```hcl
 module "environments" {
