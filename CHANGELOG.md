@@ -7,7 +7,29 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
-### Added
+## [0.1.0] - unreleased
+
+First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
+`v0.1.0-rc.1` failed before publishing anything), `v0.1.0-rc.3`, then `v0.1.0-rc.4`; the changes
+of each candidate are listed newest first. The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
+
+### Since v0.1.0-rc.3
+
+#### Changed
+
+- **Breaking for private repositories in `github-environments`**: the module reads the
+  repository's visibility, and a private repository must set the new `private_repository_plan`
+  (`free`, `pro`, `team` or `enterprise`); the plan refuses every environment whose reviewers or
+  `main`-only policy that plan cannot hold, which in practice means `enterprise`. Public and
+  internal repositories need nothing. A postcondition fails when GitHub did not keep the reviewers
+  of a gated environment. Both example bootstraps pass `private_repository_plan` through.
+- **`iac-staged`: a new `prod-gate` job** (`actions: read` only, no environment) runs
+  `ayasee require-reviewers` on the `prod` environment (prefixed name) beside the pre-prod stages,
+  and `prod-plan` needs it: no plan is handed to a `prod` that would not wait for an approval.
+  `solo_mode` does not lift it (the reviewers stay required). **`iac-breakglass`**: the `validate`
+  job now holds `actions: read` and runs the same check on `prod-breakglass`.
+
+#### Added
 
 - **Break-glass with `gate_mechanism: workflow`** (#40, decisions
   [D3 and D15](docs/governance/decisions.md#break-glass-with-the-workflow-gate)): the emergency
@@ -144,26 +166,6 @@ released version into the GitHub release notes.
     (new `--repo`, else the `origin` remote), and warns; the scaffold is still written.
   - `ayasee require-reviewers --repo --environment`: refuses a gated environment that has no
     required reviewers, does not exist, cannot be read, or whose plan ignores them.
-
-### Changed
-
-- **`iac-staged`: a new `prod-gate` job** (`actions: read` only, no environment) runs
-  `ayasee require-reviewers` on the `prod` environment (prefixed name) beside the pre-prod stages,
-  and `prod-plan` needs it: no plan is handed to a `prod` that would not wait for an approval.
-  `solo_mode` does not lift it (the reviewers stay required). **`iac-breakglass`**: the `validate`
-  job now holds `actions: read` and runs the same check on `prod-breakglass`.
-- **Breaking for private repositories in `github-environments`**: the module reads the
-  repository's visibility, and a private repository must set the new `private_repository_plan`
-  (`free`, `pro`, `team` or `enterprise`); the plan refuses every environment whose reviewers or
-  `main`-only policy that plan cannot hold, which in practice means `enterprise`. Public and
-  internal repositories need nothing. A postcondition fails when GitHub did not keep the reviewers
-  of a gated environment. Both example bootstraps pass `private_repository_plan` through.
-
-## [0.1.0] - unreleased
-
-First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
-`v0.1.0-rc.1` failed before publishing anything), then `v0.1.0-rc.3`, whose changes since rc.2
-are listed first. The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
 
 ### Since v0.1.0-rc.2
 
