@@ -35,3 +35,8 @@ crash.log
 # Research and review material, kept out of the repository
 reports/
 research_notes/
+
+# Local agent skills. A tracked symlink or submodule here breaks every caller of the reusable
+# workflows: the runner downloads an action as a tarball without submodules (#49).
+.claude/skills/
+.claude/vendor/
