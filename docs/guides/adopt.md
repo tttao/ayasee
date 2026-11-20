@@ -65,7 +65,10 @@ Know what the plan still gives you:
   variable is a repository one (the Cloudflare profile's bootstrap then sets `AYASEE_LEDGER_URL`
   as a repository variable; the Databricks profile, which needs one identity per environment
   through environment variables, cannot run there). Any collaborator with write access can read the prod secrets from
-  a workflow on any branch and push to `main`, and every stage reads the same provider tokens. The
+  a workflow on any branch and push to `main`, and every stage reads the same provider tokens. So
+  each token needs the scopes of every stage at once (the Cloudflare token edits prod, the state
+  key writes prod's state), and the pull-request plan, which runs code nobody has reviewed yet,
+  holds them too; `secret_commands` lists each secret with all the scopes it needs. The
   gate then stops mistakes and unreviewed applies, not a collaborator who means harm: keep the
   collaborators with write access to the reviewers. Shared units are not planned in pull
   requests: no environment could keep that plan's credentials apart from the prod apply's.

@@ -26,6 +26,11 @@ output "pending_secrets" {
     condition     = alltrue([for env in keys(var.secret_scopes) : contains(keys(local.environments), env)])
     error_message = "secret_scopes names an environment this module does not create."
   }
+
+  precondition {
+    condition     = length(local.repository_secret_clash) == 0
+    error_message = "On GitHub Free every secret is a repository secret: ${join(", ", local.repository_secret_clash)} is listed in both repository_secret_scopes and secret_scopes (or is a plan-key secret). Keep one."
+  }
 }
 
 output "secret_commands" {
@@ -35,5 +40,10 @@ output "secret_commands" {
   precondition {
     condition     = alltrue([for env in keys(var.secret_scopes) : contains(keys(local.environments), env)])
     error_message = "secret_scopes names an environment this module does not create."
+  }
+
+  precondition {
+    condition     = length(local.repository_secret_clash) == 0
+    error_message = "On GitHub Free every secret is a repository secret: ${join(", ", local.repository_secret_clash)} is listed in both repository_secret_scopes and secret_scopes (or is a plan-key secret). Keep one."
   }
 }
