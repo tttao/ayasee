@@ -86,7 +86,11 @@ It writes `.ayasee.yaml`, the callers under `.github/workflows/`, `root.hcl`, th
 one empty directory per stage, all pinned to the release commit of `X.Y.Z`: no placeholder to
 search, no `sed`. The callers are `iac-pr.yml`, `iac-staged.yml`, `iac-nightly.yml` and
 `iac-breakglass.yml`, and `iac-approve.yml` with the workflow gate (below). It can be run again: a file with identical content is skipped, a file that
-differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. With
+differs is shown as a diff and refused without `--force`, and nothing is written on a refusal. An
+existing `.ayasee.yaml` that loads is yours: init keeps it (`--force` included), takes `stages`,
+`iac_root`, `environment_prefix` and `gate_mechanism` from it, and refuses a flag that says
+otherwise, so you can commit the configuration first and add the callers later; one that does not
+load is refused, and `--replace-config` overwrites it with the template. With
 `--iac-root` it also sets `environment_prefix: iac-` in `.ayasee.yaml` and in the bootstrap, because a
 repository that holds code already deploys it to environments called `test` and `prod`, and ayasee
 must not share them ([below](#environments-that-already-exist)); `--environment-prefix other-`
@@ -112,9 +116,9 @@ run init again with `--gate-mechanism workflow --plan free|pro|team` (or `--plan
 reads, with a warning when they go against it; `--plan` alone picks `environment` for
 `enterprise` and `workflow` otherwise. With `workflow`, `reviewers.prod` is the placeholder
 `REPLACE_WITH_GITHUB_LOGIN`: `.ayasee.yaml` does not load, so no run and no `doctor` passes,
-until you list the GitHub logins that may approve a prod apply **(you)**. On a repository that
-`init` already scaffolded with the other gate, the files that change are shown as a diff and
-nothing is written without `--force`.
+until you list the GitHub logins that may approve a prod apply **(you)**. When the existing
+`.ayasee.yaml` sets the other gate, init writes nothing and says so: pass `--gate-mechanism` with
+the file's gate to keep it, or change the file.
 
 ## 2. Bootstrap the environments
 
