@@ -752,9 +752,10 @@ def _check_secrets_and_variables(
         report.add(
             WARN,
             sec,
-            "every stage reads the same repository secrets on this plan: a provider token for "
-            "prod is also handed to the pre-prod jobs, so stage isolation rests on nothing but "
-            "the token scopes (D15)",
+            "every stage reads the same repository secrets on this plan: each token needs the "
+            "scopes of every stage at once, and the pre-prod jobs and the pull-request plan "
+            "(code not reviewed yet) hold the credentials that edit prod and write its state; "
+            "nothing isolates the stages (D15)",
         )
     if checked and not missing:
         report.add(OK, sec, f"{checked} environment secret(s) in place")

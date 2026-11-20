@@ -9,6 +9,15 @@ released version into the GitHub release notes.
 
 ### Fixed
 
+- **`secret_commands` on GitHub Free printed the narrowest scope** (#47): with
+  `gate_mechanism: workflow` on a private Free repository every secret is one repository secret,
+  but `github-environments` kept the scope of whichever environment sorted last (`test-plan`, a
+  read-only one), so the credentials it described could not apply. It now prints, for each name,
+  every scope listed for it, which the one value must hold, and says that the pull-request plan
+  reads it too; a name in both `repository_secret_scopes` and `secret_scopes` is refused there.
+  The Free warning of `ayasee doctor`, D15, the adoption guide and the `iac-pr` caller comment say
+  what that means: the pre-prod jobs and the pull-request plan hold the credentials that edit prod
+  and write its state.
 - **Every caller of the reusable workflows failed in "Set up job"** (#49) since
   `v0.1.0-rc.3`: the repository tracked 183 symlinks in `.claude/skills/` that pointed into a git
   submodule, and the tarball a runner downloads for an action holds no submodule, so the runner

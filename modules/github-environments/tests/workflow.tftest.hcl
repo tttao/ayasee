@@ -88,6 +88,47 @@ run "a_private_repository_on_free_gets_bare_environments" {
     condition     = length(regexall("gh secret set CLOUDFLARE_API_TOKEN", output.secret_commands)) == 1
     error_message = "one repository secret per name"
   }
+
+  # #47: the one repository secret is read by every stage, so its value needs every scope listed
+  # for the name, not the scope of whichever environment sorts last
+  assert {
+    condition     = strcontains(output.secret_commands, "ONE value needs ALL of: prod zone edit + test zone edit")
+    error_message = "the repository secret states the union of the scopes of every environment that reads it"
+  }
+
+  assert {
+    condition     = strcontains(output.secret_commands, "the pull-request plan")
+    error_message = "secret_commands says that the pull-request plan reads the same secret"
+  }
+
+  assert {
+    condition     = length([for s in output.pending_secrets : s if s.name == "AYASEE_PLAN_PASSPHRASE"]) == 1 && !strcontains(one([for s in output.pending_secrets : s.scope if s.name == "AYASEE_PLAN_PASSPHRASE"]), "ALL of")
+    error_message = "a name with one scope on every environment keeps that scope, once"
+  }
+}
+
+run "free_refuses_a_name_that_is_both_a_repository_and_a_stage_secret" {
+  command = plan
+
+  variables {
+    private_repository_plan  = "free"
+    repository_secret_scopes = { CLOUDFLARE_API_TOKEN = "ledger" }
+  }
+
+  expect_failures = [output.secret_commands, output.pending_secrets]
+}
+
+run "a_secret_of_one_environment_keeps_its_own_scope_off_free" {
+  command = plan
+
+  variables {
+    private_repository_plan = "team"
+  }
+
+  assert {
+    condition     = strcontains(output.secret_commands, "gh secret set CLOUDFLARE_API_TOKEN --env test   # test zone edit") && strcontains(output.secret_commands, "gh secret set CLOUDFLARE_API_TOKEN --env prod   # prod zone edit")
+    error_message = "with environment secrets, each environment keeps its own scope"
+  }
 }
 
 run "environment_variables_are_refused_on_free" {

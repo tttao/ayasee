@@ -52,7 +52,9 @@ plan is applied in `prod-breakglass`, with that environment's own identity and s
 accepted: GitHub Free has no branch policies, environment secrets or environment variables, so
 the environments are created bare (no branch policy, no `AYASEE_MANAGED` variable), `variables`
 and `generate_plan_passphrase` are refused, and `secret_commands` lists every secret as a
-repository secret, one per name: every stage then reads the same provider tokens.
+repository secret, one per name: every stage, drift and the pull-request plan then read the same
+provider tokens, so the scope printed for a name is all the scopes listed for it, which one
+value must hold. A name in both `repository_secret_scopes` and `secret_scopes` is refused there.
 
 ## Names: `environment_prefix`
 

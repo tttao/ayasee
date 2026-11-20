@@ -78,23 +78,45 @@ locals {
     }
   }
 
+  # Every environment secret the module cannot create: the plan key, then secret_scopes.
+  environment_secrets = concat(
+    flatten([
+      for env in local.key_environments : [
+        for name, scope in local.key_secret_scopes[var.key_provider] : { environment = env, name = name, scope = scope }
+      ]
+    ]),
+    flatten([
+      for env, secrets in var.secret_scopes : [
+        for name, scope in secrets : { environment = env, name = name, scope = scope }
+      ]
+    ]),
+  )
+
+  # A bare environment (GitHub Free, private) has no secrets: one repository secret per name,
+  # which every job reads, the pre-prod stages, drift and the pull-request plan as well as prod.
+  # Its value therefore needs every scope listed for that name, not one of them (#47).
+  bare_scopes = { for s in local.environment_secrets : s.name => s.scope... }
+
   # Every secret still to create by hand, keyed "<environment>/<name>" ("/<name>" for a
   # repository secret) so that the for expression below lists them in a stable order.
   pending_secrets = merge(
     { for name, scope in var.repository_secret_scopes : "/${name}" => { environment = "", name = name, scope = scope } },
-    # a bare environment (GitHub Free, private) has no secrets: one repository secret per name
-    merge([
-      for env in local.key_environments : {
-        for name, scope in local.key_secret_scopes[var.key_provider] :
-        "${local.bare ? "" : env}/${name}" => { environment = local.bare ? "" : env, name = name, scope = scope }
+    local.bare ? {
+      for name, scopes in local.bare_scopes : "/${name}" => {
+        environment = ""
+        name        = name
+        scope = length(distinct(scopes)) == 1 ? "${scopes[0]} (repository secret on GitHub Free: every stage and the pull-request plan read it)" : format(
+          "repository secret on GitHub Free, read by every stage and by the pull-request plan, so ONE value needs ALL of: %s",
+          join(" + ", distinct(scopes)),
+        )
       }
-    ]...),
-    merge([
-      for env, secrets in var.secret_scopes : {
-        for name, scope in secrets : "${local.bare ? "" : env}/${name}" => { environment = local.bare ? "" : env, name = name, scope = scope }
-      }
-    ]...),
+      } : {
+      for s in local.environment_secrets : "${s.environment}/${s.name}" => s
+    },
   )
+
+  # On GitHub Free a name in both lists would be one repository secret with two meanings.
+  repository_secret_clash = local.bare ? sort(setintersection(keys(var.repository_secret_scopes), keys(local.bare_scopes))) : []
 
   repo_flag = var.owner == "" ? "" : " --repo ${var.owner}/${var.repository}"
 
