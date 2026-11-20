@@ -55,6 +55,8 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main ||
             { echo "::error::the commit is not an ancestor of origin/main"; exit 1; }
       - run: scripts/check-provenance.sh
+      # what a caller downloads must stage as an action: no submodule, no dangling symlink (#49)
+      - run: scripts/check-archive.sh
 
   build:
     name: build

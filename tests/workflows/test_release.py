@@ -52,6 +52,13 @@ def test_provenance_gate_is_first_and_everything_waits_for_it(wf):
         assert "provenance" in _ancestors(wf, job), job
 
 
+def test_provenance_gate_refuses_an_archive_a_caller_cannot_stage(wf):
+    """#49: a submodule or dangling symlink in the tag's tarball fails every caller job in
+    Set up job."""
+    runs = [s.get("run", "") for s in wf["jobs"]["provenance"]["steps"]]
+    assert "scripts/check-archive.sh" in runs
+
+
 @pytest.mark.parametrize("job", WRITE_JOBS)
 def test_write_jobs_skip_on_dry_run(wf, job):
     cond = wf["jobs"][job]["if"]

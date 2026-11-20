@@ -7,6 +7,16 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every caller of the reusable workflows failed in "Set up job"** (#49) since
+  `v0.1.0-rc.3`: the repository tracked 183 symlinks in `.claude/skills/` that pointed into a git
+  submodule, and the tarball a runner downloads for an action holds no submodule, so the runner
+  could not stage ayasee. The symlinks and the submodule are no longer tracked (`.claude/skills/`
+  and `.claude/vendor/` are ignored). A new `scripts/check-archive.sh` refuses a commit whose
+  archive holds a submodule or a symlink that does not resolve inside it; it runs in CI (`action
+  archive`) and in the first job of the release workflow.
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
