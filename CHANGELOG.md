@@ -7,7 +7,16 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
-### Fixed
+## [0.1.0] - unreleased
+
+First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of `v0.1.0-rc.1`
+failed before publishing anything), `v0.1.0-rc.3`, `v0.1.0-rc.4`, then `v0.1.0-rc.5`; the changes
+of each candidate are listed newest first. The date is set when the final version is tagged, see
+[releasing](docs/guides/releasing.md).
+
+### Since v0.1.0-rc.4
+
+#### Fixed
 
 - **`secret_commands` on GitHub Free printed the narrowest scope** (#47): with
   `gate_mechanism: workflow` on a private Free repository every secret is one repository secret,
@@ -34,12 +43,6 @@ released version into the GitHub release notes.
   and `.claude/vendor/` are ignored). A new `scripts/check-archive.sh` refuses a commit whose
   archive holds a submodule or a symlink that does not resolve inside it; it runs in CI (`action
   archive`) and in the first job of the release workflow.
-
-## [0.1.0] - unreleased
-
-First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of
-`v0.1.0-rc.1` failed before publishing anything), `v0.1.0-rc.3`, then `v0.1.0-rc.4`; the changes
-of each candidate are listed newest first. The date is set when the final version is tagged, see [releasing](docs/guides/releasing.md).
 
 ### Since v0.1.0-rc.3
 
