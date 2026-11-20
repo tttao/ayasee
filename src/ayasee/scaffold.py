@@ -26,7 +26,14 @@ which flag to pass. ``--gate-mechanism`` and ``--plan`` override the detection.
 
 It writes no unit: ``<units_root>/<stage>/`` is created empty (a ``.gitkeep``), and
 ``shared_units`` starts empty. Existing files are never overwritten without ``--force``; on a
-refusal nothing is written."""
+refusal nothing is written.
+
+An existing ``.ayasee.yaml`` that loads is the adopter's, never the template's (issue #48): ``init``
+keeps it, takes ``stages``, ``iac_root``, ``environment_prefix`` and ``gate_mechanism`` from it, and
+refuses a flag or a detected gate that contradicts it, so that the callers and the bootstrap it
+writes agree with the configuration. A file that loads only once the ``reviewers.prod``
+placeholder is filled counts as loading. ``--force`` never replaces it; ``--replace-config``
+does, and ignores it."""
 
 from __future__ import annotations
 
@@ -46,6 +53,7 @@ from ayasee.config import (
     ENVIRONMENT_PREFIX,
     GATE_MECHANISMS,
     REVIEWER_PLACEHOLDER,
+    Config,
     ConfigError,
     parse_config_text,
     staged_layout,
@@ -539,7 +547,7 @@ def _inside(dest: Path, rel: str) -> Path:
     return dest / rel
 
 
-def _key_diff(old: str, new: str) -> str:
+def _key_diff(old: str, new: str, dropped: str = " (--force drops it)") -> str:
     """Top-level keys of two ``.ayasee.yaml`` texts: added, changed and kept-only-here."""
     try:
         a, b = yaml.safe_load(old), yaml.safe_load(new)
@@ -548,7 +556,7 @@ def _key_diff(old: str, new: str) -> str:
     if not isinstance(a, dict) or not isinstance(b, dict):
         return ""
     lines = [f"  key only in the scaffold: {k}" for k in b if k not in a]
-    lines += [f"  key only in your file (--force drops it): {k}" for k in a if k not in b]
+    lines += [f"  key only in your file{dropped}: {k}" for k in a if k not in b]
     lines += [f"  key with another value: {k}" for k in a if k in b and a[k] != b[k]]
     return "\n".join(lines)
 
@@ -632,6 +640,7 @@ def _upgrade(args: argparse.Namespace, dest: Path) -> int:
         ("--gate-mechanism", args.gate_mechanism),
         ("--plan", args.plan),
         ("--force", args.force or None),
+        ("--replace-config", args.replace_config or None),
     ):
         if value:
             raise InitError(f"--upgrade only moves the release pin; {flag} does not apply")
@@ -676,12 +685,15 @@ def _run(args: argparse.Namespace) -> int:
         if not args.profile:
             raise InitError("--profile is required (or --upgrade)")
         profile = PROFILES[args.profile]
+        kept = None if args.replace_config else _existing_config(dest)
         stages = (
             [s.strip() for s in args.stages.split(",")] if args.stages else list(profile.stages)
         )
         iac_root = posixpath.normpath((args.iac_root or ".").strip("/") or ".")
-        _check_args(profile, stages, iac_root)
         prefix = args.environment_prefix
+        if kept is not None:
+            stages, iac_root, prefix = _inputs_from_config(kept, args, stages, iac_root)
+        _check_args(profile, stages, iac_root)
         if prefix is None:
             prefix = MONOREPO_PREFIX if iac_root != "." else ""
         templates, _ = templates_root()
@@ -690,6 +702,8 @@ def _run(args: argparse.Namespace) -> int:
             _detect_plan(args.repo or _origin_repo(dest)), args.gate_mechanism, args.plan
         )
         _say(choice.messages)
+        if kept is not None and choice.gate != kept.cfg.gate_mechanism:
+            raise InitError(_gate_mismatch(kept.cfg.gate_mechanism, choice.gate, args))
         if (
             choice.gate == "workflow"
             and choice.plan == "free"
@@ -709,7 +723,15 @@ def _run(args: argparse.Namespace) -> int:
             plan=choice.plan,
         )
         _check_config(files[".ayasee.yaml"], choice.gate)
+        if kept is not None:
+            template = files.pop(".ayasee.yaml")
+            if kept.text != template:
+                diff = _key_diff(kept.text, template, dropped="")
+                _say((("note", (_KEPT_NOTE, *([diff] if diff else []))),))
         todo, same, conflicts = plan_writes(dest, files)
+        if args.replace_config and ".ayasee.yaml" in conflicts:
+            todo[".ayasee.yaml"] = files[".ayasee.yaml"]
+            del conflicts[".ayasee.yaml"]
         if conflicts and not args.force:
             for report in conflicts.values():
                 print(report, file=sys.stderr)
@@ -721,6 +743,8 @@ def _run(args: argparse.Namespace) -> int:
     except (InitError, ConfigError, GitHubError, OSError) as exc:
         print(f"init: error: {exc}", file=sys.stderr)
         return 1
+    if kept is not None:
+        print("kept .ayasee.yaml")
     for rel in same:
         print(f"unchanged {rel}")
     for rel, content in todo.items():
@@ -752,6 +776,93 @@ def _run(args: argparse.Namespace) -> int:
     for n, step in enumerate(steps, 1):
         print(f"  {n}. {step}")
     return 0
+
+
+_KEPT_NOTE = (
+    ".ayasee.yaml exists and loads: init keeps it and took stages, iac_root, environment_prefix "
+    "and gate_mechanism from it; where it differs from the profile's template, yours stays "
+    "(--replace-config writes the template instead)"
+)
+
+
+@dataclass(frozen=True)
+class KeptConfig:
+    """An existing ``.ayasee.yaml`` that ``init`` keeps (issue #48): its text and what it loads
+    as (with the ``reviewers.prod`` placeholder filled, when only that is missing)."""
+
+    text: str
+    cfg: Config
+
+
+def _existing_config(dest: Path) -> KeptConfig | None:
+    """The repository's ``.ayasee.yaml`` when it loads, ``None`` when there is none. A file that
+    does not load is refused, never kept and never overwritten: init cannot tell which of its
+    values are meant."""
+    path = _inside(dest, ".ayasee.yaml")
+    if not path.exists() and not path.is_symlink():
+        return None
+    if not path.is_file():
+        raise InitError(".ayasee.yaml exists and is not a regular file")
+    text = path.read_text()
+    try:
+        return KeptConfig(text, parse_config_text(text))
+    except ConfigError as exc:
+        if REVIEWER_PLACEHOLDER in text:
+            try:  # init's own workflow scaffold before a reviewer is named
+                return KeptConfig(
+                    text, parse_config_text(text.replace(REVIEWER_PLACEHOLDER, "reviewer"))
+                )
+            except ConfigError:
+                pass
+        raise InitError(
+            f".ayasee.yaml exists but does not load ({exc}). init reads stages, iac_root, "
+            "environment_prefix and gate_mechanism from it: fix it (`ayasee config show`), or "
+            "pass --replace-config to overwrite it with the template"
+        ) from exc
+
+
+def _inputs_from_config(
+    kept: KeptConfig, args: argparse.Namespace, stages: list[str], iac_root: str
+) -> tuple[list[str], str, str]:
+    """``stages``, ``iac_root`` and ``environment_prefix`` from the kept configuration. A flag that
+    says otherwise is refused, not overridden: the callers and the bootstrap must match it."""
+    cfg = kept.cfg
+    clashes = []
+    if args.stages and stages != cfg.stages:
+        clashes.append(f"--stages {','.join(stages)} (it has {','.join(cfg.stages)})")
+    if args.iac_root is not None and iac_root != cfg.iac_root:
+        clashes.append(f"--iac-root {iac_root} (it has {cfg.iac_root})")
+    if args.environment_prefix is not None and args.environment_prefix != cfg.environment_prefix:
+        clashes.append(
+            f"--environment-prefix {args.environment_prefix!r} (it has {cfg.environment_prefix!r})"
+        )
+    if clashes:
+        raise InitError(
+            "these flags contradict the existing .ayasee.yaml, which init keeps: "
+            + "; ".join(clashes)
+            + ". Drop them, change the file, or pass --replace-config"
+        )
+    units_root = "stages" if cfg.iac_root == "." else f"{cfg.iac_root}/stages"
+    if cfg.units_root != units_root:
+        raise InitError(
+            f".ayasee.yaml has units_root: {cfg.units_root}, but init scaffolds {units_root} "
+            f"for iac_root {cfg.iac_root}; nothing written. Add the callers and the bootstrap by "
+            "hand (the profile's README), or pass --replace-config"
+        )
+    return list(cfg.stages), cfg.iac_root, cfg.environment_prefix
+
+
+def _gate_mismatch(kept: str, chosen: str, args: argparse.Namespace) -> str:
+    if args.gate_mechanism:
+        return (
+            f"--gate-mechanism {chosen} contradicts gate_mechanism: {kept} of the existing "
+            ".ayasee.yaml, which init keeps; drop the flag, change the file, or pass "
+            "--replace-config"
+        )
+    return (
+        f".ayasee.yaml sets gate_mechanism: {kept}, but init would choose {chosen} here (above). "
+        f"Nothing written: pass --gate-mechanism {kept} to keep the file's gate, or change it"
+    )
 
 
 def _check_config(text: str, gate: str) -> None:
@@ -832,7 +943,17 @@ def _setup(parser: argparse.ArgumentParser) -> None:
         help="pin --ref without checking it is the release commit of this version (a mirror whose "
         "release commit was re-pinned, or a source checkout ahead of its release)",
     )
-    parser.add_argument("--force", action="store_true", help="overwrite existing files that differ")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing files that differ (never a .ayasee.yaml that loads: init keeps "
+        "it and reads its stages, iac_root, environment_prefix and gate_mechanism)",
+    )
+    parser.add_argument(
+        "--replace-config",
+        action="store_true",
+        help="ignore the existing .ayasee.yaml and overwrite it with the template",
+    )
     parser.add_argument(
         "--upgrade",
         action="store_true",

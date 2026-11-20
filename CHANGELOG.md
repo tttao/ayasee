@@ -18,6 +18,15 @@ released version into the GitHub release notes.
   The Free warning of `ayasee doctor`, D15, the adoption guide and the `iac-pr` caller comment say
   what that means: the pre-prod jobs and the pull-request plan hold the credentials that edit prod
   and write its state.
+- **`ayasee init` with an existing `.ayasee.yaml`** (#48): a valid, customised configuration used
+  to block the scaffold, and `--force` reset it to the template (losing `reviewers.prod` and
+  `solo_mode`). Init now keeps a configuration that loads (one that only lacks the
+  `reviewers.prod` placeholder's replacement counts), whatever `--force` says, and takes
+  `stages`, `iac_root`, `environment_prefix` and `gate_mechanism` from it, so the callers and the
+  bootstrap it writes match it. A flag that contradicts the file, a gate the plan detection would
+  not choose (pass `--gate-mechanism` with the file's gate) and a `units_root` init does not
+  scaffold are refused with nothing written; a configuration that does not load is refused
+  untouched. The new `--replace-config` overwrites it with the template.
 - **Every caller of the reusable workflows failed in "Set up job"** (#49) since
   `v0.1.0-rc.3`: the repository tracked 183 symlinks in `.claude/skills/` that pointed into a git
   submodule, and the tarball a runner downloads for an action holds no submodule, so the runner

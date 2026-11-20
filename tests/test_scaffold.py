@@ -99,17 +99,128 @@ def test_the_scaffold_passes_doctor_offline(tmp_path, capsys, monkeypatch):
 
 
 def test_a_file_that_differs_is_kept_and_diffed(tmp_path, capsys):
-    (tmp_path / ".ayasee.yaml").write_text("stages: [test, prod]\nmine: 1\n")
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    caller = tmp_path / ".github/workflows/iac-nightly.yml"
+    caller.write_text(caller.read_text() + "# mine\n")
+    capsys.readouterr()
     assert _init(tmp_path, "--profile", "cloudflare-s3") == 1
     err = capsys.readouterr().err
-    assert "exist and differ" in err and ".ayasee.yaml" in err
-    assert "key only in the scaffold: units_root" in err
-    assert "key only in your file (--force drops it): mine" in err
-    assert "--- a/.ayasee.yaml (yours)" in err and "+++ b/.ayasee.yaml (scaffold)" in err
-    assert (tmp_path / ".ayasee.yaml").read_text() == "stages: [test, prod]\nmine: 1\n"
-    assert not (tmp_path / ".github").exists()  # nothing written
+    assert "exist and differ" in err and "iac-nightly.yml" in err
+    assert "--- a/.github/workflows/iac-nightly.yml (yours)" in err
+    assert caller.read_text().endswith("# mine\n")
     assert _init(tmp_path, "--profile", "cloudflare-s3", "--force") == 0
-    assert "mine" not in (tmp_path / ".ayasee.yaml").read_text()
+    assert not caller.read_text().endswith("# mine\n")
+
+
+# ---- an existing .ayasee.yaml (issue #48) ------------------------------------------------------
+
+
+def _customised(tmp_path, *args):
+    """A configuration init wrote, then customised, with no caller yet."""
+    assert _init(tmp_path, "--profile", "cloudflare-s3", *args) == 0
+    cfg = tmp_path / ".ayasee.yaml"
+    text = cfg.read_text().replace(REVIEWER_PLACEHOLDER, "tttao") + "solo_mode: true\n"
+    for p in sorted(tmp_path.rglob("*"), reverse=True):
+        if p != cfg and p.is_file():
+            p.unlink()
+    cfg.write_text(text)
+    return cfg, text
+
+
+def test_an_existing_configuration_is_kept_and_the_rest_written(tmp_path, capsys):
+    args = ("--iac-root", "infra/iac", "--plan", "free")
+    cfg, text = _customised(tmp_path, *args)
+    capsys.readouterr()
+    assert _init(tmp_path, "--profile", "cloudflare-s3", *args) == 0
+    out, err = capsys.readouterr()
+    assert cfg.read_text() == text  # reviewers.prod and solo_mode survive
+    assert "kept .ayasee.yaml" in out and "wrote .github/workflows/iac-approve.yml" in out
+    assert "init keeps it" in err and "key only in your file: solo_mode" in err
+    assert (tmp_path / "infra/iac/root.hcl").is_file()
+    boot = (tmp_path / "infra/iac/bootstrap/main.tf").read_text()
+    assert re.search(r'variable "private_repository_plan" \{[^}]*default\s*=\s*"free"', boot, re.S)
+
+
+def test_force_never_replaces_a_configuration_that_loads(tmp_path):
+    cfg, text = _customised(tmp_path, "--plan", "free")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--plan", "free", "--force") == 0
+    assert cfg.read_text() == text
+
+
+def test_replace_config_writes_the_template(tmp_path):
+    cfg, _ = _customised(tmp_path, "--plan", "free")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--plan", "free", "--replace-config") == 0
+    assert REVIEWER_PLACEHOLDER in cfg.read_text() and "solo_mode" not in cfg.read_text()
+
+
+def test_the_layout_is_read_from_the_configuration(tmp_path, capsys):
+    """No flag: stages, iac_root and the prefix come from the file, not the profile defaults."""
+    cfg = tmp_path / ".ayasee.yaml"
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--stages", "dev,staging,prod",
+                 "--iac-root", "infra", "--environment-prefix", "ops-") == 0  # fmt: skip
+    text = cfg.read_text()
+    for p in [p for p in tmp_path.rglob("*") if p.is_file() and p != cfg]:
+        p.unlink()
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    assert cfg.read_text() == text
+    boot = (tmp_path / "infra/bootstrap/main.tf").read_text()
+    assert '["dev", "staging", "prod"]' in boot
+    assert re.search(r'variable "environment_prefix" \{[^}]*default\s*=\s*"ops-"', boot, re.S)
+    assert (tmp_path / "infra/stages/staging/.gitkeep").is_file()
+
+
+@pytest.mark.parametrize(
+    ("flag", "msg"),
+    [
+        (["--stages", "dev,prod"], "--stages dev,prod (it has test,prod)"),
+        (["--iac-root", "infra"], "--iac-root infra (it has .)"),
+        (["--environment-prefix", "x-"], "--environment-prefix 'x-' (it has '')"),
+        (["--gate-mechanism", "workflow"], "contradicts gate_mechanism: environment"),
+    ],
+)
+def test_a_flag_that_contradicts_the_configuration_is_refused(tmp_path, capsys, flag, msg):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    (tmp_path / "root.hcl").unlink()
+    capsys.readouterr()
+    assert _init(tmp_path, "--profile", "cloudflare-s3", *flag) == 1
+    assert msg in capsys.readouterr().err
+    assert not (tmp_path / "root.hcl").exists()  # nothing written
+
+
+def test_a_gate_the_detection_would_not_choose_needs_the_flag(tmp_path, capsys):
+    cfg, text = _customised(tmp_path, "--plan", "free")  # gate_mechanism: workflow
+    capsys.readouterr()
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 1  # no plan known: environment
+    err = capsys.readouterr().err
+    assert "sets gate_mechanism: workflow, but init would choose environment" in err
+    assert "--gate-mechanism workflow" in err
+    assert not [p for p in (tmp_path / ".github").rglob("*") if p.is_file()]  # nothing written
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--gate-mechanism", "workflow") == 0
+    assert cfg.read_text() == text
+
+
+def test_a_configuration_that_does_not_load_is_refused_untouched(tmp_path, capsys):
+    cfg = tmp_path / ".ayasee.yaml"
+    cfg.write_text("stages: [test, prod]\nmine: 1\n")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--force") == 1
+    err = capsys.readouterr().err
+    assert "does not load" in err and "unknown key(s): mine" in err and "--replace-config" in err
+    assert cfg.read_text() == "stages: [test, prod]\nmine: 1\n"
+    assert not (tmp_path / ".github").exists()
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--replace-config") == 0
+    assert "mine" not in cfg.read_text()
+
+
+def test_a_units_root_init_does_not_scaffold_is_refused(tmp_path, capsys):
+    (tmp_path / ".ayasee.yaml").write_text("stages: [test, prod]\nunits_root: live\n")
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 1
+    assert "units_root: live, but init scaffolds stages" in capsys.readouterr().err
+    assert not (tmp_path / ".github").exists()
+
+
+def test_upgrade_refuses_replace_config(tmp_path, capsys):
+    assert _init(tmp_path, "--upgrade", "--replace-config") == 1
+    assert "--replace-config does not apply" in capsys.readouterr().err
 
 
 def test_init_can_run_twice(tmp_path, capsys):
@@ -119,7 +230,7 @@ def test_init_can_run_twice(tmp_path, capsys):
     capsys.readouterr()
     assert _init(tmp_path, *args) == 0
     out = capsys.readouterr().out
-    assert "wrote " not in out and "unchanged .ayasee.yaml" in out
+    assert "wrote " not in out and "kept .ayasee.yaml" in out
     assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
 
@@ -788,10 +899,10 @@ def test_a_workflow_scaffold_is_rerunnable_and_upgrade_moves_the_approve_pin(tmp
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     assert _init(tmp_path, *args) == 0
     assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    # the same repository without the flags: the scaffold differs, so nothing is written
+    # the same repository without the flags: init would choose another gate, so nothing is written
     capsys.readouterr()
     assert _init(tmp_path, "--profile", "cloudflare-s3") == 1
-    assert "key only in your file (--force drops it): gate_mechanism" in capsys.readouterr().err
+    assert "sets gate_mechanism: workflow, but init would choose" in capsys.readouterr().err
     assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     other = "c" * 40
     upgrade = ["init", "--dir", str(tmp_path), "--upgrade", "--ref", other, "--unverified-ref"]

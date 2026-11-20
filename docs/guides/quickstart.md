@@ -77,8 +77,10 @@ configuration file and the ayasee callers `.github/workflows/iac-*.yml`
 `iac-staged.yml`, `iac-nightly.yml` and `iac-breakglass.yml`, so they do not collide with the
 workflows of the applications. It can be run again on a repository that is partly prepared: it
 skips a file whose content is identical (and never refuses over an empty `.gitkeep`), and for a
-file that differs it prints a diff (for `.ayasee.yaml`, also the keys that differ) and writes
-nothing unless you pass `--force`. To move to another release, run
+file that differs it prints a diff and writes nothing unless you pass `--force`. An existing
+`.ayasee.yaml` that loads is kept, even with `--force`: init reads its stages, `iac_root`,
+environment prefix and gate from it, refuses a flag that contradicts them, and notes the keys that
+differ from the template (`--replace-config` writes the template instead). To move to another release, run
 `uvx ayasee@X.Y.Z init --upgrade` (see [adopt](adopt.md#upgrade-the-pin)). From a source checkout of
 ayasee it needs `--ref`, because its templates may differ from any release. The placeholders that
 only you can fill (subscription and tenant GUIDs, storage account names, the Cloudflare IDs) stay,
