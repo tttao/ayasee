@@ -236,7 +236,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: prefix
@@ -328,7 +328,7 @@ jobs:
             *) echo "::error::cannot check whether $SHA is on main (git exit $rc)"
                exit 1 ;;
           esac
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -432,7 +432,7 @@ jobs:
           login="$(ayasee approvals list --repo "$REPO" --run-id "$RUN_ID" --env "$BREAKGLASS_ENV")"
           echo "login=$login" >>"$GITHUB_OUTPUT"
       - id: plan
-        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/plan@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           env: prod
           units-root: ${{ steps.cfg.outputs.units-root }}
@@ -467,13 +467,13 @@ jobs:
           ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
           ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
           DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
-      - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/policy@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
           stage: prod
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: apply
-        uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/apply@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
           CLOUDFLARE_API_TOKEN: ${{ steps.cfg.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
@@ -511,7 +511,7 @@ jobs:
         run: |
           f="$RUNNER_TEMP/ayasee/prod/units.json"
           if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
-      - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/ledger@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         if: ${{ always() && steps.units.outputs.units-json != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -556,7 +556,7 @@ jobs:
           [ -z "$CHANGESET" ] || args+=(--changeset "$CHANGESET")
           [ -z "$ROLLBACK_FROM" ] || args+=(--rollback-from "$ROLLBACK_FROM")
           ayasee issue post-approval "${args[@]}"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         if: ${{ always() && steps.apply.outcome != 'skipped' }}
         with:
           event: breakglass_used
@@ -566,7 +566,7 @@ jobs:
           run-url: ${{ env.RUN_URL }}
           approver: ${{ steps.approver.outputs.login }}
           teams-webhook: ${{ secrets.teams-webhook }}
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         if: ${{ failure() }}
         with:
           event: prod_failed
@@ -628,7 +628,7 @@ jobs:
             *) echo "::error::cannot check whether $SHA is on main (git exit $rc)"
                exit 1 ;;
           esac
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Refuse settings that are not supported yet (R35, R73)
@@ -719,7 +719,7 @@ jobs:
               exit 1 ;;
           esac
       - id: plan
-        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        uses: tttao/ayasee/actions/plan@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           env: prod
           units-root: ${{ steps.cfg.outputs.units-root }}
@@ -754,7 +754,7 @@ jobs:
           ARM_TENANT_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
           ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
           DATABRICKS_AUTH_TYPE: ${{ steps.cfg.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
-      - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/policy@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
           stage: prod
@@ -813,7 +813,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/setup@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           tool-mirror: ${{ inputs.tool-mirror }}
       - name: Open the break-glass approval issue
@@ -844,7 +844,7 @@ jobs:
             echo "- sha: \`$SHA\`"
             echo "- manifest-digest: \`$DIGEST\`"
           } >>"$GITHUB_STEP_SUMMARY"
-      - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
+      - uses: tttao/ayasee/actions/notify@376ddbfb7a95f764755a457d2ce9c73f73afdb7b # AYASEE_REF
         with:
           event: prod_waiting
           repo: ${{ github.repository }}
