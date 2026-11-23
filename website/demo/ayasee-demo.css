@@ -26,7 +26,7 @@ figure{margin:0}
 .ay-ln{display:none;min-height:25px;white-space:pre-wrap;overflow-wrap:anywhere}
 .ay-ps{color:#5fd38d;font-weight:700}.ay-cmd{color:#fff}
 .ay-caret{display:inline-block;width:9px;height:19px;background:#d7dde5;vertical-align:-3px;margin-left:1px;visibility:hidden}
-.ay-ok{color:#5fd38d}.ay-fail{color:#ff7b72}.ay-h{color:#79c0ff;font-weight:700}.ay-dim{color:#7d8896}
+.ay-ok{color:#5fd38d}.ay-fail{color:#ff7b72}.ay-warn{color:#e3b341}.ay-h{color:#79c0ff;font-weight:700}.ay-dim{color:#7d8896}
 .ay-pin{border-radius:4px;padding:1px 4px;margin:0 -4px}.ay-pin.on{background:#1e3a2a;color:#9be9b0;box-shadow:0 0 0 1px #2d6a45}
 .ay-key.on{background:#1e3a2a;color:#9be9b0;box-shadow:inset 3px 0 0 #5fd38d}
 

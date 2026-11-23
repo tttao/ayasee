@@ -1,6 +1,7 @@
 /* ayasee demo. Steps and page wiring; the engine is vendor/step-window.js (MIT, see vendor/step-window.LICENSE.txt). */
 /* ayasee demo: five steps on the html-demo engine (vanilla). Every frame is a pure function of t.
-   All terminal text is real ayasee 0.1.0-rc.3 output (init, doctor, ledger show). The GitHub screens use
+   All terminal text is real ayasee 0.1.0-rc.5 output (init and doctor on a bootstrapped throwaway public
+   repository, renamed acme/platform; ledger show). Long outputs are cut to some of their lines, none composed. The GitHub screens use
    the real job names (resolve, plan-first-stage, plan-dev, prod-plan, prod) and the real "Prod gate" summary.
    Prefix: ay- (classes) */
 (function () {
@@ -15,6 +16,7 @@
     `<div class="ay-ln ay-prompt" data-at="${a - 0.25}"${off != null ? ` data-off="${off}"` : ''}><span class="ay-ps">$</span> <span class="ay-cmd" id="${id}" data-text="${esc(text)}" data-a="${a}" data-b="${b}"></span><i class="ay-caret" data-caret="${id}"></i></div>`;
   const ok = (s) => `  <b class="ay-ok">ok</b>    ${esc(s)}`;
   const fail = (s) => `  <b class="ay-fail">FAIL</b>  ${esc(s)}`;
+  const warn = (s) => `  <b class="ay-warn">warn</b>  ${esc(s)}`;
   const h = (s) => `<span class="ay-h">${esc(s)}</span>`;
   const dim = (s) => `<span class="ay-dim">${esc(s)}</span>`;
 
@@ -36,7 +38,7 @@
   const term = (inner, title) => `<div class="ay-term"><div class="ay-tt">${esc(title)}</div><div class="ay-body">${inner}</div></div>`;
 
   /* ---------- step 1: scaffold ---------- */
-  const INIT = 'uvx ayasee@0.1.0-rc.3 init --profile cloudflare-s3 --iac-root infra/iac';
+  const INIT = 'uvx ayasee@0.1.0-rc.5 init --profile cloudflare-s3 --iac-root infra/iac';
   const WROTE = ['.ayasee.yaml', '.github/workflows/iac-pr.yml', '.github/workflows/iac-staged.yml', '.github/workflows/iac-nightly.yml',
     '.github/workflows/iac-breakglass.yml', 'infra/iac/root.hcl', 'infra/iac/bootstrap/main.tf', 'infra/iac/bootstrap/.terraform.lock.hcl',
     'infra/iac/stages/test/.gitkeep', 'infra/iac/stages/prod/.gitkeep'];
@@ -46,16 +48,20 @@
     html: term(
       cmd('c1', INIT, 0.6, 2.3) +
       WROTE.map((f, i) => ln(WROTE_AT + i * WROTE_STEP, `<span class="ay-dim">wrote</span> ${esc(f)}`)).join('') +
-      ln(5.0, '') +
-      ln(5.0, `Pinned to <span class="ay-pin" id="pin">tttao/ayasee@5a08fde90cf9b4f470d6499e7bc1a13737c1aa2b</span>.`) +
-      ln(5.5, '<b>Next:</b>') +
-      ln(5.7, '  1. run the bootstrap root in infra/iac/bootstrap (a repository administrator, locally)') +
-      ln(5.9, '  2. create the state store (the profile\'s README), then the secrets: run one by one') +
-      ln(6.1, '     the commands of `tofu output -raw secret_commands` in infra/iac/bootstrap'),
+      ln(4.9, '') +
+      ln(4.9, `Pinned to <span class="ay-pin" id="pin">tttao/ayasee@42f0e3b024f02e6e067e6eee64a3d1a4fed3e71d</span> (gate_mechanism: environment).`) +
+      ln(5.3, '<b>Next:</b>') +
+      ln(5.45, '  1. run the bootstrap root in infra/iac/bootstrap (a repository administrator, locally,') +
+      ln(5.45, '     with prod_reviewers and breakglass_reviewers)') +
+      ln(5.6, '  2. create the state store (the profile\'s README), then the secrets: run one by one') +
+      ln(5.6, '     the commands of `tofu output -raw secret_commands` in infra/iac/bootstrap') +
+      ln(5.75, '  3. add the units under infra/iac/stages/&lt;stage&gt;/') +
+      ln(5.9, '  4. GITHUB_TOKEN="$(gh auth token)" ayasee doctor, until it has no failure') +
+      ln(6.05, '  5. open the first pull request'),
       'acme/platform: zsh'),
     draw(t, $) {
       drawTerm(t, $);
-      $('#pin').classList.toggle('on', t >= 5.1);
+      $('#pin').classList.toggle('on', t >= 5.0);
       return { cursor: { x: 1000, y: 600, hide: true } };
     },
   };
@@ -67,19 +73,22 @@
     id: 'doctor', name: 'Check', dur: 8,
     html: term(
       cmd('c2', 'GITHUB_TOKEN="$(gh auth token)" ayasee doctor', 0.4, 1.9, CLEAR) +
-      ln(2.1, h('configuration'), CLEAR) + ln(2.1, ok('.ayasee.yaml loads (stages test, prod)'), CLEAR) + ln(2.1, '', CLEAR) +
-      ln(2.25, h('callers'), CLEAR) + ln(2.25, ok('.github/workflows/iac-staged.yml (staged -> iac-staged): pinned to tttao/ayasee@5a08fde90cf9'), CLEAR) + ln(2.25, '', CLEAR) +
+      ln(2.1, h('GitHub plan'), CLEAR) + ln(2.1, ok('a public repository has every feature the gate needs (public)'), CLEAR) + ln(2.1, '', CLEAR) +
+      ln(2.25, h('callers'), CLEAR) + ln(2.25, ok('.github/workflows/iac-staged.yml (staged -> iac-staged): pinned to tttao/ayasee@42f0e3b024f0'), CLEAR) + ln(2.25, '', CLEAR) +
       ln(2.4, h('GitHub (acme/platform)'), CLEAR) +
-      FAILS.map((e, i) => ln(2.5 + i * 0.2, fail(`environment ${e} is missing (run the bootstrap)`), CLEAR)).join('') + ln(4.0, '', CLEAR) +
-      ln(4.0, '<b class="ay-fail">7 failed</b>, 3 warnings, 1 skipped', CLEAR) +
-      ln(4.2, dim('# run the bootstrap, then again'), CLEAR) +
+      FAILS.map((e, i) => ln(2.5 + i * 0.18, fail(`environment ${e} is missing (run the bootstrap)`), CLEAR)).join('') +
+      ln(3.8, fail('a ledger-token is passed but no ruleset requires pull requests on main: the token could push to main'), CLEAR) + ln(4.0, '', CLEAR) +
+      ln(4.0, '<b class="ay-fail">8 failed</b>, 3 warnings, 1 skipped', CLEAR) +
+      ln(4.2, dim('# run the bootstrap, set the secrets and a ruleset on main, then again'), CLEAR) +
       cmd('c2b', 'ayasee doctor', 5.0, 5.7) +
-      ln(5.95, h('configuration')) + ln(5.95, ok('.ayasee.yaml loads (stages test, prod)')) +
+      ln(5.95, h('configuration')) + ln(5.95, ok('.ayasee.yaml loads (stages test, prod)')) + ln(5.95, warn('identity: secrets: DEVIATION, stage isolation rests on token scopes')) +
       ln(6.1, h('GitHub (acme/platform)')) +
-      ln(6.1, ok('environments present: iac-test, iac-test-plan, iac-prod-plan, iac-prod, iac-prod-breakglass, iac-drift-test, iac-drift-prod')) +
+      ln(6.1, ok('environments present: iac-test, iac-prod-plan, iac-prod, iac-test-plan, iac-prod-breakglass, iac-drift-test, iac-drift-prod')) +
+      ln(6.2, ok('iac-prod: 1 required reviewer(s)')) + ln(6.2, ok('iac-prod-breakglass: 1 required reviewer(s)')) +
+      ln(6.3, ok('24 environment secret(s) in place')) +
       ln(6.3, ok('main has a pull-request ruleset (the runs check the ledger token\'s bypass)')) +
-      ln(6.5, h('release pin')) + ln(6.5, ok('tttao/ayasee@5a08fde90cf9 is the release commit of 0.1.0-rc.3 (CLI 0.1.0-rc.3)')) +
-      ln(6.9, '') + ln(6.9, '<b class="ay-ok">0 failed</b>, 0 warnings, 0 skipped'),
+      ln(6.5, h('release pin')) + ln(6.5, ok('tttao/ayasee@42f0e3b024f0 is the release commit of 0.1.0-rc.5 (CLI 0.1.0-rc.5)')) +
+      ln(6.9, '') + ln(6.9, '<b class="ay-ok">0 failed</b>, 1 warnings, 1 skipped'),
       'acme/platform: zsh'),
     draw(t, $) {
       drawTerm(t, $);
@@ -93,7 +102,7 @@
     <div class="ay-ghbar"><span class="ay-logo"></span><span class="ay-crumb">${crumb}</span></div>${inner}</div>`;
 
   /* ---------- step 3: pull request ---------- */
-  const CHECKS = [['iac-pr / resolve', 0.9], ['iac-pr / static checks and scans', 1.3], ['iac-pr / plan-first-stage', 1.7], ['iac-pr / plan-dev', 2.1]];
+  const CHECKS = [['iac-pr / resolve', 0.9], ['iac-pr / checks', 1.3], ['iac-pr / plan-first-stage', 1.7], ['iac-pr / plan-dev', 2.1]];
   const C_IN = 3.0, C_OUT = 3.9, LOST_AT = 5.0;
   const step3 = {
     id: 'plan', name: 'Review plan', dur: 8,
@@ -172,7 +181,7 @@
   const SHA = '7f3a9c1e5d20b8a4c6e1f09d2b3a47c5e8d61f0a';
   const JSON_LINES = [
     '{', '  "approver": "maria",', '  "breakglass_incident": null,', '  "converged": true,', '  "env": "prod",',
-    '  "recorded_at": "2026-11-14T22:32:57.285826Z",', '  "repo": "acme/platform",', '  "run_attempt": 1,', '  "run_id": 4182,',
+    '  "recorded_at": "2026-11-23T08:33:01.768408Z",', '  "repo": "acme/platform",', '  "run_attempt": 1,', '  "run_id": 4182,',
     `  "sha": "${SHA}",`, '  "units": {', '    "grants": {', '      "converged": true,', '      "status": "applied"', '    },',
     '    "workspace": {', '      "converged": true,', '      "status": "applied"', '    }', '  }', '}'];
   const J_AT = 2.5, J_STEP = 0.1;
