@@ -1,0 +1,33 @@
+schema: spec-driven
+
+context: |
+  ayasee: a GitHub Actions-only CI/CD framework for staged, gated IaC promotion
+  (OpenTofu + Terragrunt first). Pre-alpha; latest release candidate v0.1.0-rc.5.
+  Stack: Python CLI `ayasee` (src/ayasee, uv, pytest, ruff), reusable workflows
+  (.github/workflows/iac-*.yml), composite actions (actions/*, bash), Rego packs
+  (policy/, conftest/opa), OpenTofu bootstrap modules (modules/), cockpit site
+  (cockpit-site/, Vite + TypeScript, no framework).
+  Ground rules: everything fails closed; no plan values leave a job (counts,
+  addresses and links only); PR code is untrusted (R39); design decisions D1-D15
+  live in docs/governance/decisions.md and narrower rulings are cited as R<n>.
+  Docs live in docs/ (link-checked by scripts/check-links.py). Commits follow
+  Conventional Commits: `type(scope): subject`.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
