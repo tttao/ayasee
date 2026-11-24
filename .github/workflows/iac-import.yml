@@ -1,0 +1,311 @@
+# The import blocks of a unit's first adoption, from a plan made in CI (issue #58).
+# See docs/guides/adopt.md#6-write-the-units-and-import-what-exists and
+# docs/concepts/pr-checks.md#import-blocks-from-ci-iac-import.
+#
+# Started by hand on a branch (workflow_dispatch, write access) with a stage and a unit, or every
+# unit of the stage. It never commits: a maintainer reviews the result and adds it to the branch.
+#
+#   resolve  (no environment, no secret) checks out the dispatched commit and checks the inputs
+#            with `ayasee import-target`: the stage must be the FIRST stage, the unit a relative
+#            path of plain names with a terragrunt.hcl under <units_root>/<stage>. Any other stage
+#            is refused: its environments deploy from main only (or apply), and a branch's code
+#            must not run with them; those imports stay a local `ayasee import-plan` step.
+#   import   (environment <first stage>-plan: contents read, id-token write) plans read-only
+#            exactly as plan-first-stage of iac-pr does (same-job, no encryption, -lock=false),
+#            runs `ayasee import-plan --plan-dir` on the plan JSON (GET requests only), then, in a
+#            step that runs whatever happened, deletes every plan file, plan JSON and engine log.
+#            Only the imports.tf files (addresses and provider IDs) and a summary (the outcome of
+#            each planned create, by address) are uploaded, as artifact ayasee-imports.
+#   comment  (contents read, pull-requests write; no OIDC, checks out the default branch, never
+#            the dispatched one: R39) posts the summary on the open pull request of that branch.
+#
+# Trust model: <first stage>-plan accepts every branch and holds read-only credentials, which
+# iac-pr already hands to a pull request's code; anyone who can dispatch this can push a branch
+# whose own workflow names that environment. So this run reaches nothing a pull-request plan does
+# not. The provider tokens reach the plan step; CLOUDFLARE_API_TOKEN also reaches the lookups.
+# On GitHub Free that environment holds no secret of its own: the job reads the repository
+# secrets, which every stage and the pull-request plan already read (D15).
+#
+# Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
+# rewrites them at release (or to ./actions for in-repo runs). This file is not callable before that.
+#
+# Environment names: `environment_prefix` of .ayasee.yaml plus <first stage>-plan, named by resolve;
+# docs/reference/ayasee-yaml.md#environment-names.
+name: iac-import
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: >-
+          The stage to import into: empty or the first stage. Any other stage is refused (run
+          `ayasee import-plan` locally with that stage's plan credentials).
+        type: string
+        required: false
+        default: ""
+      unit:
+        description: >-
+          The unit, as its path under <units_root>/<stage> (for example dns, or net/edge). Empty
+          plans every unit of the stage.
+        type: string
+        required: false
+        default: ""
+      comment:
+        description: Post the result on the open pull request of the dispatched branch.
+        type: boolean
+        required: false
+        default: true
+      tool-mirror:
+        description: >-
+          Optional https base URL (no trailing slash) replacing https://github.com for tool
+          downloads (GitHub Enterprise Server or offline runners). SHA-256 checks still apply.
+        type: string
+        required: false
+        default: ""
+      config-path:
+        description: Path of the ayasee configuration file.
+        type: string
+        required: false
+        default: .ayasee.yaml
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          identity: secrets only. The read-only token of <first-stage>-plan, as an environment
+          secret of that environment (the one iac-pr passes); a branch's code runs with it. The
+          plan step and the import-plan lookups (GET requests only) receive it.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: >-
+          identity: secrets only, read-only, an environment secret of <first-stage>-plan as for
+          iac-pr. Only the plan step receives it.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: >-
+          identity: secrets only, read-only, an environment secret of <first-stage>-plan as for
+          iac-pr. Only the plan step receives it.
+        required: false
+      AYASEE_PROVIDER_ENV:
+        description: >-
+          identity: secrets only, as in iac-pr, an environment secret of <first-stage>-plan. Only
+          the plan step receives it.
+        required: false
+
+permissions: {}
+
+jobs:
+  resolve:
+    # checks the stage and the unit before any environment or credential is used
+    name: resolve
+    if: ${{ github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code
+    outputs:
+      environment: ${{ steps.target.outputs.environment }}
+      stage: ${{ steps.target.outputs.stage }}
+      units-root: ${{ steps.target.outputs.units-root }}
+      engine: ${{ steps.target.outputs.engine }}
+      identity: ${{ steps.target.outputs.identity }}
+      provider-env-names: ${{ steps.target.outputs.provider-env-names }}
+      only-units: ${{ steps.target.outputs.only-units }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: target
+        name: Check the stage and the unit
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+          STAGE: ${{ inputs.stage }}
+          UNIT: ${{ inputs.unit }}
+        run: |
+          # refuses any stage but the first, and a unit that is not a plain path to a unit
+          if ! ayasee import-target --path "$CONFIG_PATH" --stage "$STAGE" --unit "$UNIT" \
+            >"$RUNNER_TEMP/target" 2>"$RUNNER_TEMP/err"; then
+            while IFS= read -r line; do echo "::error::$line"; done <"$RUNNER_TEMP/err"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/target" >>"$GITHUB_OUTPUT"
+
+  import:
+    # plan read-only, write the import blocks, delete every plan value, upload imports.tf only
+    name: import
+    needs: resolve
+    if: ${{ github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/') && needs.resolve.outputs.environment != '' }}
+    runs-on: ubuntu-latest
+    # <environment_prefix><first-stage>-plan: the pull-request plan environment of iac-pr
+    environment: ${{ needs.resolve.outputs.environment }}
+    permissions:
+      contents: read # check out the code
+      id-token: write # OIDC login to Azure and Databricks (read-only identity)
+    concurrency:
+      group: ayasee-${{ github.repository }}-import-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - name: Refuse settings that are not supported yet (R35, R73)
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          if ! problems="$(ayasee config check-supported --path "$CONFIG_PATH" 2>&1)"; then
+            while IFS= read -r line; do echo "::error::$line"; done <<<"$problems"
+            exit 1
+          fi
+      - name: Label deviations from the compliant defaults
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+        run: |
+          labels="$(ayasee config labels --path "$CONFIG_PATH")"
+          [ -n "$labels" ] || exit 0
+          while IFS= read -r line; do
+            echo "::warning::$line"
+            echo "> **$line**" >>"$GITHUB_STEP_SUMMARY"
+          done <<<"$labels"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: ${{ needs.resolve.outputs.identity == 'oidc' }}
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - id: plan
+        uses: OWNER/ayasee/actions/plan@0000000000000000000000000000000000000000 # AYASEE_REF
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          AWS_ACCESS_KEY_ID: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AYASEE_PROVIDER_ENV: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.AYASEE_PROVIDER_ENV || '' }}
+          AYASEE_PROVIDER_ENV_NAMES: ${{ needs.resolve.outputs.provider-env-names }}
+          # identity: oidc (default) is the Entra OIDC profile; identity: secrets sets none of these
+          ARM_USE_OIDC: ${{ needs.resolve.outputs.identity == 'oidc' && 'true' || '' }}
+          ARM_CLIENT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_CLIENT_ID || '' }}
+          ARM_TENANT_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_TENANT_ID || '' }}
+          ARM_SUBSCRIPTION_ID: ${{ needs.resolve.outputs.identity == 'oidc' && vars.AZURE_SUBSCRIPTION_ID || '' }}
+          DATABRICKS_AUTH_TYPE: ${{ needs.resolve.outputs.identity == 'oidc' && 'github-oidc-azure' || '' }}
+        with:
+          env: ${{ needs.resolve.outputs.stage }}
+          units-root: ${{ needs.resolve.outputs.units-root }}
+          engine: ${{ needs.resolve.outputs.engine }}
+          only-units: ${{ needs.resolve.outputs.only-units }}
+          encrypt: "false"
+          binding-mode: same-job # a pre-prod stage; the plan files are deleted below, never applied
+          lock: "false" # a read-only identity cannot write the state lock
+      - id: imports
+        name: Write the import blocks (read-only provider lookups)
+        if: ${{ steps.plan.outcome == 'success' }}
+        env:
+          # the lookups read this token only (GET requests); nothing else reaches this step
+          CLOUDFLARE_API_TOKEN: ${{ needs.resolve.outputs.identity == 'secrets' && secrets.CLOUDFLARE_API_TOKEN || '' }}
+          JSON_DIR: ${{ steps.plan.outputs.json-dir }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
+          STAGE: ${{ needs.resolve.outputs.stage }}
+        run: |
+          # stdout lists each planned create by address and outcome; IDs go to the files only.
+          # The artifact directory starts empty: nothing the plan's code left there is uploaded.
+          rm -rf "$RUNNER_TEMP/ayasee-import"
+          ayasee import-plan --plan-dir "$JSON_DIR" --out-dir "$RUNNER_TEMP/ayasee-import" \
+            --unit-prefix "$UNITS_ROOT/$STAGE" --summary "$RUNNER_TEMP/ayasee-import/import-summary.md"
+      - id: delete
+        name: Delete the plan files, the plan JSON and the engine logs
+        if: ${{ always() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/ayasee"
+          find "$RUNNER_TEMP" "$GITHUB_WORKSPACE" -name '*.tfplan' -type f -delete
+          if [ -n "$(find "$RUNNER_TEMP" "$GITHUB_WORKSPACE" -name '*.tfplan' -print -quit)" ]; then
+            echo "::error::a plan file is left behind; nothing is uploaded"
+            exit 1
+          fi
+      - id: body
+        name: Write the summary
+        if: ${{ !cancelled() }}
+        env:
+          STAGE: ${{ needs.resolve.outputs.stage }}
+          SHA: ${{ github.sha }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          IMPORTS_OUTCOME: ${{ steps.imports.outcome }}
+        run: |
+          out="$RUNNER_TEMP/ayasee-import"
+          summary="$out/import-summary.md"
+          head="### Import plan of $STAGE at \`$SHA\`"
+          # without import-plan's output, upload nothing but the text written here
+          if [ "$IMPORTS_OUTCOME" = skipped ] || [ ! -f "$summary" ]; then rm -rf "$out"; fi
+          mkdir -p "$out"
+          if [ "$PLAN_OUTCOME" != success ]; then
+            printf '%s\n\nThe plan of %s failed, so nothing was written. See the [run](%s).\n' \
+              "$head" "$STAGE" "$RUN_URL" >"$summary"
+          elif [ ! -f "$summary" ]; then
+            printf '%s\n\nimport-plan failed (a provider API error or an unreadable plan): nothing was written. See the [run](%s).\n' \
+              "$head" "$RUN_URL" >"$summary"
+          else
+            {
+              echo "$head"
+              echo
+              if [ "$IMPORTS_OUTCOME" != success ]; then
+                echo "Some units have ambiguous matches: their imports.tf was not written. Write those blocks by hand."
+                echo
+              fi
+              cat "$summary"
+              echo
+              printf 'Review every block, then add the files to this branch: they are in the artifact %s of the [run](%s), at their repository paths. ayasee never commits.\n' \
+                "\`ayasee-imports\`" "$RUN_URL"
+            } >"$summary.new"
+            mv "$summary.new" "$summary"
+          fi
+          cat "$summary" >>"$GITHUB_STEP_SUMMARY"
+      - name: Keep the import blocks and the summary
+        if: ${{ !cancelled() && steps.delete.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ayasee-imports
+          path: ${{ runner.temp }}/ayasee-import
+          retention-days: 7
+          if-no-files-found: error
+
+  comment:
+    # posts the summary on the branch's pull request; no OIDC and no branch code: only the default
+    # branch is checked out (R39), which also gives the in-repo (--local, ./actions) form its actions
+    name: comment
+    needs: [resolve, import]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/') && inputs.comment && needs.import.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the default branch
+      pull-requests: write # the sticky comment
+    steps:
+      - name: Check out the default branch (never the dispatched one)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: OWNER/ayasee/actions/setup@0000000000000000000000000000000000000000 # AYASEE_REF
+        with:
+          tool-mirror: ${{ inputs.tool-mirror }}
+      - id: download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true # the import job reports its own failure
+        with:
+          name: ayasee-imports
+          path: ${{ runner.temp }}/ayasee-import
+      - name: Explain a missing artifact
+        if: ${{ steps.download.outcome != 'success' }}
+        run: echo "::warning::no summary from the import job; see that job"
+      - name: Post the sticky comment on the branch's pull request
+        if: ${{ steps.download.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: >-
+          ayasee pr-comment --repo "$REPO" --head-branch "$BRANCH" --marker import-plan
+          --body-file "$RUNNER_TEMP/ayasee-import/import-summary.md"

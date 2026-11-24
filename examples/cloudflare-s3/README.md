@@ -231,6 +231,15 @@ uvx --from "git+https://github.com/tttao/ayasee@<release SHA>" ayasee import-pla
 rm adopt.json && find .terragrunt-cache -name adopt.tfplan -delete
 ```
 
+For `stages/test/dns` CI can do it instead, with the secrets of `test-plan`: push a branch with the
+unit and run `gh workflow run iac-import.yml --ref <branch> -f unit=dns`. The
+[`iac-import`](.github/workflows/iac-import.yml) caller plans the unit read-only in `test-plan`,
+runs `import-plan`, deletes the plan file and JSON in the job, and publishes only `imports.tf` (as
+the artifact `ayasee-imports`, at `stages/test/dns/imports.tf`) and the outcome of each address, also
+as a comment on the branch's pull request. It never commits. It refuses the prod units: `prod-plan`
+deploys from `main` only, so their blocks stay the local step above
+([the adoption guide](../../docs/guides/adopt.md#the-first-stage-from-ci-iac-import)).
+
 It reads the creates of the plan, looks each one up with GET requests only, and writes
 `imports.tf` next to `terragrunt.hcl` (Terragrunt copies it into the working directory with the
 shared code, so each stage has its own IDs). The plan file and `adopt.json` hold plan values:

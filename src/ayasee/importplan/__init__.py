@@ -187,6 +187,8 @@ def render(outcomes: list[Outcome]) -> str:
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.plan_dir is not None:
+        return _run_dir(args)
     out = Path(args.out)
     if out.exists() and not args.force:
         print(f"import-plan: {out} exists; pass --force to overwrite it", file=sys.stderr)
@@ -214,13 +216,119 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- a whole plan directory (the iac-import workflow, issue #58) -----------------------------
+
+# one path segment of a unit or of its prefix: no "..", no hidden name, no separator, no space
+_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _safe_rel(path: str, what: str) -> str:
+    """``path`` if it is a relative path of plain segments, else :class:`ImportPlanError`: the
+    written files must land under the output directory, at the unit's path in the repository."""
+    if not path or not all(_SEGMENT.fullmatch(p) for p in path.split("/")):
+        raise ImportPlanError(f"{what} is not a relative path of plain names")
+    return path
+
+
+def unit_path(name: str) -> str:
+    """The repository path of a unit, below its stage, from its plan name (``/`` written as
+    ``__`` by the plan action)."""
+    return _safe_rel(name.replace("__", "/"), f"unit name {name!r}")
+
+
+def _md(text: str) -> str:
+    from ayasee.changeset import _md as md
+
+    return md(text)
+
+
+def _fence(text: str) -> str:
+    """``text`` in a fenced code block that no line of it can close."""
+    longest = max((len(m) for m in re.findall(r"~+", text)), default=0)
+    fence = "~" * max(3, longest + 1)
+    return f"{fence}hcl\n{text.rstrip(chr(10))}\n{fence}\n"
+
+
+def summarise(path: str, outcomes: list[Outcome], written: str | None) -> str:
+    """The values-free part of the comment for one unit: each planned create with its outcome,
+    by address, then the file written (addresses and provider IDs only)."""
+    lines = [f"#### `{_md(path)}`", ""]
+    if not outcomes:
+        lines.append("No planned create: nothing to import.")
+    for o in outcomes:
+        reason = f": {_md(o.reason)}" if o.reason else ""
+        lines.append(f"- {o.status} `{_md(o.address)}`{reason}")
+    lines.append("")
+    if any(o.status == "ambiguous" for o in outcomes):
+        lines.append(
+            "`imports.tf` not written: ambiguous matches. Resolve them by hand (never guessed)."
+        )
+    elif written is None:
+        lines.append("Nothing to import: no `imports.tf` for this unit.")
+    else:
+        count = sum(o.status == "import" for o in outcomes)
+        lines += [f"`{_md(path)}/imports.tf`, {count} import block(s):", "", _fence(written)]
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _run_dir(args: argparse.Namespace) -> int:
+    if not (args.out_dir and args.unit_prefix and args.summary):
+        print(
+            "import-plan: --plan-dir needs --out-dir, --unit-prefix and --summary",
+            file=sys.stderr,
+        )
+        return 1
+    out_dir, summary = Path(args.out_dir), Path(args.summary)
+    try:
+        prefix = _safe_rel(args.unit_prefix, "--unit-prefix")
+        plans = sorted(Path(args.plan_dir).glob("*.json"))
+        if not plans:
+            raise ImportPlanError(f"no plan JSON in {args.plan_dir}")
+        units = [(f"{prefix}/{unit_path(p.stem)}", p) for p in plans]
+        # every unit is looked up before anything is written: an API error anywhere writes nothing
+        resolved = [(path, resolve(planned_creates(p), PROVIDERS())) for path, p in units]
+    except (PlanFormatError, OSError) as exc:
+        print(f"import-plan: cannot read the plan: {exc}; nothing written", file=sys.stderr)
+        return 1
+    except ImportPlanError as exc:
+        print(f"import-plan: {exc}; nothing written", file=sys.stderr)
+        return 1
+    parts, failed = [], False
+    for path, outcomes in resolved:
+        written = None
+        for o in outcomes:
+            print(f"{o.status:<9} {path}: {o.address}" + (f": {o.reason}" if o.reason else ""))
+        if any(o.status == "ambiguous" for o in outcomes):
+            failed = True
+            print(f"import-plan: {path}: ambiguous matches; not written. Resolve them by hand.")
+        elif any(o.status == "import" for o in outcomes):
+            written = render(outcomes)
+            target = out_dir / path / "imports.tf"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(written)
+            print(f"import-plan: wrote {path}/imports.tf")
+        parts.append(summarise(path, outcomes, written))
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text("\n".join(parts))
+    return 1 if failed else 0
+
+
 def _setup(parser: argparse.ArgumentParser) -> None:
     parser.description = "Write import blocks for live objects a unit's plan would create."
-    parser.add_argument(
-        "--plan-json", required=True, help="`tofu show -json` of a plan of the unit"
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--plan-json", help="`tofu show -json` of a plan of the unit")
+    source.add_argument(
+        "--plan-dir",
+        help="a directory of <unit>.json plans (the plan action's json-dir): one imports.tf per "
+        "unit under --out-dir/<unit-prefix>/<unit>/, and a values-free --summary",
     )
     parser.add_argument("--out", default="imports.tf", help="output file (default: imports.tf)")
     parser.add_argument("--force", action="store_true", help="overwrite an existing output file")
+    parser.add_argument("--out-dir", help="with --plan-dir: where the imports.tf files go")
+    parser.add_argument(
+        "--unit-prefix", help="with --plan-dir: <units_root>/<stage>, the units' directory"
+    )
+    parser.add_argument("--summary", help="with --plan-dir: the Markdown summary to write")
     parser.set_defaults(handler=_run)
 
 

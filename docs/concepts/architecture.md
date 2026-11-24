@@ -78,6 +78,7 @@ flowchart LR
 | Component | Type | Role |
 |---|---|---|
 | `iac-pr` (`.github/workflows/iac-pr.yml`) | Reusable workflow | On `pull_request`: fmt and validate, Trivy and Checkov (scrubbed SARIF), a read-only plan of the changed dev units, the Rego pack on that plan, one sticky comment. Never applies. No job that evaluates PR code holds `pull-requests: write` or `security-events: write` (R39). See [pull-request checks](pr-checks.md). |
+| `iac-import` | Reusable workflow | Started by hand on a branch: a read-only plan of a first-stage unit in `<first stage>-plan`, `ayasee import-plan` on it, the plan files and JSON deleted in the job, and only `imports.tf` and a values-free summary uploaded and posted on the branch's pull request. Never commits; refuses every other stage. See [import blocks from CI](pr-checks.md#import-blocks-from-ci-iac-import). |
 | `iac-staged` | Reusable workflow | On push to `main`: `resolve`, the pre-prod slots `stage-1` to `stage-4` (one per configured pre-prod stage, unused ones skipped), `prod-plan`, then `prod` (gated) or `prod-in-sync`, plus `prod-result` for a rejected gate. See [the staged run](staged-run.md). |
 | `iac-nightly` | Reusable workflow | Per environment: drift plan at the ledger's live SHA, one issue per environment, prod drift raises stop-the-line. Re-scan of `main`. See [drift](drift.md). |
 | `iac-breakglass` | Reusable workflow | The one emergency path into prod: incident reference, separate `prod-breakglass` environment and reviewers, post-approval issue. With `gate_mechanism: workflow` it only plans (in `prod-plan`) and asks for an approval, which `iac-approve` with the incident applies in `prod-breakglass`. See [DORA mapping](../compliance/dora-art17.md). |
@@ -88,7 +89,7 @@ flowchart LR
 | `actions/risk` | Composite action | Runs `ayasee changeset` on a directory of plan JSON files. The plan action calls the same command. |
 | `actions/ledger` | Composite action | Writes the outcome of a stage to the ledger and, from `main`, mirrors it to Deployments. |
 | `actions/notify` | Composite action | Teams Adaptive Cards: counts and links only. A failed post never fails a run. |
-| `ayasee` CLI (`src/ayasee/`) | Python package | `binding`, `cascade`, `changed-units`, `changeset`, `config`, `drift`, `findings`, `guard`, `issue`, `approvals`, `ledger`, `notify`, `pr-comment`, `sarif-scrub` and `cockpit`. Every command fails closed. |
+| `ayasee` CLI (`src/ayasee/`) | Python package | `binding`, `cascade`, `changed-units`, `changeset`, `config`, `drift`, `findings`, `guard`, `issue`, `approvals`, `ledger`, `notify`, `pr-comment`, `sarif-scrub`, `import-plan`, `import-target` and `cockpit`. Every command fails closed. |
 | `policy/databricks/`, `policy/cloudflare/` | Rego | The policy packs, see [the policy packs](../reference/policy-pack.md). |
 | `rules/databricks-azure.yaml`, `rules/cloudflare.yaml` | YAML | The risk rules, see [the risk gate](risk-gate.md). |
 | `modules/github-environments`, `modules/azure-stage-identity` | OpenTofu modules | The nine environments, their reviewers and branch policies, and one managed identity with a federated credential per environment. |
@@ -109,7 +110,7 @@ table: [azure-stage-identity](../../modules/azure-stage-identity/README.md#role-
 
 | Environment | Used by | Branches | Reviewers | Can |
 |---|---|---|---|---|
-| `dev-plan` (`<first stage>-plan`) | `iac-pr` | all | none | Read the first stage, plan with `-lock=false` |
+| `dev-plan` (`<first stage>-plan`) | `iac-pr`, `iac-import` | all | none | Read the first stage, plan with `-lock=false` |
 | each pre-prod stage (default `dev`, `uat`) | `iac-staged` | `main` | none | Apply its own stage, its state, write the ledger |
 | `prod-plan` | `iac-staged` | `main` | none | Read and plan prod (state read, lock lease), wrap and unwrap the plan key (`tofu show -json` decrypts its own plan), write the prod ledger record. Cannot apply. |
 | `prod` | `iac-staged` | `main` | required, no self-review, no admin bypass | Apply prod, its state, unwrap the plan key, read and write the ledger |

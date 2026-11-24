@@ -312,6 +312,39 @@ def test_upgrade_moves_only_the_pin(tmp_path, capsys):
     assert "triggers untouched" in capsys.readouterr().out
 
 
+def test_the_import_caller_is_scaffolded_pinned_and_upgraded(tmp_path):
+    """iac-import (issue #58): a dispatch-only caller pinned like the others, its secrets by
+    name and exactly those the reusable workflow declares; Cloudflare only (lookups)."""
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    path = tmp_path / ".github/workflows/iac-import.yml"
+    text = path.read_text()
+    assert f"tttao/ayasee/.github/workflows/iac-import.yml@{SHA} #" in text
+    assert "OWNER" not in text and "0" * 40 not in text and "inherit" not in text
+    caller = yaml.safe_load(text)
+    assert list(caller[True]) == ["workflow_dispatch"]
+    (job,) = caller["jobs"].values()
+    reusable = yaml.safe_load((ROOT / ".github/workflows/iac-import.yml").read_text())
+    call = reusable[True]["workflow_call"]
+    assert set(job["secrets"]) <= set(call["secrets"])
+    assert all(v == f"${{{{ secrets.{k} }}}}" for k, v in job["secrets"].items())
+    assert set(job["with"]) <= set(call["inputs"])
+    needed: dict[str, str] = {}
+    for called in reusable["jobs"].values():
+        needed.update(called.get("permissions", {}))
+    assert job["permissions"] == needed
+    assert _upgrade(tmp_path) == 0
+    assert f"iac-import.yml@{NEW} #" in path.read_text()
+    other = tmp_path / "db"
+    assert _init(other, "--profile", "databricks-azure") == 0
+    assert not (other / ".github/workflows/iac-import.yml").exists()
+
+
+def test_the_packaged_templates_carry_the_import_caller():
+    force = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["hatch"]["build"]
+    text = str(force)
+    assert "examples/cloudflare-s3/.github/workflows/iac-import.yml" in text
+
+
 def test_upgrade_twice_changes_nothing(tmp_path, capsys):
     assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
     assert _upgrade(tmp_path, ref=SHA) == 0

@@ -20,7 +20,12 @@ MARKER = "<!-- ayasee:pr-plan -->"
 # one sticky comment per kind: the first stage's plan, and the plan of the shared prod units (#5),
 # which may wait for the prod-pr-plan approval (or, with the workflow gate, for a prod reviewer
 # to start iac-pr-shared) and must not hold back the other
-MARKERS = {"pr-plan": MARKER, "pr-plan-shared": "<!-- ayasee:pr-plan-shared -->"}
+MARKERS = {
+    "pr-plan": MARKER,
+    "pr-plan-shared": "<!-- ayasee:pr-plan-shared -->",
+    # the result of an iac-import run on the pull request's branch (issue #58)
+    "import-plan": "<!-- ayasee:import-plan -->",
+}
 DEFAULT_AUTHOR = "github-actions[bot]"
 MAX_BODY = 65536  # GitHub's comment size limit
 _CUT = "\n\n_(summary truncated)_\n"
@@ -62,8 +67,16 @@ def _run(args: argparse.Namespace) -> int:
     try:
         text = Path(args.body_file).read_text()
         gh = GitHub.from_env()
-        done = upsert(gh, args.repo, args.pr, text, args.marker, args.author)
-        print(f"pr-comment: {done} on #{args.pr}")
+        if args.pr is not None:
+            numbers = [args.pr]
+        else:
+            # the open pull requests whose head is this branch of this repository, never a fork's
+            numbers = gh.open_pulls_from_branch(args.repo, args.head_branch)
+            if not numbers:
+                print(f"pr-comment: no open pull request from {args.head_branch}; nothing posted")
+        for number in numbers:
+            done = upsert(gh, args.repo, number, text, args.marker, args.author)
+            print(f"pr-comment: {done} on #{number}")
     except (GitHubError, OSError, UnicodeDecodeError) as exc:
         print(f"pr-comment: error: {exc}", file=sys.stderr)
         return 1
@@ -75,7 +88,12 @@ def _run(args: argparse.Namespace) -> int:
 
 def _setup(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", required=True, help="owner/name")
-    parser.add_argument("--pr", required=True, type=int)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--pr", type=int)
+    target.add_argument(
+        "--head-branch",
+        help="instead of --pr: every open pull request whose head is this branch of --repo",
+    )
     parser.add_argument("--body-file", required=True)
     parser.add_argument(
         "--marker",

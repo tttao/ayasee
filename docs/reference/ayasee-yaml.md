@@ -30,7 +30,9 @@ a configuration error for a stage list or `start-stage` that `iac-staged` cannot
 `<environment_prefix><first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test,
 prod]`; `--logical` leaves the prefix out), or exits 1
 with a configuration error when the first stage is `prod` or a pre-prod stage name is reserved
-(`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`).
+(`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`). `iac-import` imports into the first stage in
+the same environment; `ayasee import-target` prints its name with the stage and unit it plans
+([import blocks from CI](../concepts/pr-checks.md#import-blocks-from-ci-iac-import)).
 
 `environments` prints every GitHub environment ayasee derives from the file, one `<name>=<GitHub
 name>` line each (or a JSON object with `--json`); `show` includes the same map as `environments`.

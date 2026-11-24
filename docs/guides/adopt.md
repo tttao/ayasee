@@ -244,6 +244,29 @@ It never guesses: two live objects for one address, or one object for two addres
 and exits 1. A `skip` line is a resource to import by hand. See
 [first adoption](../../examples/cloudflare-s3/README.md#7-first-adoption) for the matching rules.
 
+### The first stage from CI: `iac-import`
+
+When the plan credentials exist only as GitHub secrets, let CI write the first stage's blocks.
+`ayasee init` writes the caller `.github/workflows/iac-import.yml` (cloudflare-s3 profile). Push a
+branch with the unit, then start it on that branch:
+
+```bash
+gh workflow run iac-import.yml --ref <branch> -f unit=dns     # unit empty: every unit of the stage
+```
+
+In one job, in the `<first stage>-plan` environment (`test-plan` here), it plans the unit read-only
+as the pull-request plan does, runs `ayasee import-plan` on the plan JSON, and deletes the plan
+files and JSON before the job ends. It uploads only the `imports.tf` files, at their repository
+paths, and a summary with the outcome of each planned create (`import`, `create`, `skip`,
+`ambiguous`) as the artifact `ayasee-imports`, and posts that summary on the branch's open pull
+request. **It never commits**: review the blocks, then add the files to the branch.
+
+Only the first stage: its plan environment already accepts every branch with read-only
+credentials, so this run reaches nothing a pull request's plan does not. The other stages'
+environments deploy from `main` only, and a branch's code must not run with them: `iac-import`
+refuses them, and their blocks (`stages/prod/...` here) stay the local step above, with that stage's
+plan credentials. See [import blocks from CI](../concepts/pr-checks.md#import-blocks-from-ci-iac-import).
+
 ## 7. The first pull request
 
 Commit the scaffold, the units of **one** unit name across its stages (`dns` first), and their

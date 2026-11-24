@@ -223,6 +223,76 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
 
+## Import blocks from CI: `iac-import`
+
+A unit's first adoption needs `import` blocks ([adoption guide, step 6](../guides/adopt.md#6-write-the-units-and-import-what-exists)).
+`ayasee import-plan` writes them from a plan of the unit, which needs the plan credentials. When
+those exist only as GitHub secrets, `iac-import` makes that plan in CI. A person with write access
+starts it on a branch (`gh workflow run iac-import.yml --ref <branch> -f unit=dns`); it never
+commits.
+
+| Job | Permissions | What it does |
+|---|---|---|
+| `resolve` | `contents: read` | No environment, no secret. Runs only for a `workflow_dispatch` on a branch (`refs/heads/*`). Checks out the dispatched commit and runs `ayasee import-target`: `stage` must be empty or the first stage, `unit` empty (every unit of the stage) or a relative path of plain names (no `..`, no hidden name, no `__`) with a `terragrunt.hcl` under `<units_root>/<stage>`. Any other stage is refused, with a message naming the local CLI. The inputs reach the script through `env:` only. |
+| `import` | `contents: read`, `id-token: write` | Environment `<first stage>-plan`, named by `resolve`. Refuses unsupported settings, logs in to Azure when `identity` is `oidc`, and plans the unit like `plan-first-stage` (`binding-mode: same-job`, `encrypt: false`, `lock: false`). `ayasee import-plan --plan-dir` then looks each planned create up (GET requests only) and writes `<units_root>/<stage>/<unit>/imports.tf` per unit and a summary. A step that runs whatever happened deletes `$RUNNER_TEMP/ayasee` (plan files, plan JSON, engine logs) and any `*.tfplan`; only then is the artifact `ayasee-imports` (7 days) uploaded: the `imports.tf` files and the summary, nothing else. |
+| `comment` | `contents: read`, `pull-requests: write` | Unless `comment: false`. No OIDC and no branch code: checks out the **default branch** (R39). Downloads `ayasee-imports` and posts the summary as the `import-plan` sticky comment on the open pull request whose head is the dispatched branch of this repository (never a fork's); with none, it says so and posts nothing. |
+
+**Why the first stage only.** `<first stage>-plan` accepts every branch and holds read-only
+credentials: `iac-pr` already runs a pull request's code with them, and anyone who can start a
+workflow can also push a branch whose own workflow names that environment. So a branch's import
+run reaches nothing its pull request's plan does not. Every other stage's environment deploys
+from `main` only (`prod-plan`) or applies (a pre-prod stage): a branch's code must not run with
+them, and ayasee adds no path that would. `prod-pr-plan` is not used either: with the environment
+gate it waits for a prod reviewer, with the workflow gate it is `main`-only and reached through
+`iac-pr-shared`'s checks, and it does not exist on GitHub Free. The blocks of the other stages stay a
+local `ayasee import-plan` step with that stage's plan credentials.
+
+**Credentials.** With `identity: secrets` the provider tokens and `AYASEE_PROVIDER_ENV` reach the
+plan step, as in `iac-pr`, and `CLOUDFLARE_API_TOKEN` alone also reaches the `import-plan` step,
+whose lookups read nothing else. Pass the same `<first stage>-plan` environment secrets as to
+`iac-pr`. On GitHub Free that environment holds no secret of its own and the job reads the
+repository secrets, which every stage and the pull-request plan already read
+([D15](../governance/decisions.md#d15-the-workflow-gate)): `iac-import` adds no reader, but the
+lookups then run with a token that can edit prod. They send GET requests only.
+
+**What leaves the job.** `imports.tf` holds addresses and provider IDs (each ID checked as a plain
+identifier); the summary holds each planned create's address, outcome and reason, never a planned
+value. Engine output stays in `$RUNNER_TEMP` as for every plan. A provider API error or an
+unreadable plan writes no file and no summary and fails the job; an ambiguous match leaves that
+unit without a file and fails the job. The artifact directory is emptied before `import-plan`
+writes to it, so a file the plan's code left there is not uploaded; that is a guard against
+accidents, not against hostile code, which holds the credentials during the plan as in
+`iac-pr`. **The comment is advisory**, like the plan comment: the branch's code produced the plan.
+
+The caller (written by `ayasee init` for the cloudflare-s3 profile; `ayasee doctor` fails one with a
+trigger other than `workflow_dispatch`):
+
+```yaml
+# .github/workflows/iac-import.yml
+name: iac-import
+on:
+  workflow_dispatch:
+    inputs:
+      stage: { required: false, default: "" }
+      unit: { required: false, default: "" }
+      comment: { type: boolean, required: false, default: true }
+permissions: {}
+jobs:
+  import:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    uses: tttao/ayasee/.github/workflows/iac-import.yml@<release SHA>
+    with:
+      stage: ${{ inputs.stage }}
+      unit: ${{ inputs.unit }}
+      comment: ${{ inputs.comment }}
+    secrets:
+      # identity: secrets only: environment secrets of <first stage>-plan, read-only
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
 ## Fork pull requests
 
 A fork PR gets a read-only token and no OIDC token. For those PRs `resolve`, `plan-first-stage`

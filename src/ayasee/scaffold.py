@@ -154,7 +154,8 @@ PROFILES = {
         Profile(
             "cloudflare-s3",
             ("test", "prod"),
-            WORKFLOWS,
+            # iac-import (issue #58): import-plan has lookups for Cloudflare only
+            (*WORKFLOWS, "iac-import.yml"),
             ("main.tf", ".terraform.lock.hcl"),
         ),
         Profile(

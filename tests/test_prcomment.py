@@ -161,3 +161,52 @@ def test_dev_marker_does_not_capture_the_shared_comment(tmp_path, monkeypatch):
     )
     assert _run(tmp_path, monkeypatch) == 0
     assert post.called
+
+
+# ---- --head-branch: the import run's comment (issue #58) -------------------------------------
+
+
+def _pull(number, ref="feat/x", repo="o/n"):
+    return {"number": number, "head": {"ref": ref, "repo": {"full_name": repo}}}
+
+
+def _by_branch(tmp_path, monkeypatch, branch="feat/x"):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    args = ["pr-comment", "--repo", "o/n", "--head-branch", branch, "--marker", "import-plan"]
+    return cli.main([*args, "--body-file", _body(tmp_path, "imports")])
+
+
+@respx.mock
+def test_head_branch_posts_on_the_open_pull_request_of_this_repository(tmp_path, monkeypatch):
+    pulls = respx.get(f"{BASE}/repos/o/n/pulls").mock(
+        return_value=httpx.Response(
+            200,
+            json=[_pull(9, repo="fork/n"), _pull(8, ref="other"), _pull(7)],
+        )
+    )
+    respx.get(f"{BASE}/repos/o/n/issues/7/comments").mock(return_value=httpx.Response(200, json=[]))
+    post = respx.post(f"{BASE}/repos/o/n/issues/7/comments").mock(
+        return_value=httpx.Response(201, json={"id": 5})
+    )
+    assert _by_branch(tmp_path, monkeypatch) == 0
+    params = pulls.calls[0].request.url.params
+    assert params["head"] == "o:feat/x" and params["state"] == "open"
+    body = json.loads(post.calls[0].request.content)["body"]
+    assert body == "<!-- ayasee:import-plan -->\nimports"
+
+
+@respx.mock
+def test_head_branch_without_a_pull_request_posts_nothing(tmp_path, monkeypatch, capsys):
+    respx.get(f"{BASE}/repos/o/n/pulls").mock(return_value=httpx.Response(200, json=[]))
+    assert _by_branch(tmp_path, monkeypatch) == 0
+    assert "no open pull request" in capsys.readouterr().out
+
+
+def test_pr_and_head_branch_are_exclusive(tmp_path):
+    import pytest
+
+    with pytest.raises(SystemExit):
+        cli.main(["pr-comment", "--repo", "o/n", "--pr", "7", "--head-branch", "x"])
+    with pytest.raises(SystemExit):
+        cli.main(["pr-comment", "--repo", "o/n", "--body-file", _body(tmp_path)])
