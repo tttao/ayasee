@@ -118,3 +118,14 @@ After the upload, `ayasee findings new --repo <repo> --since-hours 26` counts th
 alerts of severity high or critical that were created in the last 26 hours. The window is two hours
 longer than the schedule so that a late run or a clock skew cannot lose an alert. When the count is
 above zero, Teams gets `new_findings`. The card carries counts and links only, never finding details.
+
+### Code scanning off
+
+A private repository without GitHub Code Security has no code scanning: every upload fails, and so
+does `ayasee findings new`, which reads the code-scanning API. Its caller passes
+`code-scanning: false` (as for [the pull-request checks](pr-checks.md#code-scanning)). The rescan
+then still runs both scanners on `main`, but uploads nothing and skips `ayasee findings new`, so no
+`new_findings` notification is sent; the scrubbed SARIF is kept as the run artifact
+`ayasee-rescan-sarif` (30 days), and a notice and the job summary say that code scanning is off,
+with the number of findings of each scanner. Pull requests still fail on high and critical
+findings. The job keeps `security-events: write`, since job permissions cannot depend on an input.

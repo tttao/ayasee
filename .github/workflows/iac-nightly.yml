@@ -9,6 +9,11 @@
 # `rescan` job holds `security-events: write` and runs HCL scanners over main. Main is trusted code
 # (reviewed and merged), no PR code reaches it, so one job is acceptable here (R39 is about PR code).
 #
+# Code scanning (issue #55): with `code-scanning: false` (a private repository without GitHub Code
+# Security) the rescan uploads nothing and skips `ayasee findings new`, keeps the SARIF as a run
+# artifact and says so in its summary. The job keeps `security-events: write` either way: job
+# permissions cannot depend on an input.
+#
 # Lines marked AYASEE_REF are placeholders (all-zero SHA, owner OWNER): scripts/set-ayasee-ref.sh
 # rewrites them at release. The `--local` (./actions) form is not supported for this workflow: the
 # drift job checks out the live SHA after installing ayasee, and that checkout would replace
@@ -39,6 +44,16 @@ on:
         type: string
         required: false
         default: 3.4.3
+      code-scanning:
+        description: >-
+          Upload the rescan's SARIF to GitHub code scanning and count the new high and critical
+          alerts. A private repository has code scanning only with GitHub Code Security (GitHub
+          Team or Enterprise); without it pass false: the upload and the count are skipped, the
+          scrubbed SARIF stays a run artifact (ayasee-rescan-sarif) and the summary says so.
+          docs/concepts/drift.md#code-scanning-off
+        type: boolean
+        required: false
+        default: true
     secrets:
       teams-webhook:
         description: Optional Teams incoming-webhook URL for notifications.
@@ -414,17 +429,32 @@ jobs:
           fi
           ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - name: Upload the Trivy SARIF
+        if: ${{ inputs.code-scanning }}
         uses: github/codeql-action/upload-sarif@f3bbb05694c2f74569081c28664c0866d64dec21 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/sarif/trivy.sarif
           category: ayasee-trivy
       - name: Upload the Checkov SARIF
+        if: ${{ inputs.code-scanning }}
         uses: github/codeql-action/upload-sarif@f3bbb05694c2f74569081c28664c0866d64dec21 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/sarif/checkov.sarif
           category: ayasee-checkov
+      - name: Keep the scrubbed SARIF as a run artifact
+        # code-scanning: false (issue #55): no upload, so the run keeps the findings
+        if: ${{ !inputs.code-scanning }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ayasee-rescan-sarif
+          path: |
+            ${{ runner.temp }}/sarif/trivy.sarif
+            ${{ runner.temp }}/sarif/checkov.sarif
+          retention-days: 30
+          if-no-files-found: error
       - id: findings
         name: Count new high and critical alerts
+        # reads the code-scanning API, which a repository without code scanning refuses
+        if: ${{ inputs.code-scanning }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -436,8 +466,27 @@ jobs:
             exit 1
           }
           echo "count=$count" >>"$GITHUB_OUTPUT"
+      - id: code-scanning-off
+        name: Say that code scanning is off
+        if: ${{ !inputs.code-scanning }}
+        run: |
+          echo "::notice::code scanning is off (code-scanning: false): the SARIF is not uploaded and ayasee findings new is skipped (no new_findings notification); the SARIF is in the ayasee-rescan-sarif artifact of this run"
+          {
+            echo "### Code scanning is off"
+            echo
+            echo "The caller passes \`code-scanning: false\` (a private repository without GitHub Code Security):"
+            echo "the findings on main are not uploaded, \`ayasee findings new\` is skipped and no"
+            echo "\`new_findings\` notification is sent. The scrubbed SARIF is in the \`ayasee-rescan-sarif\`"
+            echo "artifact of this run (30 days). Pull requests still fail on high and critical findings."
+            echo
+            for tool in trivy checkov; do
+              label="$([ "$tool" = trivy ] && echo Trivy || echo Checkov)"
+              echo "- $label: $(jq '[.runs[]?.results[]?] | length' "$RUNNER_TEMP/sarif/$tool.sarif") finding(s) on main"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
       - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ steps.findings.outputs.count != '0' }}
+        # a skipped count is '' and must not read as "not zero"
+        if: ${{ inputs.code-scanning && steps.findings.outputs.count != '0' }}
         with:
           event: new_findings
           repo: ${{ github.repository }}

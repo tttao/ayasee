@@ -22,6 +22,19 @@ released version into the GitHub release notes.
   The `trivy-action` steps state the Trivy version (`v0.70.0`, the action's default until now);
   `scripts/install-dev-tools.sh trivy` installs it, and CI scans what `init` writes for each
   profile and gate, five times each.
+- **SARIF upload on a repository without code scanning** (#55): on a private repository without
+  GitHub Code Security (every private one on GitHub Free or Pro, most on Team) `upload-sarif` was
+  red on every pull request and the nightly `rescan` failed on its upload and on
+  `ayasee findings new`, with no way to turn them off. `iac-pr` and `iac-nightly` take a boolean
+  input `code-scanning` (default `true`, the previous behaviour). With `false` nothing is uploaded,
+  the scrubbed SARIF stays a run artifact (30 days), `findings new` and its `new_findings`
+  notification are skipped, and each job summary says code scanning is off with the finding
+  counts; Trivy and Checkov still gate the pull-request checks. `ayasee init` writes
+  `code-scanning: false` into those callers when GitHub says code scanning is not enabled, or for
+  a private repository on Free, Pro or Team where it cannot confirm Code Security
+  (`--code-scanning` / `--no-code-scanning` decide instead); `ayasee doctor` warns when a caller
+  uploads to a repository without code scanning or where it cannot confirm it. Existing adopters
+  on such a repository add `with: code-scanning: false` to both callers.
 
 ## [0.1.0] - unreleased
 

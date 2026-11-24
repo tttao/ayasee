@@ -347,6 +347,11 @@ class GitHub:
             params["severity"] = severity
         return self._paginate(f"/repos/{repo}/code-scanning/alerts", params, "alerts")
 
+    def code_scanning_probe(self, repo: str) -> None:
+        """One page of one alert: raises :class:`GitHubError` when code scanning cannot be read
+        (403 "Code scanning is not enabled ..." on a repository without GitHub Code Security)."""
+        self._get(f"/repos/{repo}/code-scanning/alerts", "alerts", per_page=1)
+
     # ---- sandbox driver support (e2e): git data, pull requests, runs, deployment reviews -----
 
     def _get(self, path: str, what: str, **params: Any) -> Any:
