@@ -176,11 +176,25 @@ def record_from_run(
     breakglass_incident: str | None = None,
     now: str | None = None,
     requester: str | None = None,
+    no_units: bool = False,
 ) -> LedgerRecord:
     """Build a record. ``converged`` is true iff every unit converged (so an empty plan,
     all ``no_changes``, records the environment as in sync at ``sha``). ``units`` must not be
-    empty: an empty plan is recorded as units with status ``no_changes``."""
-    if not units:
+    empty: an empty plan is recorded as units with status ``no_changes``.
+
+    ``no_units`` records a stage that has no units yet (issue #56): ``units`` must then be empty,
+    and the record is converged at ``sha`` with nothing in it, so the guard chain of the staged
+    run holds. It carries no approver, incident or requester: a record without units must never
+    become the trust anchor of the workflow gate (D15)."""
+    if no_units:
+        if units:
+            raise ValueError("no_units: a stage without units records no units, not both")
+        if approver or breakglass_incident or requester:
+            raise ValueError(
+                "no_units: a stage without units records no approver, break-glass incident or "
+                "requester"
+            )
+    elif not units:
         raise ValueError("units must not be empty (record no_changes units for an empty plan)")
     return LedgerRecord(
         repo=repo,
@@ -773,6 +787,22 @@ def _load_units(path: str) -> dict[str, UnitResult]:
         raise LedgerError("--units-json is not valid JSON") from None
 
 
+def _write_units(args: argparse.Namespace) -> dict[str, UnitResult]:
+    """The units of ``ledger write``: from --units-json, or none with --no-units (#56)."""
+    if args.no_units:
+        if args.units_json is not None:
+            raise LedgerError("--no-units and --units-json: give one, not both")
+        if args.approver or args.breakglass_incident or args.requester:
+            raise LedgerError(
+                "--no-units: a stage without units records no approver, break-glass incident "
+                "or requester"
+            )
+        return {}
+    if args.units_json is None:
+        raise LedgerError("--units-json is required (or --no-units for a stage without units)")
+    return _load_units(args.units_json)
+
+
 def _write(args: argparse.Namespace) -> int:
     if args.mirror_deployments and not args.allow_ref:
         if os.environ.get("GITHUB_REF") != "refs/heads/main":
@@ -783,10 +813,11 @@ def _write(args: argparse.Namespace) -> int:
         sha=args.sha,
         run_id=args.run_id,
         run_attempt=args.run_attempt,
-        units=_load_units(args.units_json),
+        units=_write_units(args),
         approver=args.approver,
         breakglass_incident=args.breakglass_incident,
         requester=args.requester,
+        no_units=args.no_units,
     )
     open_store(args.store).append(rec)
     if args.mirror_deployments:
@@ -866,8 +897,12 @@ def _setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--sha", required=True)
     p.add_argument("--run-id", required=True, type=int)
     p.add_argument("--run-attempt", required=True, type=int)
+    p.add_argument("--units-json", help='{"unit": {"status": ..., "converged": bool}}')
     p.add_argument(
-        "--units-json", required=True, help='{"unit": {"status": ..., "converged": bool}}'
+        "--no-units",
+        action="store_true",
+        help="record a stage that has no units yet: converged, with no units (instead of "
+        "--units-json)",
     )
     p.add_argument("--approver")
     p.add_argument("--breakglass-incident")

@@ -162,6 +162,51 @@ def test_missing_ledger_record_is_a_notice_and_skip(wf):
             assert "skip" in step["if"]
 
 
+@pytest.mark.parametrize(
+    ("record", "rc", "outputs"),
+    [
+        ("null", 0, "skip=true\n"),
+        ('{"sha": "' + "a" * 40 + '", "units": {}}', 0, "skip=true\n"),
+        (
+            '{"sha": "' + "a" * 40 + '", "units": {"u": {"status": "applied", "converged": true}}}',
+            0,
+            "skip=false\nsha=" + "a" * 40 + "\n",
+        ),
+        ('{"sha": "' + "a" * 40 + '"}', 1, ""),
+        ('{"sha": "nope", "units": {}}', 1, ""),
+    ],
+    ids=["no-record", "no-units", "units", "no-units-key", "bad-sha"],
+)
+def test_a_live_record_without_units_is_a_notice_and_skip(wf, tmp_path, record, rc, outputs):
+    """#56: a stage recorded with no units has nothing to plan; an unreadable record fails."""
+    import os
+    import subprocess
+
+    step = _steps(wf, "drift")[_index(_steps(wf, "drift"), lambda s: s.get("id") == "ledger")]
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "ayasee").write_text(f"#!/bin/bash\ncat <<'EOF'\n{record}\nEOF\n")
+    (shim / "ayasee").chmod(0o755)
+    out = tmp_path / "out"
+    out.write_text("")
+    proc = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": f"{shim}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(out),
+            "DRIFT_ENV": "dev",
+        },
+    )
+    assert (proc.returncode != 0) == bool(rc), proc.stderr
+    assert out.read_text() == outputs
+    if record.endswith('"units": {}}') and rc == 0:
+        assert "::notice::the live record of dev has no units" in proc.stdout
+
+
 def test_apply_failed_issue_skips_the_env(wf):
     steps = _steps(wf, "drift")
     failed = steps[_index(steps, lambda s: s.get("id") == "failed")]

@@ -850,3 +850,120 @@ def test_shared_units_reach_the_changeset_and_summary(fresh):
     assert json.loads((work / "changeset.json").read_text())["shared_units"] == ["app"]
     summary = (work / "summary.md").read_text()
     assert "**Shared by every stage:** `app`" in summary and "**shared**" in summary
+
+
+# ---- #56: a stage that has no units yet ----------------------------------------------------
+
+
+def _empty_stage(fresh, **extra):
+    """A sandbox whose dev directory exists (as `ayasee init` scaffolds it) but holds no unit."""
+    root, env = fresh()
+    dev = root / "repo" / "stages" / "dev"
+    shutil.rmtree(dev)
+    dev.mkdir()
+    (dev / ".gitkeep").write_text("")
+    return root, {**env, **extra}
+
+
+SAME_JOB = {"SG_ENCRYPT": "false", "SG_BINDING_MODE": "same-job"}
+# apply.sh in same-job first needs this job's plans; replan reaches unit discovery first
+MODE = {
+    "plan/plan.sh": SAME_JOB,
+    "apply/apply.sh": {"SG_ENCRYPT": "false", "SG_BINDING_MODE": "replan"},
+}
+
+
+@pytest.mark.parametrize("script", ["plan/plan.sh", "apply/apply.sh"])
+def test_an_empty_stage_fails_closed_by_default(fresh, script):
+    _, env = _empty_stage(fresh, **MODE[script])
+    proc, out = _run(Path(script), env)
+    assert proc.returncode != 0
+    assert "no units found under" in proc.stderr
+    # it stops there: no later step runs on an empty unit list
+    assert "binding failed" not in proc.stderr
+    assert "no-units" not in out and "has-changes" not in out
+    assert not (_work(env) / "units.json").exists()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [SAME_JOB, {"SG_ENCRYPT": "true", "SG_BINDING_MODE": "encrypted_plan"}],
+    ids=["same-job", "encrypted_plan"],
+)
+def test_allow_no_units_plans_nothing_and_says_so(fresh, extra):
+    _, env = _empty_stage(fresh, SG_ALLOW_NO_UNITS="true", **extra)
+    proc, out = _run(Path("plan/plan.sh"), env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert out == {"no-units": "true", "has-changes": "false"}
+    assert "no units under" in proc.stdout + proc.stderr
+    work = _work(env)
+    assert not (work / "manifest.json").exists()
+    assert not list(work.rglob("*.tfplan")) and not list((work / "json").iterdir())
+
+
+def test_allow_no_units_changes_nothing_when_there_are_units(fresh):
+    _, env = fresh()
+    proc, out = _run(Path("plan/plan.sh"), {**env, **SAME_JOB, "SG_ALLOW_NO_UNITS": "true"})
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert out["no-units"] == "false" and out["has-changes"] == "true"
+    assert "manifest-path" in out
+
+
+def test_allow_no_units_never_covers_a_missing_stage_directory(fresh):
+    root, env = fresh()
+    shutil.rmtree(root / "repo" / "stages" / "dev")
+    proc, out = _run(Path("plan/plan.sh"), {**env, **SAME_JOB, "SG_ALLOW_NO_UNITS": "true"})
+    assert proc.returncode != 0 and "units directory not found" in proc.stderr
+    assert "no-units" not in out
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"SG_ALLOW_NO_UNITS": "maybe"}, "allow-no-units must be true or false"),
+        ({"SG_ALLOW_NO_UNITS": "true", **SAME_JOB, "SG_ONLY_UNITS": "app"}, "unknown unit: app"),
+        (
+            {
+                "SG_ALLOW_NO_UNITS": "true",
+                "SG_ENCRYPT": "false",
+                "SG_BINDING_MODE": "drift",
+                "SG_DRIFT": "true",
+            },
+            "allow-no-units is not allowed with binding-mode drift",
+        ),
+        (
+            {
+                "SG_ALLOW_NO_UNITS": "true",
+                "SG_ENV": "prod",
+                "SG_BINDING_MODE": "breakglass",
+                "SG_BREAKGLASS_INCIDENT": "INC123",
+            },
+            "allow-no-units is not allowed with binding-mode breakglass",
+        ),
+    ],
+    ids=["bad-value", "only-units", "drift", "breakglass"],
+)
+def test_allow_no_units_refusals(fresh, extra, message):
+    root, env = _empty_stage(fresh)
+    prod = root / "repo" / "stages" / "prod"
+    prod.mkdir()
+    (prod / ".gitkeep").write_text("")
+    proc, out = _run(Path("plan/plan.sh"), {**env, **extra})
+    assert proc.returncode != 0 and message in proc.stderr, proc.stderr[-2000:]
+    assert "no-units" not in out
+
+
+@pytest.mark.parametrize("script", ["plan/plan.sh", "apply/apply.sh"])
+def test_a_unit_discovery_failure_is_never_read_as_no_units(fresh, script):
+    """Unit discovery used to run in a process substitution, where its sg_die could not stop
+    the script; with allow-no-units that empty list would have passed (fail open)."""
+    root, env = fresh()
+    dev = root / "repo" / "stages" / "dev"
+    # app/x and app__x both become the unit name app__x
+    shutil.copytree(dev / "app", dev / "app" / "x")
+    shutil.copytree(dev / "app", dev / "app__x")
+    proc, out = _run(Path(script), {**env, **MODE[script], "SG_ALLOW_NO_UNITS": "true"})
+    assert proc.returncode != 0
+    assert "duplicate unit name: app__x" in proc.stderr
+    assert "no-units" not in out
+    assert not (_work(env) / "units.json").exists()

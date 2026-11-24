@@ -2,13 +2,17 @@
 # Plan every unit of an environment in dependency order, bind the plans, set outputs.
 # Env: SG_ENV SG_UNITS_ROOT SG_BINDING_MODE SG_ENCRYPT SG_KEY_VAULT_KEY_ID [SG_ENGINE]
 #      [SG_SHA|GITHUB_SHA] [SG_BREAKGLASS_INCIDENT] [SG_ONLY_UNITS] [SG_LOCK] [SG_DRIFT]
-#      [SG_LOCK_TIMEOUT] [SG_EXPECT_SHA] [SG_ALLOW_CASCADE] [SG_SHARED_UNITS]
+#      [SG_LOCK_TIMEOUT] [SG_EXPECT_SHA] [SG_ALLOW_CASCADE] [SG_SHARED_UNITS] [SG_ALLOW_NO_UNITS]
 # Writes under $RUNNER_TEMP/ayasee/<env>/: plans/<unit>.tfplan, json/<unit>.json,
 # locks/<unit>.lock.hcl, changeset.json, summary.md (the rendered change set, no values), manifest.json and logs/ (engine output). The workflow decides what
 # leaves the job. With encryption off and a binding-mode other than same-job or breakglass, the plan files are
 # deleted after the manifest is made: a replan run never needs them.
 # SG_DRIFT=true (binding-mode drift): plan -detailed-exitcode per unit, exit 2 (changes) is not a
 # failure, exit-codes.json maps unit to plan exit code; plan files are deleted, never applied.
+# SG_ALLOW_NO_UNITS=true (issue #56): a units directory that exists but holds no unit yet plans
+# nothing and succeeds with only the outputs no-units=true and has-changes=false (no manifest, no
+# change set, no plan files). Off by default, refused with drift and breakglass; a missing units
+# directory, a discovery failure or a unit that fails to plan still fail.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +34,15 @@ sg_check_mode "$env" "$mode" "${SG_ENCRYPT:-true}" "${SG_ENGINE:-opentofu}" "${S
 if [ -n "${SG_ONLY_UNITS:-}" ] && [ "$mode" = breakglass ]; then
   sg_die "only-units is not allowed with binding-mode breakglass: break-glass plans every unit"
 fi
+case "${SG_ALLOW_NO_UNITS:-false}" in
+  false) ;;
+  true)
+    case "$mode" in drift | breakglass)
+      sg_die "allow-no-units is not allowed with binding-mode $mode: it plans units that are live" ;;
+    esac
+    ;;
+  *) sg_die "allow-no-units must be true or false" ;;
+esac
 sg_setup_encryption "$here/encryption.tofu.tmpl"
 
 # SG_EXPECT_SHA=true: the working tree must be at SG_SHA (the nightly drift check plans the live SHA).
@@ -60,7 +73,15 @@ esac
 driftflag=()
 [ "${SG_DRIFT:-false}" != true ] || driftflag=(-detailed-exitcode)
 
-mapfile -t units < <(sg_units "$base")
+sg_read_units "$base" "${SG_ALLOW_NO_UNITS:-false}"
+if [ "${#units[@]}" -eq 0 ]; then
+  # only reached with SG_ALLOW_NO_UNITS=true; only-units names units, so it cannot be empty here
+  [ -z "${SG_ONLY_UNITS:-}" ] || sg_die "only-units: unknown unit: ${SG_ONLY_UNITS%%,*}"
+  echo "ayasee: no units under $root/$env: nothing to plan"
+  sg_output no-units true
+  sg_output has-changes false
+  exit 0
+fi
 # SG_ONLY_UNITS: comma list of unit names to plan (empty = all); the dependency order is kept.
 sg_filter_units
 exit_codes=()
@@ -116,6 +137,7 @@ ayasee changeset --plan-json "$work/json" --sha "$sha" --env "$env" \
 [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/summary.md" >>"$GITHUB_STEP_SUMMARY"
 if [ "$(jq '.items | length' "$work/changeset.json")" -gt 0 ]; then has=true; else has=false; fi
 
+sg_output no-units false
 sg_output has-changes "$has"
 sg_output manifest-path "$work/manifest.json"
 sg_output changeset-path "$work/changeset.json"

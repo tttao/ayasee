@@ -237,6 +237,14 @@ Other rules that follow from R29:
 - `only-units` limits a run to named units. The apply action allows it with `same-job` only, and
   the plan action refuses it with `breakglass`: break-glass always plans and applies the whole prod
   tree (R71).
+- A units directory that exists but holds no unit fails with `no units found under <dir>`, unless
+  the plan action's `allow-no-units` input is `true` (issue #56). The plan then plans nothing and
+  succeeds with only `no-units=true` and `has-changes=false`: no manifest, change set, summary, plan
+  or plan JSON, so a consumer that does not handle the case finds nothing to bind or apply and
+  fails. A missing directory, a discovery failure (a duplicate unit name, `terragrunt find`
+  failing) and a plan that fails still fail; `allow-no-units` is refused with `drift` and
+  `breakglass`, and the apply action never accepts a stage without units. Unit discovery runs in
+  the script's own shell, so its refusals stop the script at once.
 - The test-only variable `AYASEE_TEST_PASSPHRASE` (a PBKDF2 passphrase) replaces the key provider
   in tests. Setting it together with a key URL or `AYASEE_PLAN_PASSPHRASE` is an error.
 

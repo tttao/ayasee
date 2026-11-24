@@ -69,14 +69,14 @@ two-stage, four-stage or five-stage run has been executed on GitHub yet.
 | Job | Needs | Runs when | What it does |
 |---|---|---|---|
 | `resolve` | - | ref is `main` | Refuses with `superseded` when `github.sha` is no longer the tip of `main` and a later commit changes the IaC: a file inside `iac_root` (documentation excepted), the configuration file or a caller `.github/workflows/iac-*.yml` (R70, `ayasee main-tip --check`: the run of the newer commit promotes the change; a redrive dispatches on the tip). Later commits that leave the IaC alone let the run go on at its own SHA (issue #15); any doubt (an API error, a tip that does not descend from the SHA, 300 changed files or more) refuses, refuses settings that are not supported yet (`ayasee config check-supported`: `gate: risky`, `engine: terraform`, `terragrunt: false`, `extra_rules`, `notify.teams: false`), validates `stages` and `start-stage` (`ayasee config staged`: empty for the first stage, a pre-prod stage name, or `prod-plan`) and reads `.ayasee.yaml` (`stages`, `ledger.url`, `units_root`, `engine`, `identity`). |
-| `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. |
+| `stage-1` | `resolve` | five stages, and `start-stage` is empty or the first stage | Runs its stage (see [Stages](#stages)): setup, guard, plan, apply (binding mode `same-job`), ledger write. A stage without units skips the apply and is recorded with no units ([stages without units](#stages-without-units)). |
 | `stage-2`, `stage-3` | the slot before | its stage is in the list and not before `start-stage`; the slot before succeeded, or was skipped (by `start-stage` or as unused) | Same as `stage-1`. |
 | `stage-4` | `stage-3` | `start-stage` is not `prod-plan`; `stage-3` succeeded, or was skipped (by `start-stage` or as unused) | Runs the stage just before prod. Same as `stage-1`. |
 | `prod-gate` | `resolve` | `resolve` succeeded and runs `prod-plan` | `ayasee require-reviewers` on the `prod` environment (its GitHub name, `environment_prefix` included): refuses when it has no required reviewers, does not exist yet (GitHub would create it unprotected on first use), or the repository's plan ignores them (a private repository on GitHub Free, seen from the 403 of the rulesets API), and when the API cannot be read. No environment, so no secret; its token holds `actions: read` only. It runs beside the pre-prod stages, which need no approval (issue #39). With `gate_mechanism: workflow` the check is skipped: `iac-approve` checks the prod environment itself. |
-| `prod-plan` | `prod-gate`, `stage-1` to `stage-4` | `prod-gate` succeeded; after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
-| `prod` | `prod-plan` | `has-changes == 'true'` or `gate-changed == 'true'`, and `gate_mechanism` is not `workflow` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
-| `prod-approval` | `prod-plan` | `has-changes == 'true'` or `gate-changed == 'true'`, and `gate_mechanism: workflow` | No environment, no secret (`contents: read`, `issues: write`): opens or rewrites the prod approval issue and ends the run. `iac-approve` applies the plan ([the workflow gate](#the-workflow-gate)). |
-| `prod-in-sync` | `prod-plan` | `has-changes == 'false'` and `gate-changed == 'false'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged. |
+| `prod-plan` | `prod-gate`, `stage-1` to `stage-4` | `prod-gate` succeeded; after each slot succeeded, or was skipped by `start-stage` or as unused | setup, guard, plan (`encrypted_plan`), Rego pack and Trivy on the plan JSON, upload the artifact, notify `prod_waiting` when there are changes. Without prod units it plans nothing, skips the scans, the upload and the notification, and outputs `no-units` ([stages without units](#stages-without-units)). Its token holds `contents: read`, `id-token: write` and `issues: read` only: it writes no ledger record, deployment or issue. A change to a root output alone counts as a change (R72). |
+| `prod` | `prod-plan` | `no-units` is not `true`; `has-changes == 'true'` or `gate-changed == 'true'`; and `gate_mechanism` is not `workflow` | Gated by the `prod` environment: guard again, read the approver (fails when there is none), download, apply the approved plan, write the ledger, notify. |
+| `prod-approval` | `prod-plan` | `no-units` is not `true`; `has-changes == 'true'` or `gate-changed == 'true'`; and `gate_mechanism: workflow` | No environment, no secret (`contents: read`, `issues: write`): opens or rewrites the prod approval issue and ends the run. `iac-approve` applies the plan ([the workflow gate](#the-workflow-gate)). |
+| `prod-in-sync` | `prod-plan` | `has-changes == 'false'`, and `gate-changed == 'false'` or `no-units == 'true'` | Runs in the `prod-plan` environment (no reviewers). Guard, then write the prod ledger record (and GitHub deployment) with every unit `no_changes` and converged, or with no units when prod has none. |
 
 Every stage job has `environment: <name>`, an `ayasee-<repo>-<env>` concurrency group with
 `cancel-in-progress: false`, and `github.ref == 'refs/heads/main'` in its `if:`. `prod-plan` runs in
@@ -395,6 +395,11 @@ Then:
 The trade-off is explicit: a change to a shared unit, even one that only concerns a test hostname,
 reaches production only through the prod gate, and no earlier stage soaks it.
 
+A pre-prod stage whose every unit is shared has no unit of its own. Keep its directory (a
+`.gitkeep`, as `ayasee init` writes it): the stage job then records it with no units and the
+chain goes on to prod ([stages without units](#stages-without-units)). Up to v0.1.0-rc.5 such a
+stage failed its job.
+
 ## The plan artifact
 
 `prod-plan` uploads one artifact, `ayasee-prod-plan`, kept 7 days. It holds only the encrypted
@@ -405,7 +410,7 @@ the upload, and the Trivy report is written to a file that is never uploaded; on
 severities are printed. A finding stops the run before anything is uploaded, and so does a Trivy
 crash (no report written), with an error that says so.
 
-`prod-plan` outputs `has-changes`, `critical`, `high` and `units` (a JSON array of unit names).
+`prod-plan` outputs `has-changes`, `no-units`, `critical`, `high` and `units` (a JSON array of unit names).
 The `prod` job downloads the artifact and applies those exact files after checking their hash,
 the engine version and the provider lock hash. A stale or mismatched plan stops the run: re-plan
 and approve again.
@@ -595,8 +600,38 @@ settings with the workflow gate on either side (`gate-changed`, [the workflow ga
 `prod` is skipped and `prod-in-sync` runs instead. It runs in the `prod-plan` environment, so it never waits for prod reviewers. It still
 passes the guard, then writes the prod ledger record (and the deployment projection) at this SHA
 with every unit `no_changes` and converged, built from the `units` output (an empty list is
-refused). Drift checks therefore never keep planning an older SHA. A failure notifies
-`prod_failed`.
+refused, unless `prod-plan` reported `no-units`: see below). Drift checks therefore never keep
+planning an older SHA. A failure notifies `prod_failed`.
+
+## Stages without units
+
+A stage whose units directory exists but holds no unit (issue #56) has nothing to plan, and that
+is not a failure. It happens when the callers, the bootstrap and `root.hcl` land in one merge and
+each unit in its own after (the adoption order of the
+[cloudflare-s3 example](../../examples/cloudflare-s3/README.md#7-first-adoption)), and for a
+pre-prod stage whose units are all [shared](#units-that-serve-every-stage).
+
+- **Pre-prod stage.** The plan action runs with `allow-no-units: true` and outputs `no-units`; the
+  apply is skipped, a notice says so, and the ledger records the stage at this SHA with no units,
+  converged (`ayasee ledger write --no-units`, [the ledger](ledger.md#the-record)). The guard of
+  the next stage finds this SHA there, so the chain, and the
+  [supersession guard](#the-supersession-guard) at the prod apply, work as for any stage.
+- **Prod.** `prod-plan` plans nothing, skips the Rego pack, Trivy, the upload and `prod_waiting`,
+  and outputs `no-units: true`, `has-changes: false` and `units: []`. `prod` and `prod-approval`
+  are skipped and `prod-in-sync` records prod at this SHA with no units, **even when
+  `gate-changed` is true**: there is no plan to approve, and the record carries no approver, so
+  the [trust anchor](#the-workflow-gate) of the workflow gate does not move and the first prod
+  plan with units still reports `gate-changed` and needs an approval. This is what happens on the
+  first push with `gate_mechanism: workflow`, where no approved prod apply exists yet.
+- **First push with no unit anywhere.** Every stage and prod are recorded with no units, no
+  approval is asked, and the run is green. The nightly drift check skips an environment whose live
+  record has no units.
+
+Only an **existing** directory counts. A missing `<units_root>/<stage>` still fails the job
+(`units directory not found`), so a mistyped `units_root` is not read as an empty estate; keep a
+`.gitkeep` in an empty stage. A failed unit discovery, a duplicate unit name and a failed plan
+fail as before. The pull-request plan does the same for the first stage
+([PR checks](pr-checks.md#which-units-are-planned)).
 
 ## Redrive
 

@@ -328,6 +328,145 @@ def test_login_then_plan_then_policy_then_comment_body(wf):
     assert "steps.plan.outputs.json-dir" in pol["plan-json"]
 
 
+def test_a_first_stage_without_units_plans_nothing_and_skips_the_pack(wf):
+    """#56: callers wired before the first unit; a missing directory still fails the plan."""
+    steps = _steps(wf, "plan-first-stage")
+    plan = steps[_index(steps, lambda s: "/actions/plan@" in _uses(s))]
+    assert plan["with"]["allow-no-units"] == "true"
+    policy = steps[_index(steps, lambda s: "/actions/policy@" in _uses(s))]
+    assert policy["if"] == (
+        "${{ steps.plan.outcome == 'success' && steps.plan.outputs.no-units != 'true' }}"
+    )
+
+
+def _body(wf, tmp_path, **env):
+    steps = _steps(wf, "plan-first-stage")
+    run = steps[_index(steps, lambda s: s.get("id") == "body")]["run"]
+    base = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_OUTPUT": str(tmp_path / "o"),
+        "RUN_URL": "https://x/run/1",
+        "CHANGED_OUTCOME": "success",
+        "STAGE": "test",
+        "ANY": "true",
+        "PLAN_OUTCOME": "success",
+        "POLICY_OUTCOME": "skipped",
+        "SUMMARY": "",
+        "NO_UNITS": "true",
+        "UNITS_ROOT": "infra/iac/stages",
+        "BASE_UNITS": "false",
+    }
+    subprocess.run(["bash", "-e", "-c", run], env={**base, **env}, check=True)
+    return (tmp_path / "pr-comment.md").read_text()
+
+
+def test_comment_says_no_units_never_no_iac_changes(wf, tmp_path):
+    text = _body(wf, tmp_path)
+    assert text.startswith("### Plan of test\n")
+    assert "No units under `infra/iac/stages/test`: nothing was planned." in text
+    assert "No IaC changes" not in text and "Policy pack" not in text
+    assert "Warning" not in text
+    # the base commit had units there: say so, so that deleting them is not a quiet green
+    text = _body(wf, tmp_path, BASE_UNITS="true")
+    assert "**Warning:** the base commit has units in test" in text
+    # with units, the summary as before
+    summary = tmp_path / "summary.md"
+    summary.write_text("SUMMARY\n")
+    text = _body(wf, tmp_path, NO_UNITS="false", SUMMARY=str(summary), POLICY_OUTCOME="success")
+    assert "SUMMARY" in text and "No units" not in text and "Policy pack: passed." in text
+    # a failed plan never reads as "no units"
+    text = _body(wf, tmp_path, PLAN_OUTCOME="failure", NO_UNITS="")
+    assert "The plan of test failed" in text
+
+
+@pytest.mark.parametrize("root", ["a`b", "a\nb", "x](http://evil)", "a b"])
+def test_no_units_comment_never_echoes_an_unusual_units_root(wf, tmp_path, root):
+    text = _body(wf, tmp_path, UNITS_ROOT=root)
+    assert "No units under the units directory of test: nothing was planned." in text
+    assert root not in text
+
+
+def _changed_step_base_units(wf, tmp_path, base_files, head_units_root="stages"):
+    """Run the `changed` step against a two-commit repository; returns its outputs."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    for rel, text in base_files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    # a fake ayasee: `config show` reads units_root from the file it is given (one line)
+    (shim / "ayasee").write_text(
+        "#!/bin/bash\n"
+        'case "$1 $2" in\n'
+        '  "config show")\n'
+        '    root="$(sed -n "s/^units_root: //p" "$4")"\n'
+        '    printf \'{"units_root": "%s", "stages": ["test", "prod"], "identity": "oidc",'
+        ' "iac_root": ".", "provider_env": [], "engine": "opentofu"}\\n\' "${root:-stages}" ;;\n'
+        '  "changed-units "*) echo ALL ;;\n'
+        "esac\n"
+    )
+    (shim / "ayasee").chmod(0o755)
+    (repo / ".ayasee.yaml").write_text(f"units_root: {head_units_root}\n")
+    steps = _steps(wf, "plan-first-stage")
+    run = steps[_index(steps, lambda s: s.get("id") == "changed")]["run"]
+    out = tmp_path / "o"
+    out.write_text("")
+    subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", run],
+        cwd=repo,
+        check=True,
+        env={
+            **os.environ,
+            "PATH": f"{shim}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(out),
+            "CONFIG_PATH": ".ayasee.yaml",
+            "BASE_SHA": base,
+            "HEAD_SHA": base,
+        },
+    )
+    return dict(line.split("=", 1) for line in out.read_text().splitlines())
+
+
+@pytest.mark.parametrize(
+    ("files", "head_root", "expected"),
+    [
+        ({"stages/test/.gitkeep": "", ".ayasee.yaml": "units_root: stages\n"}, "stages", "false"),
+        (
+            {"stages/test/app/terragrunt.hcl": "", ".ayasee.yaml": "units_root: stages\n"},
+            "stages",
+            "true",
+        ),
+        # the pull request points units_root at an empty directory: the base's own root counts
+        (
+            {"stages/test/app/terragrunt.hcl": "", ".ayasee.yaml": "units_root: stages\n"},
+            "empty",
+            "true",
+        ),
+        ({"stages/test/app/terragrunt.hcl": ""}, "stages", "true"),
+    ],
+    ids=["empty", "units", "moved-units-root", "no-base-config"],
+)
+def test_changed_step_reports_whether_the_base_had_units(wf, tmp_path, files, head_root, expected):
+    outputs = _changed_step_base_units(wf, tmp_path, files, head_root)
+    assert outputs["base-units"] == expected
+    assert outputs["units-root"] == head_root
+
+
 def test_comment_body_is_only_the_rendered_summary(wf):
     steps = _steps(wf, "plan-first-stage")
     body = steps[_index(steps, lambda s: s.get("id") == "body")]
