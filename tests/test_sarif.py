@@ -194,6 +194,16 @@ def test_scrub_command_rejects_non_sarif(tmp_path, capsys):
     assert "sarif-scrub" in capsys.readouterr().err
 
 
+def test_a_missing_input_is_reported_as_a_scanner_that_wrote_no_report(tmp_path, capsys):
+    # #57: Trivy panicked and wrote no SARIF; the scrub said only "FileNotFoundError"
+    missing = tmp_path / "trivy.raw.sarif"
+    assert cli.main(["sarif-scrub", "--in", str(missing), "--out", str(tmp_path / "o")]) == 1
+    assert not (tmp_path / "o").exists()
+    err = capsys.readouterr().err
+    assert "no SARIF at" in err and str(missing) in err
+    assert "the scanner wrote no report" in err and "crashed" in err
+
+
 def test_missing_fingerprints_are_derived_from_rule_file_and_line_only():
     doc = {
         "runs": [

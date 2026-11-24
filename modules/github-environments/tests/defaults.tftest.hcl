@@ -233,6 +233,35 @@ run "empty_breakglass_reviewers_fails" {
   expect_failures = [var.breakglass_reviewers]
 }
 
+# "no reviewers" is an empty set inside the module (#57): unset (null) reviewers must still be
+# refused by the environment gate, never read as "no reviewers wanted"
+run "unset_prod_reviewers_fails" {
+  command = plan
+  variables {
+    prod_reviewers = null
+  }
+  expect_failures = [var.prod_reviewers]
+}
+
+run "unset_breakglass_reviewers_fails" {
+  command = plan
+  variables {
+    breakglass_reviewers = null
+  }
+  expect_failures = [var.breakglass_reviewers]
+}
+
+run "prod_pr_plan_carries_the_prod_reviewers" {
+  command = plan
+  variables {
+    shared_units_pr_plan = true
+  }
+  assert {
+    condition     = one(github_repository_environment.this["prod-pr-plan"].reviewers).teams == toset([101])
+    error_message = "prod-pr-plan carries the prod reviewers under the environment gate"
+  }
+}
+
 run "prod_pr_plan_is_opt_in" {
   command = plan
 

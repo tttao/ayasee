@@ -5,9 +5,7 @@
 Static scanning of IaC with Trivy and Checkov on pull requests, the prod plan and a nightly re-scan
 of `main`, published as code-scanning alerts through SARIF that is rebuilt from an allow-list so it
 never carries values (D10). Code: `src/ayasee/sarif.py`, `src/ayasee/findings.py`.
-
 ## Requirements
-
 ### Requirement: SARIF rebuilt from an allow-list
 `ayasee sarif-scrub --in F --out F` SHALL rebuild the file keeping only `version`, `$schema`, the tool driver and extensions (name, version, rules with id, name, short description, default level), each result's rule reference, level, kind, partial fingerprints (derived from rule, file and line when absent), locations reduced to file URI plus line and column, and per-run base URIs; `result.message.text` SHALL always be the rule's short description (or rule id); snippets, region messages, code flows, fixes, properties and anything else SHALL be dropped.
 
@@ -49,3 +47,15 @@ After the upload, `ayasee findings new --since-hours 26` SHALL count open high o
 #### Scenario: One new critical
 - **WHEN** one critical alert was created in the last 26 hours
 - **THEN** Teams gets a `new_findings` card with the count
+
+### Requirement: A scanner that writes no report fails as a scanner failure
+When a scanner exits without writing its report (a crash, such as a Trivy panic), the step that reads the report SHALL fail with an error saying the scanner wrote no report and pointing at the scanner's step, and the job SHALL fail; it SHALL never pass silently nor end in an unexplained `FileNotFoundError`. `ayasee sarif-scrub` SHALL exit non-zero with such a message when its input file does not exist. This SHALL hold in `iac-pr`, in the `rescan` job of `iac-nightly` and for the Trivy scan of `prod-plan`, and the message SHALL carry no value from the scanned code.
+
+#### Scenario: Trivy panics in the PR checks
+- **WHEN** Trivy crashes before writing `trivy.raw.sarif`
+- **THEN** the Trivy scrub step fails saying Trivy wrote no report, Checkov still runs, and `checks` fails
+
+#### Scenario: Trivy panics on the prod plan
+- **WHEN** Trivy crashes before writing its report on the prod plan JSON
+- **THEN** the step that lists Trivy findings fails saying Trivy wrote no report
+

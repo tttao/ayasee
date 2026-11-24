@@ -32,12 +32,12 @@ development platform.
 ```bash
 git clone <your fork> && cd ayasee
 uv sync                           # creates .venv with the dev group
-scripts/install-dev-tools.sh      # opa, conftest, terragrunt, actionlint, gitleaks into .tools/bin (gitignored)
+scripts/install-dev-tools.sh      # opa, conftest, terragrunt, actionlint, gitleaks, trivy into .tools/bin (gitignored)
 uv run pre-commit install         # the commit hooks (see below)
 ```
 
 `scripts/install-dev-tools.sh` installs pinned versions and verifies SHA-256 checksums. Pass tool names
-(`opa conftest terragrunt actionlint gitleaks`) to install only some. zizmor is not installed by the script; run
+(`opa conftest terragrunt actionlint gitleaks trivy`) to install only some. zizmor is not installed by the script; run
 it with `uvx`. OpenTofu (`tofu`) must be on your `PATH` for the integration tests and the module tests.
 Node.js 22 is needed only for `cockpit-site/`.
 
@@ -59,7 +59,9 @@ scripts/check-policy-fixture.sh                     # conftest on the canned pla
 
 - **Integration tests** (`-m integration`) run the real plan and apply scripts against small
   Terragrunt fixtures with a local backend. They need `tofu` and `.tools/bin/terragrunt`
-  (`scripts/install-dev-tools.sh terragrunt`). They do not touch any cloud.
+  (`scripts/install-dev-tools.sh terragrunt`). They do not touch any cloud. One of them runs
+  `.tools/bin/trivy` (`scripts/install-dev-tools.sh trivy`, the version the workflows state) on
+  what `ayasee init` writes, several times, because Trivy once crashed on it at random (#57).
 - **Module tests:** `cd modules/<name> && tofu init -backend=false && tofu validate && tofu test`.
 - **Cockpit site:** `cd cockpit-site && npm ci --ignore-scripts && npm run typecheck && npm test && npm run build`.
 - **End-to-end scenarios** (`e2e/`) are unit-tested in the normal suite against fakes. Never run

@@ -143,13 +143,20 @@ jobs:
           format: sarif
           cache: "false"
           output: ${{ runner.temp }}/sarif/trivy.raw.sarif
+          version: v0.70.0 # = TRIVY_VERSION of scripts/install-dev-tools.sh (the bootstrap scan test)
       - name: Scrub the Trivy SARIF
         if: ${{ !cancelled() && steps.trivy.outcome != 'skipped' }}
         env:
           SARIF_IN: ${{ runner.temp }}/sarif/trivy.raw.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/trivy.sarif
           IAC_ROOT: ${{ steps.config.outputs.iac-root }}
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
+        run: |
+          # a scanner crash (a Trivy panic, #57) writes no report: name it, never pass
+          if [ ! -f "$SARIF_IN" ]; then
+            echo "::error::Trivy wrote no SARIF: it crashed or failed before writing its report (see the step Trivy config scan)"
+            exit 1
+          fi
+          ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - id: checkov
         name: Checkov
         if: ${{ !cancelled() }}
@@ -173,7 +180,12 @@ jobs:
           SARIF_IN: ${{ runner.temp }}/sarif/checkov/results_sarif.sarif
           SARIF_OUT: ${{ runner.temp }}/sarif/checkov.sarif
           IAC_ROOT: ${{ steps.config.outputs.iac-root }}
-        run: ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
+        run: |
+          if [ ! -f "$SARIF_IN" ]; then
+            echo "::error::Checkov wrote no SARIF: it crashed or failed before writing its report (see the step Checkov)"
+            exit 1
+          fi
+          ayasee sarif-scrub --in "$SARIF_IN" --out "$SARIF_OUT" --uri-prefix "$IAC_ROOT"
       - name: Keep the scrubbed SARIF for the upload job
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

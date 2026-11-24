@@ -107,6 +107,35 @@ run "a_private_repository_on_free_gets_bare_environments" {
   }
 }
 
+# What `ayasee init --plan free` writes: the workflow gate, GitHub Free, prod_reviewers and
+# breakglass_reviewers left unset (null). No environment carries a reviewer and none prevents self
+# review (iac-approve holds the gate, D15). Trivy panicked on this input when an environment's
+# reviewers were a null object (#57); the module now says "no reviewers" with empty lists.
+run "the_workflow_gate_on_free_with_unset_reviewers_sets_no_reviewer_anywhere" {
+  command = plan
+
+  variables {
+    private_repository_plan = "free"
+    prod_reviewers          = null
+    breakglass_reviewers    = null
+  }
+
+  assert {
+    condition = alltrue([
+      for e in github_repository_environment.this :
+      length(e.reviewers) == 0 && e.prevent_self_review == false && e.can_admins_bypass == false
+    ])
+    error_message = "the workflow gate sets no reviewer on any environment and never lets admins bypass"
+  }
+
+  assert {
+    condition = toset(output.environments) == toset([
+      "test", "prod", "test-plan", "prod-plan", "prod-breakglass", "drift-test", "drift-prod",
+    ])
+    error_message = "the same environments as with the environment gate"
+  }
+}
+
 run "free_refuses_a_name_that_is_both_a_repository_and_a_stage_secret" {
   command = plan
 

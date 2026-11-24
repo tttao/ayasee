@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install pinned dev tools (linux amd64) into .tools/bin, verifying SHA-256 checksums.
 # zizmor is not installed here: run it with `uvx zizmor`.
-# Usage: install-dev-tools.sh [--mirror URL] [opa|conftest|terragrunt|actionlint|gitleaks ...]
+# Usage: install-dev-tools.sh [--mirror URL] [opa|conftest|terragrunt|actionlint|gitleaks|trivy ...]
 #   (no tool installs all). --mirror URL (or AYASEE_TOOL_MIRROR) is an https base without a
 #   trailing slash that replaces https://github.com in the download URLs; checksums still apply.
 set -euo pipefail
@@ -16,6 +16,9 @@ ACTIONLINT_VERSION=1.7.12
 ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 # actionlint_1.7.12_linux_amd64.tar.gz
 GITLEAKS_VERSION=8.30.1
 GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb # gitleaks_8.30.1_linux_x64.tar.gz
+# the version every trivy-action step of the iac-* workflows states (`version:`); a test keeps them equal
+TRIVY_VERSION=0.70.0
+TRIVY_SHA256=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9 # trivy_0.70.0_Linux-64bit.tar.gz
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bin="$root/.tools/bin"
@@ -43,8 +46,8 @@ sg_check_mirror "$mirror"
 requested=("$@")
 for t in "${requested[@]}"; do
   case "$t" in
-    opa|conftest|terragrunt|actionlint|gitleaks) ;;
-    *) echo "unknown tool: $t (expected opa, conftest, terragrunt, actionlint or gitleaks)" >&2; exit 2 ;;
+    opa|conftest|terragrunt|actionlint|gitleaks|trivy) ;;
+    *) echo "unknown tool: $t (expected opa, conftest, terragrunt, actionlint, gitleaks or trivy)" >&2; exit 2 ;;
   esac
 done
 
@@ -85,6 +88,13 @@ if want gitleaks; then
     "$GITLEAKS_SHA256" gitleaks.tgz
   tar -xzf "$tmp/gitleaks.tgz" -C "$tmp" gitleaks
   install -m 0755 "$tmp/gitleaks" "$bin/gitleaks"
+fi
+
+if want trivy; then
+  fetch "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+    "$TRIVY_SHA256" trivy.tgz
+  tar -xzf "$tmp/trivy.tgz" -C "$tmp" trivy
+  install -m 0755 "$tmp/trivy" "$bin/trivy"
 fi
 
 echo "installed into $bin"

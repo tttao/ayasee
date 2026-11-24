@@ -7,6 +7,22 @@ released version into the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Trivy crashed on the bootstrap `ayasee init` writes** (#57): with the reviewer variables
+  unset (always with `gate_mechanism: workflow`, and until the adopter fills them in with the
+  environment gate), `github-environments` put null reviewer objects in the local its environments
+  iterate, and Trivy (0.70.0, and still 0.76.2) panics at random on such a local. The `checks` job
+  of `iac-pr` failed on most runs, then `sarif-scrub` reported only `FileNotFoundError`. The
+  module now writes "no reviewers" as an empty set; it plans the same environments, reviewers and
+  branch policies, and refuses the environment gate without reviewers on `prod`,
+  `prod-breakglass` or `prod-pr-plan` once more in a precondition. A scanner that writes no
+  report now fails its step with a message saying so (`iac-pr`, the nightly `rescan`,
+  `prod-plan`; `sarif-scrub` too).
+  The `trivy-action` steps state the Trivy version (`v0.70.0`, the action's default until now);
+  `scripts/install-dev-tools.sh trivy` installs it, and CI scans what `init` writes for each
+  profile and gate, five times each.
+
 ## [0.1.0] - unreleased
 
 First release (pre-alpha), published as release candidates: `v0.1.0-rc.2` (the run of `v0.1.0-rc.1`

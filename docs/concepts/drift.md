@@ -105,7 +105,8 @@ carry `ayasee:apply-failed`; they are cleared by closing their issue after the r
 
 The `rescan` job runs Trivy (config) and Checkov (Terraform HCL and workflows) on `main`, scrubs
 the SARIF (`sarif-scrub`) and uploads it with the categories `ayasee-trivy` and `ayasee-checkov`,
-the same ones the pull-request checks use. Findings do not fail the run.
+the same ones the pull-request checks use. Findings do not fail the run; a scanner that crashes
+and writes no SARIF does, with an error that says so.
 
 It holds `security-events: write` in the same job as the scanners. This is deliberate: it only
 scans `main`, which is reviewed and merged code. Pull-request code never reaches it (see
