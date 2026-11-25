@@ -27,29 +27,42 @@ locals {
   # stages, test-plan with [test, prod]), the name `ayasee config pr-plan-environment` prints.
   pr_plan_environment = "${var.stages[0]}-plan"
 
-  # Environments the workflows use, and their reviewers (null = none).
+  # "No reviewers" is this empty set, never null: Trivy (0.70.0 to at least 0.76.2) panics, at
+  # random, on a for_each local whose elements include a null object, which the workflow gate's
+  # unset prod_reviewers and breakglass_reviewers used to put in local.environments (#57).
+  # Reviewers are required where the set is not empty (local.reviewed); the variable validations
+  # keep the environment gate's prod and prod-breakglass sets non-empty, and a precondition below
+  # checks it again.
+  no_reviewers         = { teams = [], users = [] }
+  prod_reviewers       = local.workflow_gate || var.prod_reviewers == null ? local.no_reviewers : var.prod_reviewers
+  breakglass_reviewers = local.workflow_gate || var.breakglass_reviewers == null ? local.no_reviewers : var.breakglass_reviewers
+
+  # Environments the workflows use, and their reviewers (local.no_reviewers = none).
   # <first stage>-plan and prod-pr-plan are the only ones that are not restricted to main (PR
   # plans). prod-pr-plan (opt-in) plans the shared prod units of a PR read-only; it carries the
   # prod reviewers because the PR's code runs with a prod identity. With the workflow gate (D15)
   # nothing can hold a job of the PR's own run, so iac-pr-shared plans from main instead, and
   # prod-pr-plan is a main-only environment without reviewers (workflow_pr_plan).
   pr_plan = merge(
-    { (local.pr_plan_environment) = null },
-    var.shared_units_pr_plan && !local.workflow_gate ? { "prod-pr-plan" = var.prod_reviewers } : {},
+    { (local.pr_plan_environment) = local.no_reviewers },
+    var.shared_units_pr_plan && !local.workflow_gate ? { "prod-pr-plan" = local.prod_reviewers } : {},
   )
-  workflow_pr_plan = var.shared_units_pr_plan && local.workflow_gate ? { "prod-pr-plan" = null } : {}
+  workflow_pr_plan = var.shared_units_pr_plan && local.workflow_gate ? { "prod-pr-plan" = local.no_reviewers } : {}
 
   environments = merge(
-    { for s in var.stages : s => null },
-    { for s in var.stages : "drift-${s}" => null },
+    { for s in var.stages : s => local.no_reviewers },
+    { for s in var.stages : "drift-${s}" => local.no_reviewers },
     {
-      "prod-plan"       = null
-      "prod"            = local.workflow_gate ? null : var.prod_reviewers
-      "prod-breakglass" = local.workflow_gate ? null : var.breakglass_reviewers
+      "prod-plan"       = local.no_reviewers
+      "prod"            = local.prod_reviewers
+      "prod-breakglass" = local.breakglass_reviewers
     },
     local.pr_plan,
     local.workflow_pr_plan,
   )
+
+  # the environments whose deployments wait for required reviewers
+  reviewed = { for k, v in local.environments : k => length(v.teams) + length(v.users) > 0 }
 
   self_reviewed = ["prod", "prod-breakglass", "prod-pr-plan"]
 
@@ -207,8 +220,8 @@ resource "github_repository_environment" "this" {
     # fail closed: an environment GitHub would create without its reviewers or its branch policy
     # turns the prod gate into a pass-through or opens the prod secrets to every branch
     precondition {
-      condition     = (each.value == null || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies || local.bare)
-      error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${each.value == null ? "a main-only deployment branch policy" : "required reviewers"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, move it to GitHub Enterprise and set private_repository_plan = \"enterprise\", or use gate_mechanism = \"workflow\" (D15, a DEVIATION: ayasee enforces the gate, not GitHub; docs/guides/adopt.md#what-you-need)."
+      condition     = (!local.reviewed[each.key] || local.has_reviewers) && (!contains(keys(local.main_only), each.key) || local.has_policies || local.bare)
+      error_message = "The GitHub environment \"${local.github_name[each.key]}\" needs ${local.reviewed[each.key] ? "required reviewers" : "a main-only deployment branch policy"}, which this repository cannot hold: it is ${local.visibility}, and private_repository_plan is ${local.plan_label}. A private repository has required reviewers on environments on GitHub Enterprise only, and deployment branch policies on GitHub Pro, Team or Enterprise. Without them nothing waits for an approval before prod (prevent_self_review and the break-glass reviewers go with it) and any branch can read the prod secrets, so this module creates nothing. Make the repository public, move it to GitHub Enterprise and set private_repository_plan = \"enterprise\", or use gate_mechanism = \"workflow\" (D15, a DEVIATION: ayasee enforces the gate, not GitHub; docs/guides/adopt.md#what-you-need)."
     }
     precondition {
       condition     = !(local.bare && contains(keys(local.workflow_pr_plan), each.key))
@@ -218,9 +231,15 @@ resource "github_repository_environment" "this" {
       condition     = !local.bare || (length(var.variables) == 0 && !var.generate_plan_passphrase)
       error_message = "A private repository on GitHub Free has no environment variables or secrets: set the variables (AYASEE_LEDGER_URL, ...) and the plan passphrase as repository variables and secrets instead, and leave variables empty and generate_plan_passphrase false (secret_commands lists them at repository level)."
     }
+    # the environment gate: prod, prod-breakglass and prod-pr-plan always wait for reviewers (the
+    # variable validations refuse an empty set; this holds even if "no reviewers" reached them)
+    precondition {
+      condition     = local.workflow_gate || !contains(local.self_reviewed, each.key) || local.reviewed[each.key]
+      error_message = "With gate_mechanism = \"environment\", \"${local.github_name[each.key]}\" must carry required reviewers: set prod_reviewers and breakglass_reviewers."
+    }
     # GitHub may store an environment without the reviewers it was given: check what it kept
     postcondition {
-      condition     = each.value == null || length(self.reviewers) > 0
+      condition     = !local.reviewed[each.key] || length(self.reviewers) > 0
       error_message = "GitHub did not keep the required reviewers of \"${local.github_name[each.key]}\": its job would run without an approval. Check the repository's plan (`ayasee doctor`); the staged and break-glass runs refuse such an environment."
     }
     precondition {
@@ -235,7 +254,7 @@ resource "github_repository_environment" "this" {
   can_admins_bypass   = false
 
   dynamic "reviewers" {
-    for_each = each.value == null ? [] : [each.value]
+    for_each = local.reviewed[each.key] ? [each.value] : []
     content {
       teams = reviewers.value.teams
       users = reviewers.value.users

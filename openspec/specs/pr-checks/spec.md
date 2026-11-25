@@ -6,9 +6,7 @@
 validation checks, scanners with scrubbed SARIF, a read-only plan of the changed units of the first
 stage, the policy pack on that plan, and one sticky advisory comment. It never applies. Code:
 `src/ayasee/changed.py`, `src/ayasee/prcomment.py`. Reference: `docs/concepts/pr-checks.md`.
-
 ## Requirements
-
 ### Requirement: Never apply, never write from PR code
 `iac-pr` SHALL perform no apply, guard or ledger write, SHALL upload nothing the plan produced (only scrubbed SARIF and comment text, kept one day), and no job that evaluates the pull request's HCL SHALL hold `pull-requests: write` or `security-events: write` (R39); results SHALL be handed to small jobs that run no PR code.
 
@@ -24,11 +22,15 @@ Every job SHALL act only when `github.event_name` is `pull_request` (never `pull
 - **THEN** its jobs do nothing
 
 ### Requirement: Static checks and scanners
-The `checks` job SHALL run `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`, Trivy `config` and Checkov (`uvx checkov@<version>`, with `--baseline .ayasee/checkov.baseline` when present) scoped to `iac_root`, SHALL run both scanners even after an earlier failure, SHALL scrub each SARIF with `ayasee sarif-scrub`, keep them as artifact `ayasee-sarif`, and fail if any step failed. A separate `upload-sarif` job SHALL upload them (categories `ayasee-trivy`, `ayasee-checkov`) without checking out code, skipped for forks.
+The `checks` job SHALL run `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`, Trivy `config` and Checkov (`uvx checkov@<version>`, with `--baseline .ayasee/checkov.baseline` when present) scoped to `iac_root`, SHALL run both scanners even after an earlier failure, SHALL scrub each SARIF with `ayasee sarif-scrub`, keep them as artifact `ayasee-sarif`, and fail if any step failed. A scanner that wrote no SARIF (it crashed) SHALL fail its scrub step with a message saying so. A separate `upload-sarif` job SHALL upload them (categories `ayasee-trivy`, `ayasee-checkov`) without checking out code, skipped for forks.
 
 #### Scenario: Format failure plus findings
 - **WHEN** `tofu fmt` fails and Checkov reports findings
 - **THEN** both SARIF files are still produced and `checks` fails
+
+#### Scenario: Trivy crash
+- **WHEN** Trivy panics and writes no SARIF
+- **THEN** the Trivy scrub step fails saying Trivy wrote no report, the Checkov SARIF is still produced, and `checks` fails
 
 ### Requirement: Pull-request plan environment
 The `resolve` job SHALL compute the plan environment `<environment_prefix><first stage>-plan` with `ayasee config pr-plan-environment`, and SHALL fail when the configuration does not load, the first stage is `prod` or a stage name is reserved; `plan-first-stage` SHALL then be skipped and the comment SHALL say "the configuration was refused".
@@ -79,3 +81,4 @@ For a pull request from a fork, `resolve`, `plan-first-stage`, `plan-dev` and `u
 #### Scenario: Fork PR
 - **WHEN** a fork opens a pull request
 - **THEN** no cloud login happens and the static checks still gate the PR
+

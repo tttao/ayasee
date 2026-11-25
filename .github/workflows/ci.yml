@@ -53,8 +53,10 @@ jobs:
         with:
           tofu_version: 1.13.9
           tofu_wrapper: false
-      - run: scripts/install-dev-tools.sh terragrunt
+      - run: scripts/install-dev-tools.sh terragrunt trivy
       - run: uv run pytest -m integration
+        env:
+          AYASEE_REQUIRE_TRIVY: "1" # the bootstrap scan test (#57) must not skip here
 
   tofu-test:
     name: tofu test

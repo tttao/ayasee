@@ -402,7 +402,8 @@ plan files (`plans/<unit>.tfplan`) and `manifest.json` (plan hashes, engine vers
 hashes). The plan JSON stays in the job: the Rego pack (conftest, with a data file that sets the
 stage to `prod`) and the Trivy `config` scan (HIGH and CRITICAL, exit code 1) both run on it before
 the upload, and the Trivy report is written to a file that is never uploaded; only rule ids and
-severities are printed. A finding stops the run before anything is uploaded.
+severities are printed. A finding stops the run before anything is uploaded, and so does a Trivy
+crash (no report written), with an error that says so.
 
 `prod-plan` outputs `has-changes`, `critical`, `high` and `units` (a JSON array of unit names).
 The `prod` job downloads the artifact and applies those exact files after checking their hash,

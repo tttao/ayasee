@@ -196,6 +196,14 @@ def scrub(doc: dict[str, Any], uri_prefix: str = ".") -> dict[str, Any]:
 
 
 def _main(args: argparse.Namespace) -> int:
+    if not Path(args.infile).exists():
+        # a crashed scanner (a Trivy panic, #57) wrote no report: say so, not FileNotFoundError
+        print(
+            f"sarif-scrub: error: no SARIF at {args.infile}: the scanner wrote no report, so it "
+            "crashed or failed before writing it; see the scanner's step",
+            file=sys.stderr,
+        )
+        return 1
     try:
         doc = json.loads(Path(args.infile).read_text())
         if not isinstance(doc, dict):

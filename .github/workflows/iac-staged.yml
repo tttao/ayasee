@@ -998,12 +998,17 @@ jobs:
           format: json
           cache: "false"
           output: ${{ runner.temp }}/trivy-prod-plan.report
+          version: v0.70.0 # = TRIVY_VERSION of scripts/install-dev-tools.sh (the bootstrap scan test)
       - name: List Trivy findings (ids and severities only)
         if: ${{ !cancelled() && steps.trivy.outcome != 'skipped' }}
         env:
           REPORT: ${{ runner.temp }}/trivy-prod-plan.report
         run: |
-          [ -f "$REPORT" ] || exit 0
+          # Trivy writes the report on success and on findings: none means it crashed (#57)
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::Trivy wrote no report: it crashed or failed before writing it (see the Trivy step)"
+            exit 1
+          fi
           jq -r '.Results[]? | .Target as $t | .Misconfigurations[]? | "\(.Severity) \(.ID) \($t | split("/") | last)"' "$REPORT"
       - id: summary
         name: Summarise the plan
