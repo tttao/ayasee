@@ -209,7 +209,7 @@ def test_rescan_runs_scanners_uploads_scrubbed_sarif_and_notifies(wf):
     assert "--since-hours 26" in steps[findings]["run"]
     notify = steps[_index(steps, lambda s: "/actions/notify@" in _uses(s))]
     assert notify["with"]["event"] == "new_findings"
-    assert notify["if"] == "${{ steps.findings.outputs.count != '0' }}"
+    assert notify["if"] == "${{ inputs.code-scanning && steps.findings.outputs.count != '0' }}"
     assert wf["jobs"]["rescan"]["permissions"]["security-events"] == "write"
     assert wf["jobs"]["rescan"]["if"] == "${{ github.ref == 'refs/heads/main' }}"
 
@@ -294,3 +294,33 @@ def test_rescan_sarif_paths_are_made_repository_relative(wf):
     scrubs = [s for s in _steps(wf, "rescan") if "ayasee sarif-scrub" in s.get("run", "")]
     assert len(scrubs) == 2
     assert all('--uri-prefix "$IAC_ROOT"' in s["run"] for s in scrubs)
+
+
+# ---- code scanning off (issue #55) -------------------------------------------------------------
+
+
+def test_nightly_code_scanning_is_an_input_that_defaults_on(wf):
+    inp = wf[True]["workflow_call"]["inputs"]["code-scanning"]
+    assert inp["type"] == "boolean" and inp["default"] is True and inp["required"] is False
+
+
+def test_rescan_without_code_scanning_uploads_nothing_and_says_so(wf):
+    steps = _steps(wf, "rescan")
+    uploads = [s for s in steps if "upload-sarif" in _uses(s)]
+    assert len(uploads) == 2
+    assert all(s["if"] == "${{ inputs.code-scanning }}" for s in uploads)
+    findings = steps[_index(steps, lambda s: s.get("id") == "findings")]
+    # findings new reads the code-scanning API: skipped, not run into an API error
+    assert findings["if"] == "${{ inputs.code-scanning }}"
+    notify = steps[_index(steps, lambda s: "/actions/notify@" in _uses(s))]
+    # a skipped count is '' and must not read as "not zero"
+    assert notify["if"] == "${{ inputs.code-scanning && steps.findings.outputs.count != '0' }}"
+    keep = steps[_index(steps, lambda s: "upload-artifact" in _uses(s))]
+    assert keep["if"] == "${{ !inputs.code-scanning }}"
+    assert keep["with"]["name"] == "ayasee-rescan-sarif"
+    assert "raw" not in str(keep["with"]["path"])
+    say = steps[_index(steps, lambda s: s.get("id") == "code-scanning-off")]
+    assert say["if"] == "${{ !inputs.code-scanning }}"
+    assert "::notice::" in say["run"] and "GITHUB_STEP_SUMMARY" in say["run"]
+    assert "findings new" in say["run"] and "ayasee-rescan-sarif" in say["run"]
+    assert steps.index(say) > steps.index(findings)

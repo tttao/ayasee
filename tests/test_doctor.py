@@ -102,17 +102,21 @@ def _mock_pin(version=None, parents=None, status=200, head=None):
     )
 
 
-def _mock_repo(visibility="public"):
+def _mock_repo(visibility="public", alerts=(200, [])):
     respx.get(f"{API}/repos/{REPO}").mock(
         return_value=httpx.Response(
             200, json={"visibility": visibility, "owner": {"login": "acme", "type": "Organization"}}
         )
     )
+    # code scanning (issue #55): a private repository is probed once; 200 means it is enabled
+    return respx.get(f"{API}/repos/{REPO}/code-scanning/alerts").mock(
+        return_value=httpx.Response(alerts[0], json=alerts[1])
+    )
 
 
 def _mock(state):
     _mock_pin()
-    _mock_repo(state.get("visibility", "public"))
+    _mock_repo(state.get("visibility", "public"), state.get("alerts", (200, [])))
 
     def names(items, key):
         return httpx.Response(200, json={key: [{"name": n} for n in sorted(items)]})
@@ -1250,3 +1254,86 @@ def test_breakglass_of_the_workflow_gate_needs_an_approve_caller_with_incident(e
     _bruno()
     rc, out = _doctor(estate, capsys)
     assert any("does not pass incident" in f for f in _fails(out)), out
+
+
+# ---- code scanning (issue #55) -----------------------------------------------------------------
+
+NOT_ENABLED = {"message": "Code scanning is not enabled for this repository"}
+
+
+def _section(out, name):
+    sec = out.split(f"\n{name}\n", 1)[1].split("\n\n", 1)[0]
+    return [line.strip() for line in sec.splitlines()]
+
+
+def _private_state(alerts):
+    state = _good_state()
+    state["visibility"] = "private"
+    state["alerts"] = alerts
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": "enterprise"}})
+    )
+    return state
+
+
+def _turn_off(estate, *names):
+    for name in names:
+        wf = estate / ".github/workflows" / name
+        text = wf.read_text()
+        uses = next(line for line in text.splitlines() if line.lstrip().startswith("uses:"))
+        wf.write_text(text.replace(uses, f"{uses}\n    with:\n      code-scanning: false", 1))
+
+
+@respx.mock
+def test_a_public_repository_takes_the_upload(estate, capsys):
+    _mock(_good_state())
+    _, out = _doctor(estate, capsys)
+    lines = _section(out, "code scanning")
+    assert len(lines) == 1 and lines[0].startswith("ok") and "public" in lines[0]
+
+
+@respx.mock
+def test_an_upload_without_code_scanning_warns_and_says_how_to_turn_it_off(estate, capsys):
+    _mock(_private_state((403, NOT_ENABLED)))
+    rc, out = _doctor(estate, capsys)
+    assert _fails(out) == [], out  # not a required check, and the scanners still gate checks
+    lines = _section(out, "code scanning")
+    assert len(lines) == 1 and lines[0].startswith("warn"), lines
+    assert "iac-pr.yml" in lines[0] and "iac-nightly.yml" in lines[0]
+    assert "upload-sarif fails on every pull request" in lines[0]
+    assert "code-scanning: false" in lines[0] and "HTTP 403" not in out
+
+
+@respx.mock
+def test_code_scanning_that_cannot_be_confirmed_is_never_ok(estate, capsys):
+    _mock(_private_state((403, {"message": "Resource not accessible by integration"})))
+    _, out = _doctor(estate, capsys)
+    lines = _section(out, "code scanning")
+    assert lines[0].startswith("warn  cannot confirm code scanning"), lines
+
+
+@respx.mock
+def test_callers_that_turn_the_upload_off_need_no_code_scanning(estate, capsys):
+    _turn_off(estate, "iac-pr.yml", "iac-nightly.yml")
+    _mock(_private_state((403, NOT_ENABLED)))
+    _, out = _doctor(estate, capsys)
+    lines = _section(out, "code scanning")
+    assert len(lines) == 1 and lines[0].startswith("ok") and "code-scanning: false" in lines[0]
+    assert "run artifact" in lines[0]
+    assert all("code-scanning" not in str(c.request.url) for c in respx.calls)
+
+
+@respx.mock
+def test_one_caller_still_uploading_is_named(estate, capsys):
+    _turn_off(estate, "iac-pr.yml")
+    _mock(_private_state((403, NOT_ENABLED)))
+    _, out = _doctor(estate, capsys)
+    lines = _section(out, "code scanning")
+    assert lines[0].startswith("warn") and "iac-nightly.yml" in lines[0]
+    assert "iac-pr.yml" not in lines[0]
+
+
+def test_without_a_token_code_scanning_is_skipped(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    _, out = _doctor(estate, capsys)
+    assert _section(out, "code scanning")[0].startswith("skip")

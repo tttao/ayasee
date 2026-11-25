@@ -4,7 +4,7 @@
 changed units of the **first stage** (`dev` by default) with a read-only identity, runs the policy pack on that plan and posts one
 sticky comment with the risk summary. **It never applies**: no apply, no guard, no ledger write, and
 nothing the plan produced is uploaded. The only artifacts are the scrubbed SARIF and the comment
-text, both kept for one day. Running a job in the
+text, both kept for one day (the SARIF 30 days with [code scanning off](#code-scanning)). Running a job in the
 [pull-request plan environment](#the-pull-request-plan-environment) still creates
 a deployment record for that environment (separate from the first stage's, which is why the
 environment has its own name).
@@ -34,8 +34,8 @@ result to small jobs that run no PR code (R39).
 
 | Job | Permissions | What it does |
 |---|---|---|
-| `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on `iac_root` (the repository by default; SARIF, no cache); Checkov via `uvx checkov@<version>` on `iac_root` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. A scanner that crashes writes no SARIF: its scrub step then fails with `::error::Trivy wrote no SARIF` (or Checkov), never passes. Trivy is the version stated on the `trivy-action` steps (`v0.70.0`). Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day). |
-| `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs. |
+| `checks` | `contents: read` | `tofu fmt -check -recursive`, `terragrunt hcl format --check`, `terragrunt hcl validate`; Trivy `config` on `iac_root` (the repository by default; SARIF, no cache); Checkov via `uvx checkov@<version>` on `iac_root` (SARIF, with `--baseline .ayasee/checkov.baseline` when the file exists). Both scanners run even if an earlier step failed, so all SARIF is kept; the job still fails if any step failed. A scanner that crashes writes no SARIF: its scrub step then fails with `::error::Trivy wrote no SARIF` (or Checkov), never passes. Trivy is the version stated on the `trivy-action` steps (`v0.70.0`). Each SARIF goes through `ayasee sarif-scrub` and the scrubbed files are kept as artifact `ayasee-sarif` (1 day; 30 days with `code-scanning: false`, when its summary says code scanning is off and gives the count of each scanner). |
+| `upload-sarif` | `security-events: write`, `actions: read`, `contents: read` | No checkout. Downloads `ayasee-sarif` and uploads it with `github/codeql-action/upload-sarif`, categories `ayasee-trivy` and `ayasee-checkov`. Skipped for fork PRs and when the caller passes `code-scanning: false` ([code scanning](#code-scanning)). |
 | `resolve` | `contents: read` | No environment, no identity. Checks out the PR head and prints the environment `plan-first-stage` runs in with `ayasee config pr-plan-environment`: `<environment_prefix><first stage>-plan` (`dev-plan` by default, `test-plan` with `stages: [test, prod]`, `iac-test-plan` with `environment_prefix: iac-`). It fails when the configuration does not load, the first stage is `prod` or a stage name is reserved (`prod-pr`, `prod-breakglass`, `drift-*`, `*-plan`); `plan-first-stage` is then skipped, `plan-dev` fails and `comment` posts "the configuration was refused". |
 | `plan-first-stage` | `contents: read`, `id-token: write` | Environment `<first stage>-plan`, from `resolve` (a job's environment is fixed before its steps run). Checks out the PR head (`persist-credentials: false`), finds the changed units of the first configured stage (`dev` by default), logs in to Azure when `identity` is `oidc` (with `identity: secrets` the plan step receives that environment's provider tokens instead, so keep them read-only: pull-request code runs with them), plans (`binding-mode: same-job`, `encrypt: false`, `lock: false`; plan files never leave the runner), runs the Rego pack on the plan JSON (with that stage) and writes the comment text, headed "Plan of `<stage>`", to artifact `ayasee-pr-comment` (1 day). |
 | `plan-dev` | none | The verdict of the pull-request plan, and the check to require. No checkout, no environment, no identity. It runs whenever `resolve` ran, also after a failure, and fails unless `resolve` succeeded and `plan-first-stage` succeeded. A skipped job counts as passed in branch protection, so requiring `plan-first-stage` alone would let a refused configuration merge. |
@@ -217,6 +217,44 @@ A fork PR gets a read-only token and no OIDC token. For those PRs `resolve`, `pl
 and `plan-dev` are skipped
 (`github.event.pull_request.head.repo.full_name == github.repository`), and so is `upload-sarif`;
 fmt, validate, Trivy and Checkov still run, and their failures fail the check.
+
+## Code scanning
+
+`upload-sarif` publishes the findings to GitHub code scanning (the Security tab). Code scanning is
+free on a public repository; a private one has it only with GitHub Code Security, an add-on of
+GitHub Team and Enterprise, so on GitHub Free or Pro, and on Team without the add-on, every upload
+fails ("Code scanning is not enabled for this repository") and `upload-sarif` is red on every pull
+request. Such a repository turns the upload off in its caller:
+
+```yaml
+jobs:
+  pr:
+    uses: <owner>/ayasee/.github/workflows/iac-pr.yml@<sha>
+    with:
+      code-scanning: false   # no GitHub Code Security on this private repository
+```
+
+With `code-scanning: false`:
+
+- `upload-sarif` is skipped, so no job with `security-events: write` runs;
+- the scrubbed SARIF stays in the `ayasee-sarif` artifact of the run, for 30 days instead of one;
+- the `checks` job prints a notice and writes a job summary saying code scanning is off, with the
+  number of findings of each scanner (counts only; the rule ids and files are in the log of
+  "List findings");
+- Trivy and Checkov **still gate** `checks`: a high or critical finding still fails the check.
+
+The nightly rescan takes the same input ([drift](drift.md#code-scanning-off)). The caller keeps
+granting `security-events: write`: GitHub refuses a called workflow whose job asks for more than its
+caller grants, whether or not that job runs.
+
+The input is explicit rather than detected at run time. Treating the upload's "not enabled" error as
+a pass would also hide a real misconfiguration (a token without the scope, a broken SARIF, an
+outage) behind the same green, and would add logic to the one job that holds
+`security-events: write`; an input is reviewed in the caller and printed on every run. `ayasee init`
+writes `code-scanning: false` when GitHub says code scanning is not enabled, or for a private
+repository on Free, Pro or Team where it cannot confirm GitHub Code Security (`--code-scanning` and
+`--no-code-scanning` decide instead), and `ayasee doctor` warns when a caller uploads to a
+repository without code scanning or where it cannot confirm it.
 
 ## Monorepos
 

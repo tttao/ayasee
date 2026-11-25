@@ -22,7 +22,11 @@ when set, anonymous otherwise; the token is never printed), and chooses the prod
 ``gate_mechanism: workflow`` (D15), the ``iac-approve`` caller and ``private_repository_plan`` in
 the bootstrap, with ``reviewers.prod`` left as a placeholder that the configuration refuses until a
 person names the reviewers; a plan it cannot read keeps the default ``environment`` gate and says
-which flag to pass. ``--gate-mechanism`` and ``--plan`` override the detection.
+which flag to pass. ``--gate-mechanism`` and ``--plan`` override the detection. It also asks
+whether the repository has code scanning (:func:`choose_code_scanning`, issue #55) and writes
+``code-scanning: false`` into the ``iac-pr`` and ``iac-nightly`` callers when it has not, or
+cannot be confirmed for a private repository on Free, Pro or Team; ``--[no-]code-scanning``
+overrides.
 
 It writes no unit: ``<units_root>/<stage>/`` is created empty (a ``.gitkeep``), and
 ``shared_units`` starts empty. Existing files are never overwritten without ``--force``; on a
@@ -49,6 +53,10 @@ from pathlib import Path
 import yaml
 
 from ayasee import __version__, cli
+from ayasee.codescanning import UNAVAILABLE as CS_UNAVAILABLE
+from ayasee.codescanning import UNKNOWN as CS_UNKNOWN
+from ayasee.codescanning import CodeScanning
+from ayasee.codescanning import detect as detect_code_scanning
 from ayasee.config import (
     ENVIRONMENT_PREFIX,
     GATE_MECHANISMS,
@@ -84,6 +92,18 @@ _TF_PREFIX = re.compile(r'(variable "environment_prefix" \{[^}]*?default\s*=\s*)
 _TF_GATE = re.compile(r'(variable "gate_mechanism" \{[^}]*?default\s*=\s*)"environment"')
 _TF_PLAN = re.compile(r'(variable "private_repository_plan" \{[^}]*?default\s*=\s*)""')
 PLANS = tuple(PRIVATE_MISSING)  # free, pro, team, enterprise
+# code-scanning: false (issue #55), written right after the pinned `uses:` of these callers
+_CS_CALLERS = ("iac-pr.yml", "iac-nightly.yml")
+_CALLER_USES = re.compile(
+    r"^(    uses: \S+/\.github/workflows/iac-(?:pr|nightly)\.yml@[0-9a-f]{40}[^\n]*\n)", re.M
+)
+_CS_INPUT = (
+    "    with:\n"
+    "      # no code scanning on this repository (a private one needs GitHub Code Security): the\n"
+    "      # SARIF stays a run artifact and Trivy and Checkov still gate the checks.\n"
+    "      # docs/concepts/pr-checks.md#code-scanning\n"
+    "      code-scanning: false\n"
+)
 # in a monorepo the repository already deploys applications, whose environments are called test
 # and prod: ayasee's get a prefix of their own by default (issue #31)
 MONOREPO_PREFIX = "iac-"
@@ -211,10 +231,13 @@ def render(
     environment_prefix: str = "",
     gate: str = "environment",
     plan: str = "",
+    code_scanning: bool = True,
 ) -> dict[str, str]:
     """Repository-relative path -> content of every file to write. ``gate``: gate_mechanism of the
     configuration and the bootstrap; ``workflow`` adds the iac-approve caller and the
-    ``reviewers.prod`` placeholder. ``plan``: the bootstrap's ``private_repository_plan``."""
+    ``reviewers.prod`` placeholder. ``plan``: the bootstrap's ``private_repository_plan``.
+    ``code_scanning`` False writes ``code-scanning: false`` into the iac-pr and iac-nightly
+    callers (issue #55)."""
     src = templates / profile.name
     units_root = "stages" if iac_root == "." else f"{iac_root}/stages"
     files: dict[str, str] = {}
@@ -245,6 +268,8 @@ def render(
             # callers, not all of .github/, so that an application workflow starts none (#33)
             paths = f'    paths: ["{iac_root}/**", ".ayasee.yaml", "{STAGED_PATHS_CALLERS}"]\n'
             text = text.replace(_PUSH_MAIN, _PUSH_MAIN + paths, 1)
+        if not code_scanning and name in _CS_CALLERS:
+            text = _sub_once(_CALLER_USES, f"\\g<1>{_CS_INPUT}", text, f"{name}: uses")
         files[f".github/workflows/{name}"] = text
 
     base = "" if iac_root == "." else f"{iac_root}/"
@@ -514,6 +539,115 @@ def choose_gate(
     return GateChoice(chosen, chosen_plan, tuple(msgs))
 
 
+@dataclass(frozen=True)
+class CodeScanningChoice:
+    """Whether the ``iac-pr`` and ``iac-nightly`` callers upload SARIF (issue #55): ``enabled``
+    False writes ``code-scanning: false`` into both. ``messages`` as for :class:`GateChoice`."""
+
+    enabled: bool
+    messages: tuple[Message, ...] = ()
+
+
+_CS_OFF = (
+    "init writes code-scanning: false into the iac-pr and iac-nightly callers: the SARIF stays a "
+    "run artifact (nothing on the Security tab) and Trivy and Checkov still gate the checks; "
+    "--code-scanning keeps the upload, which needs GitHub Code Security on a private repository"
+)
+_CS_PLANS = ("free", "pro", "team")
+
+
+def choose_code_scanning(
+    cs: CodeScanning | None, visibility: str | None, plan: str, flag: bool | None
+) -> CodeScanningChoice:
+    """Whether the callers upload SARIF, from what the repository answered (``cs``, None: no
+    repository to ask), its visibility, the plan init states, and ``--[no-]code-scanning``.
+
+    Off only on evidence: GitHub says code scanning is not enabled, or a private repository on
+    Free, Pro or Team (which have code scanning only with GitHub Code Security, an add-on that
+    Free and Pro cannot buy) whose answer could not be read. Anything else keeps the default
+    upload, with a note when it was not confirmed: a red upload-sarif is loud, a dropped upload
+    would be silent, and ``ayasee doctor`` checks it again."""
+    vis = visibility or (cs.visibility if cs else None)
+    if flag is not None:
+        msgs: list[Message] = []
+        if flag and cs is not None and cs.verdict == CS_UNAVAILABLE:
+            msgs.append(
+                (
+                    "warning",
+                    (
+                        f"--code-scanning: code scanning is not available here ({cs.how()}): "
+                        "upload-sarif fails on every pull request and the nightly rescan fails "
+                        "until GitHub Code Security is enabled",
+                    ),
+                )
+            )
+        if not flag and cs is not None and cs.available:
+            msgs.append(
+                (
+                    "note",
+                    (
+                        f"--no-code-scanning: this repository has code scanning ({cs.how()}); the "
+                        "findings will not reach the Security tab, they stay run artifacts",
+                    ),
+                )
+            )
+        return CodeScanningChoice(flag, tuple(msgs))
+    if cs is not None and cs.available:
+        return CodeScanningChoice(True)
+    if cs is not None and cs.verdict == CS_UNAVAILABLE:
+        return CodeScanningChoice(
+            False, (("note", (f"code scanning is not available ({cs.how()})", _CS_OFF)),)
+        )
+    if vis in (None, "private") and plan in _CS_PLANS:
+        why = cs.how() if cs is not None else "no repository to ask"
+        return CodeScanningChoice(
+            False,
+            (
+                (
+                    "note",
+                    (
+                        f"cannot confirm code scanning ({why}); a private repository on GitHub "
+                        "Free, Pro or Team has it only with GitHub Code Security, so",
+                        _CS_OFF,
+                    ),
+                ),
+            ),
+        )
+    if cs is None:
+        return CodeScanningChoice(True)
+    return CodeScanningChoice(
+        True,
+        (
+            (
+                "note",
+                (
+                    f"cannot confirm code scanning ({cs.how()}); init keeps the SARIF upload, the "
+                    "default. If upload-sarif fails with 'Code scanning is not enabled', run init "
+                    "with --no-code-scanning or pass code-scanning: false in the iac-pr and "
+                    "iac-nightly callers; `ayasee doctor` checks it",
+                ),
+            ),
+        ),
+    )
+
+
+def _detect_code_scanning(repo: str | None) -> CodeScanning | None:
+    """Whether the repository takes a SARIF upload (issue #55), or None without a repository.
+    Never raises: a failure is UNKNOWN. The token is sent, never printed."""
+    if repo is None:
+        return None
+    try:
+        gh = GitHub(
+            os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL, os.environ.get("GITHUB_TOKEN", "")
+        )
+    except GitHubError as exc:
+        return CodeScanning(CS_UNKNOWN, None, (f"cannot reach GitHub: {exc}",))
+    try:
+        return detect_code_scanning(gh, repo)
+    finally:
+        gh.close()
+
+
 def _detect_plan(repo: str | None) -> PlanSupport | None:
     """What the repository's plan allows (issue #39), or None without a repository. Never raises:
     a failure is UNKNOWN, which keeps the default gate. The token is sent, never printed."""
@@ -639,6 +773,7 @@ def _upgrade(args: argparse.Namespace, dest: Path) -> int:
         ("--environment-prefix", args.environment_prefix),
         ("--gate-mechanism", args.gate_mechanism),
         ("--plan", args.plan),
+        ("--[no-]code-scanning", None if args.code_scanning is None else "given"),
         ("--force", args.force or None),
         ("--replace-config", args.replace_config or None),
     ):
@@ -698,10 +833,17 @@ def _run(args: argparse.Namespace) -> int:
             prefix = MONOREPO_PREFIX if iac_root != "." else ""
         templates, _ = templates_root()
         sha, label = _resolve_pin(args)
-        choice = choose_gate(
-            _detect_plan(args.repo or _origin_repo(dest)), args.gate_mechanism, args.plan
-        )
+        repo = args.repo or _origin_repo(dest)
+        support = _detect_plan(repo)
+        choice = choose_gate(support, args.gate_mechanism, args.plan)
         _say(choice.messages)
+        scanning = choose_code_scanning(
+            _detect_code_scanning(repo),
+            support.visibility if support else None,
+            choice.plan,
+            args.code_scanning,
+        )
+        _say(scanning.messages)
         if kept is not None and choice.gate != kept.cfg.gate_mechanism:
             raise InitError(_gate_mismatch(kept.cfg.gate_mechanism, choice.gate, args))
         if (
@@ -721,6 +863,7 @@ def _run(args: argparse.Namespace) -> int:
             environment_prefix=prefix,
             gate=choice.gate,
             plan=choice.plan,
+            code_scanning=scanning.enabled,
         )
         _check_config(files[".ayasee.yaml"], choice.gate)
         if kept is not None:
@@ -920,6 +1063,14 @@ def _setup(parser: argparse.ArgumentParser) -> None:
         help="the GitHub plan of a private repository, for the bootstrap's "
         "private_repository_plan (default: the plan read from GitHub, if any); without "
         "--gate-mechanism, enterprise keeps the environment gate and the others choose workflow",
+    )
+    parser.add_argument(
+        "--code-scanning",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="whether the iac-pr and iac-nightly callers upload SARIF to GitHub code scanning "
+        "(default: from the repository: off when GitHub says code scanning is not enabled, or for "
+        "a private repository on Free, Pro or Team it cannot confirm; on otherwise)",
     )
     parser.add_argument("--dir", default=".", help="the repository checkout (default: .)")
     parser.add_argument(

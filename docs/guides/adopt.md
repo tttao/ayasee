@@ -32,6 +32,15 @@ them on every plan
 | Required reviewers on environments | every plan | GitHub Enterprise only | the prod gate (D9): nothing waits for an approval before prod; `prevent_self_review` (D2), the separate break-glass reviewers (D3) and the reviewer of `prod-pr-plan` go with it |
 | Deployment branch policies | every plan | GitHub Pro, Team or Enterprise | the `main`-only environments: any branch could run a job in `prod` and read its secrets |
 | Rulesets and branch protection | every plan | GitHub Pro, Team or Enterprise | the guard of the ledger token: it could push to `main` |
+| Code scanning (SARIF upload) | every plan | with GitHub Code Security only, an add-on of GitHub Team or Enterprise | the Security tab: the findings stay run artifacts (`code-scanning: false`); Trivy and Checkov still gate the pull-request checks |
+
+Code scanning is not part of the gate. Without it, the `iac-pr` and `iac-nightly` callers pass
+`code-scanning: false` (otherwise `upload-sarif` is red on every pull request and the nightly
+rescan fails): `ayasee init` writes it when GitHub says code scanning is not enabled, or when it
+reads a private repository on Free, Pro or Team and cannot confirm GitHub Code Security
+(`--code-scanning` and `--no-code-scanning` decide instead), and `ayasee doctor` warns when a
+caller uploads to a repository without it
+([what changes](../concepts/pr-checks.md#code-scanning)).
 
 So the repository must be **public, or private on GitHub Enterprise**. A private repository on
 GitHub Free, Pro or Team is **not supported by the default gate today**: ayasee says so instead of
@@ -120,6 +129,14 @@ until you list the GitHub logins that may approve a prod apply **(you)**. When t
 `.ayasee.yaml` sets the other gate, init writes nothing and says so: pass `--gate-mechanism` with
 the file's gate to keep it, or change the file.
 
+**Code scanning follows the repository too.** init asks GitHub whether the repository takes a SARIF
+upload (a public one does; for a private one, `security_and_analysis`, which an administrator's
+token shows, or one read of the code-scanning API). It writes `code-scanning: false` into the
+`iac-pr` and `iac-nightly` callers when GitHub says code scanning is not enabled, or when it cannot
+tell for a private repository on Free, Pro or Team; otherwise the callers upload, with a note when
+it could not confirm. `--code-scanning` and `--no-code-scanning` decide instead
+([what changes](../concepts/pr-checks.md#code-scanning)).
+
 ## 2. Bootstrap the environments
 
 From an administrator's machine, never from CI and never as an ayasee unit:
@@ -204,7 +221,8 @@ with the credentials of a key that can write each bucket in `AWS_ACCESS_KEY_ID` 
 `AWS_SECRET_ACCESS_KEY`. It checks first that the repository's plan can hold the gate, and stops
 there with one failure if it cannot. Then it lists, in one pass, everything steps 1 to 4 left out: an environment or
 a reviewer, a secret missing or set at repository level, a variable, a caller still unpinned, the
-ruleset on `main`, a bucket that ignores the lock condition. Repeat until it exits 0. See
+ruleset on `main`, a bucket that ignores the lock condition. It warns when a caller uploads SARIF
+to a repository without code scanning, or where it cannot confirm it. Repeat until it exits 0. See
 [check it all](quickstart.md#check-it-all-before-the-first-run).
 
 ## 6. Write the units and import what exists

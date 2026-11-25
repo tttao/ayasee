@@ -12,6 +12,11 @@
 # skipped for them, and so is the SARIF upload (a fork's token cannot write security events). The
 # checks still run.
 #
+# Code scanning (issue #55): a private repository without GitHub Code Security cannot take a SARIF
+# upload, so its caller passes `code-scanning: false`; upload-sarif is then skipped and the SARIF
+# stays a run artifact. The caller still grants `security-events: write`: GitHub refuses a called
+# workflow whose job asks for more than the caller grants, whether or not that job runs.
+#
 # Required checks: `checks` and `plan-dev`. plan-dev is the verdict of the pull-request plan: it is
 # red when resolve refuses the configuration (and plan-first-stage is skipped) or when the plan or
 # the policy pack fails, so a configuration that does not load never reads as a passed check.
@@ -44,6 +49,16 @@ on:
         type: string
         required: false
         default: 3.4.3
+      code-scanning:
+        description: >-
+          Upload the Trivy and Checkov SARIF to GitHub code scanning (the upload-sarif job). A
+          private repository has code scanning only with GitHub Code Security (GitHub Team or
+          Enterprise); without it pass false: the upload is skipped, the scrubbed SARIF stays a
+          run artifact (ayasee-sarif) and the summary says so. Trivy and Checkov still gate the
+          checks job either way. docs/concepts/pr-checks.md#code-scanning
+        type: boolean
+        required: false
+        default: true
     secrets:
       CLOUDFLARE_API_TOKEN:
         description: >-
@@ -194,7 +209,8 @@ jobs:
           path: |
             ${{ runner.temp }}/sarif/trivy.sarif
             ${{ runner.temp }}/sarif/checkov.sarif
-          retention-days: 1
+          # with code scanning off (issue #55) the artifact is the only record of the findings
+          retention-days: ${{ inputs.code-scanning && 1 || 30 }}
           if-no-files-found: warn
       - name: List findings (rule ids and files only)
         if: ${{ !cancelled() }}
@@ -203,12 +219,38 @@ jobs:
             [ -f "$f" ] || continue
             jq -r '.runs[]?.results[]? | "\(.ruleId) \(.locations[0].physicalLocation.artifactLocation.uri // "")"' "$f"
           done
+      - id: code-scanning-off
+        name: Say that code scanning is off
+        # issue #55: the caller passed code-scanning: false, so upload-sarif is skipped. This step
+        # only reports; the scans above gate this job either way.
+        if: ${{ !cancelled() && !inputs.code-scanning }}
+        run: |
+          echo "::notice::code scanning is off (code-scanning: false): the SARIF is not uploaded; it is kept in the ayasee-sarif artifact of this run"
+          {
+            echo "### Code scanning is off"
+            echo
+            echo "The caller passes \`code-scanning: false\` (a private repository without GitHub Code Security),"
+            echo "so the findings are not uploaded to the Security tab. Trivy and Checkov still gate this check."
+            echo "The scrubbed SARIF is in the \`ayasee-sarif\` artifact of this run (30 days); the rule ids and"
+            echo "files are in the log of the step List findings."
+            echo
+            for tool in trivy checkov; do
+              label="$([ "$tool" = trivy ] && echo Trivy || echo Checkov)"
+              f="$RUNNER_TEMP/sarif/$tool.sarif"
+              if [ -f "$f" ]; then
+                echo "- $label: $(jq '[.runs[]?.results[]?] | length' "$f") finding(s)"
+              else
+                echo "- $label: no SARIF (see its step)"
+              fi
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
 
   upload-sarif:
     # publishes the scrubbed SARIF; checks out and runs no PR code. Fork PRs have a read-only token.
+    # Skipped when the caller passes code-scanning: false (issue #55; checks says so in its summary).
     name: upload-sarif
     needs: checks
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.checks.result != 'skipped' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.checks.result != 'skipped' && inputs.code-scanning }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write # upload SARIF

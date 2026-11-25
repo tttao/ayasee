@@ -37,6 +37,9 @@ instead of failed jobs found one at a time:
   repository level); the variables the
   workflows read (``AYASEE_LEDGER_URL``, ``AZURE_*``, the plan key IDs) are set; and ``main`` has a
   pull-request ruleset when a ``ledger-token`` is passed;
+- **code scanning** (with ``GITHUB_TOKEN``, issue #55): when an ``iac-pr`` or ``iac-nightly``
+  caller uploads SARIF (it does not pass ``code-scanning: false``), the repository has code
+  scanning (:mod:`ayasee.codescanning`); a warning when it has not, or cannot be confirmed;
 - **lock** (opt-in, ``--lock-check s3://<bucket>?region=..&endpoint=..``, AWS credentials in the
   environment): the store refuses a second ``If-None-Match`` write, which ``use_lockfile`` needs.
   This is the only check that writes: one object, deleted afterwards.
@@ -64,6 +67,8 @@ import yaml
 
 from ayasee import cli
 from ayasee.changed import DEFAULT_CONFIG
+from ayasee.codescanning import UNAVAILABLE as CS_UNAVAILABLE
+from ayasee.codescanning import detect as detect_code_scanning
 from ayasee.config import (
     Config,
     ConfigError,
@@ -158,6 +163,7 @@ class Caller:
     secrets: dict[str, str | None] | None  # input name -> repository secret name; None: inherit
     pr_paths: bool = False
     inputs: frozenset[str] = frozenset()  # the with: keys the caller passes
+    code_scanning: bool = True  # False when it passes code-scanning: false (issue #55)
 
 
 # ---- configuration ---------------------------------------------------------------------------
@@ -251,6 +257,9 @@ def find_callers(report: Report, root: Path) -> list[Caller]:
             caller.inputs = (
                 frozenset(str(k) for k in given) if isinstance(given, dict) else frozenset()
             )
+            # only a literal false turns the upload off; an expression may evaluate to true
+            off = given.get("code-scanning") if isinstance(given, dict) else None
+            caller.code_scanning = not (off is False or str(off).strip().lower() == "false")
             callers.append(caller)
     return callers
 
@@ -882,6 +891,69 @@ def _workflow_plan_line(support: PlanSupport) -> tuple[str, str, str]:
     )
 
 
+# ---- code scanning (issue #55) ---------------------------------------------------------------
+
+CODE_SCANNING_SECTION = "code scanning"
+SARIF_KINDS = ("iac-pr", "iac-nightly")
+
+
+def check_code_scanning(
+    report: Report, gh: GitHub | None, repo: str | None, callers: list[Caller]
+) -> None:
+    """The callers that upload SARIF need a repository with code scanning.
+
+    A warning, not a failure: ``upload-sarif`` is not a required check and the scanners still gate
+    ``checks``, but without code scanning it is red on every pull request and the nightly rescan
+    fails. A repository that cannot be confirmed warns too, never reads as ok. Callers that all
+    pass ``code-scanning: false`` need no API call. ``gh`` None: no token or repository (skip)."""
+    sec = CODE_SCANNING_SECTION
+    scanners = [c for c in callers if c.kind in SARIF_KINDS]
+    uploading = [c for c in scanners if c.code_scanning]
+    if not scanners:
+        return
+    if not uploading:
+        files = ", ".join(sorted({c.file for c in scanners}))
+        report.add(
+            OK,
+            sec,
+            f"code-scanning: false in {files}: no SARIF upload; the findings stay run artifacts "
+            "(nothing on the Security tab) and Trivy and Checkov still gate the checks",
+        )
+        return
+    if repo is None:
+        report.add(SKIP, sec, "no --repo and no github.com origin remote")
+        return
+    if gh is None:
+        report.add(SKIP, sec, "set GITHUB_TOKEN to check that the repository has code scanning")
+        return
+    found = detect_code_scanning(gh, repo)
+    files = ", ".join(sorted({c.file for c in uploading}))
+    if found.available:
+        report.add(OK, sec, f"{files} upload SARIF and the repository has it ({found.how()})")
+        return
+    fix = (
+        f"pass code-scanning: false in {files} (the SARIF then stays a run artifact; Trivy and "
+        "Checkov still gate the checks), or enable GitHub Code Security; "
+        "docs/concepts/pr-checks.md#code-scanning"
+    )
+    if found.verdict == CS_UNAVAILABLE:
+        report.add(
+            WARN,
+            sec,
+            f"{files} upload SARIF, but code scanning is not available on this repository "
+            f"({found.how()}): upload-sarif fails on every pull request and the nightly rescan "
+            f"fails. {fix}",
+        )
+    else:
+        report.add(
+            WARN,
+            sec,
+            f"cannot confirm code scanning ({found.how()}), which {files} upload SARIF to; a "
+            "private repository has it only with GitHub Code Security (an administrator's token "
+            f"shows it). Without it, {fix}",
+        )
+
+
 # ---- lock ------------------------------------------------------------------------------------
 
 
@@ -997,6 +1069,14 @@ def run(args: argparse.Namespace) -> Report:
             check_github(report, gh, repo, cfg, callers, bare)
         finally:
             gh.close()
+    if repo is not None and os.environ.get("GITHUB_TOKEN"):
+        gh = GitHub.from_env()
+        try:
+            check_code_scanning(report, gh, repo, callers)
+        finally:
+            gh.close()
+    else:
+        check_code_scanning(report, None, repo, callers)
     pinned = [c for c in callers if _SHA.match(c.ref)]
     if pinned and os.environ.get("GITHUB_TOKEN"):
         gh = GitHub.from_env()

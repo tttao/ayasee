@@ -262,7 +262,9 @@ def test_publishing_jobs_run_no_pr_code(wf):
     assert up["with"]["name"] == "ayasee-pr-comment" and up["with"]["retention-days"] == 1
     sarif = _steps(wf, "checks")
     keep = sarif[_index(sarif, lambda s: "upload-artifact" in _uses(s))]
-    assert keep["with"]["name"] == "ayasee-sarif" and keep["with"]["retention-days"] == 1
+    assert keep["with"]["name"] == "ayasee-sarif"
+    # one day when upload-sarif publishes it, longer with code scanning off (issue #55)
+    assert keep["with"]["retention-days"] == "${{ inputs.code-scanning && 1 || 30 }}"
 
 
 def test_plan_runs_without_the_state_lock(wf):
@@ -621,3 +623,54 @@ def test_checks_refuse_a_shared_unit_outside_prod(wf):
     steps = _steps(wf, "checks")
     i = _index(steps, lambda s: "config check-shared" in s.get("run", ""))
     assert "exit 1" in steps[i]["run"]
+
+
+# ---- code scanning off (issue #55) -------------------------------------------------------------
+
+
+def test_code_scanning_is_an_input_that_defaults_on(wf):
+    inp = wf[True]["workflow_call"]["inputs"]["code-scanning"]
+    assert inp["type"] == "boolean" and inp["default"] is True and inp["required"] is False
+    assert "GitHub Code Security" in inp["description"]
+
+
+def test_code_scanning_off_skips_the_upload_job(wf):
+    # the job, not a step: with the input off nothing that holds security-events: write runs
+    assert "&& inputs.code-scanning" in wf["jobs"]["upload-sarif"]["if"]
+    assert FORK_SKIP in wf["jobs"]["upload-sarif"]["if"]
+
+
+def test_code_scanning_off_keeps_the_sarif_and_says_so(wf):
+    steps = _steps(wf, "checks")
+    keep = steps[_index(steps, lambda s: "upload-artifact" in _uses(s))]
+    # kept longer when it is the only record of the findings
+    assert keep["with"]["retention-days"] == "${{ inputs.code-scanning && 1 || 30 }}"
+    say = steps[_index(steps, lambda s: s.get("id") == "code-scanning-off")]
+    assert say["if"] == "${{ !cancelled() && !inputs.code-scanning }}"
+    assert "GITHUB_STEP_SUMMARY" in say["run"] and "::notice::" in say["run"]
+    assert "ayasee-sarif" in say["run"] and "GitHub Code Security" in say["run"]
+    # the job's verdict does not depend on it: Trivy and Checkov still gate checks
+    assert steps.index(say) > _index(steps, lambda s: s.get("id") == "checkov")
+    assert "exit 1" not in say["run"]
+
+
+def test_the_code_scanning_summary_counts_findings_without_values(wf, tmp_path):
+    steps = _steps(wf, "checks")
+    say = steps[_index(steps, lambda s: s.get("id") == "code-scanning-off")]
+    sarif = tmp_path / "sarif"
+    sarif.mkdir()
+    (sarif / "trivy.sarif").write_text(
+        json.dumps({"runs": [{"results": [{"ruleId": "AVD-1"}, {"ruleId": "AVD-2"}]}]})
+    )
+    summary = tmp_path / "summary.md"
+    proc = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", say["run"]],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_STEP_SUMMARY": str(summary)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    text = summary.read_text()
+    assert "Code scanning is off" in text
+    assert "Trivy: 2 finding(s)" in text and "Checkov: no SARIF" in text
+    assert "AVD-1" not in text  # counts only; the rule ids are in the log of List findings

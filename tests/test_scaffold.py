@@ -11,6 +11,8 @@ import respx
 import yaml
 
 from ayasee import cli, doctor, scaffold  # noqa: F401  (registers the subcommands)
+from ayasee.codescanning import AVAILABLE, UNAVAILABLE, CodeScanning
+from ayasee.codescanning import UNKNOWN as UNKNOWN_CS
 from ayasee.config import REVIEWER_PLACEHOLDER, ConfigError, parse_config_text
 from ayasee.github import GitHub
 from ayasee.plansupport import (
@@ -701,6 +703,10 @@ def _mock_estate(visibility):
             200, json={"visibility": visibility, "owner": {"login": "acme", "type": "Organization"}}
         )
     )
+    # code scanning (issue #55): what a private repository without Code Security answers
+    respx.get(f"{API}/repos/acme/estate/code-scanning/alerts").mock(
+        return_value=httpx.Response(403, json={"message": NOT_ENABLED})
+    )
 
 
 @respx.mock
@@ -1017,3 +1023,112 @@ def test_the_documented_approve_caller_is_the_one_init_writes():
         shipped,
     )
     assert block.group(1) == shipped
+
+
+# ---- code scanning (issue #55) -----------------------------------------------------------------
+
+NOT_ENABLED = "Code scanning is not enabled for this repository"
+CS_ON = CodeScanning(AVAILABLE, "private", ("GitHub Code Security is enabled",))
+CS_OFF = CodeScanning(UNAVAILABLE, "private", ("the code-scanning API says it is not enabled",))
+CS_UNKNOWN = CodeScanning(UNKNOWN_CS, "private", ("cannot read the code-scanning API (403)",))
+CS_PUBLIC = CodeScanning(AVAILABLE, "public", ("a public repository: code scanning is free",))
+
+
+@pytest.mark.parametrize(
+    "cs, visibility, plan, flag, want",
+    [
+        (None, None, "", None, True),  # nothing read: the default, doctor checks later
+        (CS_PUBLIC, "public", "", None, True),
+        (CS_ON, "private", "team", None, True),
+        (CS_OFF, "private", "enterprise", None, False),
+        (CS_UNKNOWN, "private", "free", None, False),
+        (CS_UNKNOWN, "private", "pro", None, False),
+        (CS_UNKNOWN, "private", "team", None, False),
+        (CS_UNKNOWN, "private", "enterprise", None, True),  # may well have it: keep, note
+        (CS_UNKNOWN, "private", "", None, True),
+        (None, None, "free", None, False),  # --plan free without a repository: private
+        (CS_OFF, "private", "free", True, True),  # the flag wins, with a warning
+        (CS_ON, "private", "team", False, False),
+    ],
+)
+def test_code_scanning_follows_the_repository_and_the_flag(cs, visibility, plan, flag, want):
+    assert scaffold.choose_code_scanning(cs, visibility, plan, flag).enabled is want
+
+
+def test_code_scanning_choices_say_why_and_how_to_undo():
+    def says(*args):
+        return _says(scaffold.choose_code_scanning(*args))
+
+    assert says(CS_PUBLIC, "public", "", None) == ""
+    off = says(CS_OFF, "private", "free", None)
+    assert "code-scanning: false" in off and "--code-scanning" in off and "artifact" in off
+    assert "Free, Pro or Team" in says(CS_UNKNOWN, "private", "team", None)
+    assert "--no-code-scanning" in says(CS_UNKNOWN, "private", "", None)
+    assert "fails on every pull request" in says(CS_OFF, "private", "free", True)
+    assert "Security tab" in says(CS_ON, "private", "team", False)
+
+
+def _no_upload(tmp_path):
+    for name in ("iac-pr.yml", "iac-nightly.yml"):
+        doc = yaml.safe_load((tmp_path / ".github/workflows" / name).read_text())
+        job = next(iter(doc["jobs"].values()))
+        assert job["with"]["code-scanning"] is False, name
+        # the caller still grants it: a nested job may not ask for more, run or not
+        assert job["permissions"]["security-events"] == "write"
+
+
+@pytest.mark.parametrize("profile", ["cloudflare-s3", "databricks-azure"])
+def test_no_code_scanning_writes_the_input_into_both_callers(tmp_path, profile):
+    assert _init(tmp_path, "--profile", profile, "--no-code-scanning") == 0
+    _no_upload(tmp_path)
+    for name in ("iac-staged.yml", "iac-breakglass.yml"):
+        assert "code-scanning" not in (tmp_path / ".github/workflows" / name).read_text()
+
+
+def test_the_default_scaffold_uploads(tmp_path):
+    assert _init(tmp_path, "--profile", "cloudflare-s3") == 0
+    for name in ("iac-pr.yml", "iac-nightly.yml"):
+        assert "code-scanning" not in (tmp_path / ".github/workflows" / name).read_text()
+
+
+@respx.mock
+def test_a_free_private_repository_gets_no_upload(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secretvalue")
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("private")
+    respx.get(f"{API}/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "plan": {"name": "free"}})
+    )
+    respx.get(f"{API}/repos/acme/estate/code-scanning/alerts").mock(
+        return_value=httpx.Response(403, json={"message": NOT_ENABLED})
+    )
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    _no_upload(tmp_path)
+    err = capsys.readouterr().err
+    assert "code-scanning: false" in err and "ghp_secretvalue" not in err
+
+
+@respx.mock
+def test_a_public_repository_uploads(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    _mock_estate("public")
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--repo", "acme/estate") == 0
+    assert "code-scanning" not in (tmp_path / ".github/workflows/iac-pr.yml").read_text()
+
+
+def test_the_no_upload_scaffold_passes_doctor_offline(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--no-code-scanning") == 0
+    capsys.readouterr()
+    cli.main(["doctor", "--root", str(tmp_path), "--repo", "acme/estate"])
+    out = capsys.readouterr().out
+    assert "0 failed" in out and "code-scanning: false" in out
+
+
+def test_upgrade_keeps_the_input_and_refuses_the_flag(tmp_path, capsys):
+    assert _init(tmp_path, "--profile", "cloudflare-s3", "--no-code-scanning") == 0
+    assert _upgrade(tmp_path) == 0
+    _no_upload(tmp_path)
+    for flag in ("--code-scanning", "--no-code-scanning"):
+        assert _upgrade(tmp_path, flag) == 1
+        assert "--upgrade only moves the release pin" in capsys.readouterr().err
