@@ -54,6 +54,11 @@ that pin; the changelog of a fix will say which workflows and actions it touches
 - **The job split (R39).** No job that evaluates PR code (`terragrunt hcl validate`, plan) holds
   `pull-requests: write` or `security-events: write`. The comment and the SARIF upload run in small
   separate jobs that run no PR code and only consume artifacts.
+- `iac-import` (started by hand on a branch) runs that branch's code with the same
+  `<first stage>-plan` credentials and nothing more: it refuses every other stage, deletes the plan
+  files and JSON in the job, uploads only `imports.tf` and a summary of addresses and outcomes,
+  posts them from a job that runs no branch code, and never commits
+  ([import blocks from CI](docs/concepts/pr-checks.md#import-blocks-from-ci-iac-import)).
 - Stage workflows never use a dependency cache (R40), so PR code cannot poison a cache that a prod job
   later restores.
 - The pull-request comment is advisory. The PR's own code produces the plan it summarises.

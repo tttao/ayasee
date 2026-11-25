@@ -24,6 +24,7 @@ CALLS = {
     "iac-nightly.yml": "iac-nightly.yml",
     "iac-breakglass.yml": "iac-breakglass.yml",
     "iac-approve.yml": "iac-approve.yml",  # written by ayasee init with gate_mechanism: workflow
+    "iac-import.yml": "iac-import.yml",  # imports of the first stage from CI (issue #58)
 }
 TOKENS = ("CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
 UNITS = {"test": {"dns"}, "prod": {"dns", "tunnel", "access"}}
@@ -141,6 +142,8 @@ def test_bootstrap_lists_the_secrets_doctor_checks(profile):
     assert f'key_provider = "{cfg.plan_encryption.key_provider}"' in text
     passed = set()
     for name in CALLS:
+        if not (ex / ".github" / "workflows" / name).is_file():
+            continue  # iac-import is a cloudflare-s3 caller only
         for job in _yaml(ex / ".github" / "workflows" / name)["jobs"].values():
             for value in (job.get("secrets") or {}).values():
                 m = re.fullmatch(r"\$\{\{ secrets\.([A-Z_]+) \}\}", value)

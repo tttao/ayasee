@@ -21,6 +21,7 @@ REUSABLE = [
     "iac-staged.yml",
     "iac-pr.yml",
     "iac-pr-shared.yml",
+    "iac-import.yml",
     "iac-nightly.yml",
     "iac-breakglass.yml",
 ]
@@ -36,6 +37,8 @@ ALLOWED = [
     r"\$\{\{ needs\.shared-changes\.outputs\.environment-prefix \}\}prod-pr-plan",
     # iac-pr-shared: `ayasee pr-shared authorize` prints environment_prefix (of main) + prod-pr-plan
     r"\$\{\{ needs\.verify\.outputs\.environment \}\}",
+    # iac-import: `ayasee import-target` prints environment_prefix + <first stage>-plan
+    r"\$\{\{ needs\.resolve\.outputs\.environment \}\}",
 ]
 
 

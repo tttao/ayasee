@@ -476,6 +476,28 @@ class GitHub:
         number = items[0].get("number") if items else None
         return number if isinstance(number, int) else None
 
+    def open_pulls_from_branch(self, repo: str, branch: str) -> list[int]:
+        """Numbers of the open pull requests whose head is ``branch`` of ``repo`` itself (never a
+        fork's branch of the same name), lowest first."""
+        owner = repo.split("/")[0]
+        items = self._paginate(
+            f"/repos/{repo}/pulls",
+            {"head": f"{owner}:{branch}", "state": "open", "per_page": 100},
+            "pull requests",
+        )
+        out = []
+        for item in items:
+            head = item.get("head") if isinstance(item, dict) else None
+            number = item.get("number") if isinstance(item, dict) else None
+            if (
+                isinstance(head, dict)
+                and isinstance(number, int)
+                and head.get("ref") == branch
+                and (head.get("repo") or {}).get("full_name") == repo
+            ):
+                out.append(number)
+        return sorted(out)
+
     def merge_pull_request(self, repo: str, number: int, method: str = "squash") -> str:
         """Merge and return the merge commit SHA (the commit that lands on the base branch)."""
         resp = self._request(

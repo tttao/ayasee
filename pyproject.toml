@@ -53,6 +53,7 @@ packages = ["src/ayasee"]
 "examples/cloudflare-s3/.github/workflows/iac-nightly.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/iac-nightly.yml"
 "examples/cloudflare-s3/.github/workflows/iac-breakglass.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/iac-breakglass.yml"
 "examples/cloudflare-s3/.github/workflows/iac-approve.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/iac-approve.yml"
+"examples/cloudflare-s3/.github/workflows/iac-import.yml" = "ayasee/templates/cloudflare-s3/.github/workflows/iac-import.yml"
 "examples/cloudflare-s3/bootstrap/main.tf" = "ayasee/templates/cloudflare-s3/bootstrap/main.tf"
 "examples/cloudflare-s3/bootstrap/.terraform.lock.hcl" = "ayasee/templates/cloudflare-s3/bootstrap/.terraform.lock.hcl"
 "examples/databricks-azure/.ayasee.yaml" = "ayasee/templates/databricks-azure/.ayasee.yaml"

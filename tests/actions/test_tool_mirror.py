@@ -147,6 +147,7 @@ def test_actions_expose_and_pass_tool_mirror(action):
     [
         "iac-pr",
         "iac-pr-shared",
+        "iac-import",
         "iac-staged",
         "iac-nightly",
         "iac-breakglass",

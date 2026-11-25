@@ -196,6 +196,44 @@ def test_placeholders_and_unpinned_refs_fail(estate, capsys, monkeypatch):
     assert any("pin different releases" in f for f in fails)
 
 
+def test_the_import_caller_is_checked_like_the_others(estate, capsys, monkeypatch):
+    """iac-import (issue #58): pinned, secrets by name, and started by hand only."""
+    monkeypatch.delenv("GITHUB_TOKEN")
+    path = estate / ".github/workflows/iac-import.yml"
+    _, out = _doctor(estate, capsys)
+    assert f"iac-import.yml (import -> iac-import): pinned to tttao/ayasee@{PIN[:12]}" in out
+    assert _fails(out) == []
+    path.write_text(path.read_text().replace(PIN, "2" * 40))
+    _, out = _doctor(estate, capsys)
+    assert any("pin different releases" in f for f in _fails(out))
+
+
+def test_an_import_caller_started_by_anything_but_a_dispatch_fails(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    path = estate / ".github/workflows/iac-import.yml"
+    path.write_text(
+        path.read_text().replace("  workflow_dispatch:\n", "  push:\n  workflow_dispatch:\n")
+    )
+    _, out = _doctor(estate, capsys)
+    assert any("iac-import.yml" in f and "workflow_dispatch only" in f for f in _fails(out))
+
+
+def test_an_import_caller_that_inherits_secrets_warns(estate, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN")
+    path = estate / ".github/workflows/iac-import.yml"
+    text = path.read_text()
+    path.write_text(text[: text.index("    secrets:")] + "    secrets: inherit\n")
+    _, out = _doctor(estate, capsys)
+    assert "iac-import.yml (import -> iac-import): secrets: inherit" in out
+
+
+def test_the_import_caller_reads_the_first_stage_plan_environment():
+    from ayasee.config import Config
+
+    cfg = Config(stages=["test", "prod"], environment_prefix="iac-")
+    assert doctor.environments_of("iac-import", cfg) == ["iac-test-plan"]
+
+
 def test_a_paths_filter_on_the_pull_request_caller_fails(estate, capsys, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN")
     pr = estate / ".github/workflows/iac-pr.yml"

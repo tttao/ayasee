@@ -52,6 +52,19 @@ released version into the GitHub release notes.
   environment whose live record has no units. A missing stage directory still fails. Unit
   discovery now runs in the plan and apply scripts' own shell, so its refusals (`unit discovery
   failed`, `duplicate unit name`) stop the script at once instead of surfacing as a binding error.
+### Added
+
+- **`iac-import`: the first stage's import blocks from CI** (#58). A new reusable workflow,
+  started by hand on a branch with a `unit` (or every unit of the first stage), plans read-only in
+  `<first stage>-plan` as the pull-request plan does, runs `ayasee import-plan` on the plan JSON,
+  deletes the plan files and JSON in the job, and publishes only the `imports.tf` files and a
+  summary of each address's outcome, as the artifact `ayasee-imports` and as a comment on the
+  branch's pull request. It never commits. Other stages are refused (their environments deploy
+  from `main` only); their blocks stay the local `ayasee import-plan` step. `ayasee init` writes
+  the caller for the cloudflare-s3 profile and `ayasee doctor` checks it (pinned, secrets by name,
+  `workflow_dispatch` only). New: `ayasee import-plan --plan-dir`, `ayasee import-target`,
+  `ayasee pr-comment --head-branch`. See
+  [import blocks from CI](docs/concepts/pr-checks.md#import-blocks-from-ci-iac-import).
 
 ## [0.1.0] - unreleased
 

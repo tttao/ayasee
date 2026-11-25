@@ -1,0 +1,42 @@
+# The import blocks of a unit's first adoption, planned in CI with the read-only credentials of
+# test-plan (the first stage only), from a branch: gh workflow run iac-import.yml --ref <branch>
+# -f unit=dns. It never commits: the result is an artifact and a comment on the branch's pull
+# request (docs/guides/adopt.md, step 6, in the ayasee repository).
+name: iac-import
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Empty or the first stage; the other stages are imported with the local CLI.
+        required: false
+        default: ""
+      unit:
+        description: The unit's path under stages/<stage> (dns); empty imports every unit.
+        required: false
+        default: ""
+      comment:
+        description: Post the result on the branch's pull request.
+        type: boolean
+        required: false
+        default: true
+
+permissions: {}
+
+jobs:
+  import:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    uses: OWNER/ayasee/.github/workflows/iac-import.yml@0000000000000000000000000000000000000000 # replace with an ayasee release SHA
+    with:
+      stage: ${{ inputs.stage }}
+      unit: ${{ inputs.unit }}
+      comment: ${{ inputs.comment }}
+    # identity: secrets: the read-only environment secrets of test-plan (on GitHub Free, the
+    # repository secrets every stage reads), passed by name
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

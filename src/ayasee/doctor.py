@@ -18,7 +18,8 @@ instead of failed jobs found one at a time:
   pin one full release SHA (no ``OWNER`` placeholder, no all-zero SHA), the ``iac-staged`` and
   ``iac-pr`` callers exist, and the pull-request caller has no ``paths:`` filter; with
   ``gate_mechanism: workflow`` and ``shared_units``, a warning when no workflow calls
-  ``iac-pr-shared`` (the shared units are then not planned in pull requests);
+  ``iac-pr-shared`` (the shared units are then not planned in pull requests); an
+  ``iac-import`` caller (optional) is started by ``workflow_dispatch`` only;
 - **environments**: no workflow that is not an ayasee caller names an environment ayasee uses
   (``environment_prefix`` keeps them apart, issue #31);
 - **GitHub** (with ``GITHUB_TOKEN``, read-only): every environment the callers use exists, under
@@ -95,7 +96,7 @@ OK, WARN, FAIL, SKIP = "ok", "warn", "FAIL", "skip"
 
 _CALLER = re.compile(
     r"^(?P<repo>[^/@\s]+/[^/@\s]+)/\.github/workflows/"
-    r"(?P<kind>iac-(?:staged|pr-shared|pr|nightly|breakglass|approve))\.ya?ml@(?P<ref>\S+)$"
+    r"(?P<kind>iac-(?:staged|pr-shared|pr|nightly|breakglass|approve|import))\.ya?ml@(?P<ref>\S+)$"
 )
 _SECRET_REF = re.compile(r"^\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -157,13 +158,14 @@ class Report:
 class Caller:
     file: str
     job: str
-    kind: str  # iac-staged, iac-pr, iac-nightly, iac-breakglass
+    kind: str  # iac-staged, iac-pr, iac-nightly, iac-breakglass, iac-import, ...
     source: str  # owner/repo of ayasee
     ref: str
     secrets: dict[str, str | None] | None  # input name -> repository secret name; None: inherit
     pr_paths: bool = False
     inputs: frozenset[str] = frozenset()  # the with: keys the caller passes
     code_scanning: bool = True  # False when it passes code-scanning: false (issue #55)
+    triggers: frozenset[str] = frozenset()  # the events of the caller's `on:`
 
 
 # ---- configuration ---------------------------------------------------------------------------
@@ -222,6 +224,15 @@ def _secrets(raw: Any) -> dict[str, str | None] | None:
     return out
 
 
+def _triggers(doc: dict[str, Any]) -> frozenset[str]:
+    on = doc.get("on", doc.get(True))  # YAML 1.1 reads a bare `on` as True
+    if isinstance(on, str):
+        return frozenset({on})
+    if isinstance(on, (list, dict)):
+        return frozenset(str(e) for e in on)
+    return frozenset()
+
+
 def _pr_has_paths(doc: dict[str, Any]) -> bool:
     on = doc.get("on", doc.get(True))  # YAML 1.1 reads a bare `on` as True
     if not isinstance(on, dict):
@@ -253,6 +264,7 @@ def find_callers(report: Report, root: Path) -> list[Caller]:
                 rel, str(name), m["kind"], m["repo"], m["ref"], _secrets(job.get("secrets"))
             )
             caller.pr_paths = m["kind"] == "iac-pr" and _pr_has_paths(doc)
+            caller.triggers = _triggers(doc)
             given = job.get("with")
             caller.inputs = (
                 frozenset(str(k) for k in given) if isinstance(given, dict) else frozenset()
@@ -337,6 +349,15 @@ def check_callers(report: Report, callers: list[Caller], cfg: Config | None = No
             for name, src in sorted(c.secrets.items()):
                 if src is None:
                     report.add(WARN, sec, f"{where}: secret {name} is not ${{{{ secrets.X }}}}")
+        if c.kind == "iac-import" and c.triggers != {"workflow_dispatch"}:
+            # issue #58: a person starts it on a branch; any other event would run a branch's
+            # code with the <first stage>-plan credentials without anyone asking for it
+            report.add(
+                FAIL,
+                sec,
+                f"{where}: iac-import must be started by workflow_dispatch only "
+                f"(on: {', '.join(sorted(c.triggers)) or 'none'})",
+            )
         if c.pr_paths:
             report.add(
                 FAIL,
@@ -454,6 +475,9 @@ def _logical_environments_of(kind: str, cfg: Config) -> list[str]:
         return ["prod", "prod-breakglass"] if workflow_breakglass else ["prod"]
     if kind == "iac-pr-shared":
         return ["prod-pr-plan"] if cfg.shared_units else []
+    if kind == "iac-import":
+        # the pull-request plan environment: the first stage only (issue #58)
+        return [pr_plan_environment(cfg.stages)]
     if cfg.gate_mechanism == "workflow":
         return ["prod-plan", "prod-breakglass"]  # the request plans in prod-plan
     return ["prod-breakglass"]

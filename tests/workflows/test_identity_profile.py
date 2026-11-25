@@ -13,6 +13,7 @@ CASES = {
     "iac-nightly.yml": ("needs.resolve.outputs.identity", "job"),
     "iac-pr.yml": ("steps.changed.outputs.identity", "step"),
     "iac-breakglass.yml": ("steps.cfg.outputs.identity", "step"),
+    "iac-import.yml": ("needs.resolve.outputs.identity", "step"),
 }
 # jobs whose identity expression differs from the workflow's (job -> expression)
 JOB_IDENT = {
@@ -62,6 +63,9 @@ def test_arm_variables_are_set_only_for_the_oidc_identity(name):
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_the_identity_is_read_from_the_configuration(name):
     text = (WORKFLOWS / name).read_text()
+    if name == "iac-import.yml":  # `ayasee import-target` prints it (tests/test_importtarget.py)
+        assert "ayasee import-target" in text
+        return
     assert "'.identity'" in text
 
 
@@ -103,6 +107,10 @@ def test_provider_tokens_reach_only_plan_and_apply_steps_for_the_secrets_identit
                     del env[key]
             step = {**step, "env": env}
             has = [t for t in TOKENS if t in env]
+            if name == "iac-import.yml" and step.get("id") == "imports":
+                # the read-only Cloudflare lookups of import-plan (issue #58): that token only
+                assert has == ["CLOUDFLARE_API_TOKEN"], step
+                continue
             if not has:
                 assert not any(t in str(step) for t in TOKENS), (name, job_name, step)
                 continue
@@ -137,6 +145,8 @@ def test_provider_env_names_come_from_the_configuration(name):
                 outputs = wf["jobs"][producer]["outputs"]
                 assert outputs["provider-env-names"].endswith(".outputs.provider-env-names }}")
     assert steps >= 1
+    if name == "iac-import.yml":  # `ayasee import-target` prints them (tests/test_importtarget.py)
+        return
     assert """echo "provider-env-names=$(jq -r '.provider_env | join(",")' """ in text
 
 
