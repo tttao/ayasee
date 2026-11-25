@@ -52,7 +52,8 @@ case "$mode" in
     ;;
 esac
 
-mapfile -t units < <(sg_units "$base")
+# a stage without units has nothing to apply: the staged run skips this action for it (#56)
+sg_read_units "$base" false
 # SG_ONLY_UNITS (same-job only): apply only the units that were planned with the same list.
 sg_filter_units
 

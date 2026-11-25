@@ -7,15 +7,25 @@ is written by the stage's own identity to a backend store, read by the guard, th
 check and the cockpit, and projected to GitHub Deployments for humans. Code: `src/ayasee/ledger.py`,
 `src/ayasee/s3.py`, `src/ayasee/trunkguard.py`, `actions/ledger`. Reference:
 `docs/concepts/ledger.md`.
-
 ## Requirements
-
 ### Requirement: Record content
-A ledger record SHALL carry `repo`, `env`, `sha`, `run_id`, `run_attempt`, per-unit `status` (`applied`, `no_changes`, `failed`, `skipped`) and `converged`, an overall `converged` true only if every unit converged, `approver` (or null), `breakglass_incident` (or null), `requester` only on a workflow-gate break-glass record, and `recorded_at` in RFC 3339 UTC with microseconds. Records SHALL never carry plan values, and empty `units` SHALL be refused.
+A ledger record SHALL carry `repo`, `env`, `sha`, `run_id`, `run_attempt`, per-unit `status` (`applied`, `no_changes`, `failed`, `skipped`) and `converged`, an overall `converged` true only if every unit converged, `approver` (or null), `breakglass_incident` (or null), `requester` only on a workflow-gate break-glass record, and `recorded_at` in RFC 3339 UTC with microseconds. Records SHALL never carry plan values, and empty `units` SHALL be refused, except for the record of a stage without units, written only with `ayasee ledger write --no-units` (ledger action input `no-units`): empty `units`, converged, and refused together with `--units-json`, `--approver`, `--breakglass-incident` or `--requester`.
 
 #### Scenario: Partial failure
 - **WHEN** the second of three units fails to apply
 - **THEN** the record lists the first as `applied`, the second as `failed`, and `converged` is false
+
+#### Scenario: Empty units file
+- **WHEN** `ayasee ledger write` is given a `--units-json` file holding `{}`
+- **THEN** it fails and writes nothing
+
+#### Scenario: Stage without units
+- **WHEN** `ayasee ledger write --no-units` runs for a stage
+- **THEN** the record has empty `units` and `converged` true
+
+#### Scenario: No units with an approver
+- **WHEN** `ayasee ledger write --no-units --approver bob` runs
+- **THEN** it fails and writes nothing
 
 ### Requirement: Store selection
 The store SHALL be selected by the `AYASEE_LEDGER_URL` variable, falling back to `ledger.url`, and the run SHALL fail if neither is set. Supported URLs SHALL be `azure-blob://` (read/write, `DefaultAzureCredential`), `git-branch://` (read/write, orphan branch), `s3://` (read/write, experimental), `github-branch://` (read-only, contents API; `append` always raises) and `file://` (read/write, tests).
@@ -76,3 +86,4 @@ When `ledger-token` is passed, the `resolve` job of `iac-staged` and `iac-nightl
 #### Scenario: Token can bypass the ruleset
 - **WHEN** the ruleset on `main` lists the ledger token's actor as `always` bypass
 - **THEN** the run warns that the ledger token can push to `main`
+

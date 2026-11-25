@@ -443,20 +443,34 @@ sg_load_provider_env() {
   done
 }
 
-# sg_units BASE: print unit paths relative to BASE, dependencies first. Names must be unique
-# once / becomes __.
+# sg_units BASE: print unit paths relative to BASE, dependencies first, one per line; nothing
+# when BASE holds no unit. Names must be unique once / becomes __. It runs inside $(...), where
+# sg_die only ends the subshell: call it through sg_read_units, or check its exit status.
 sg_units() {
   local base="$1" out rel name
   local -A seen=()
   [ -d "$base" ] || sg_die "units directory not found: $base"
   out="$(terragrunt find --dag --no-color --working-dir "$base")" || sg_die "unit discovery failed"
-  [ -n "$out" ] || sg_die "no units found under $base"
   while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
     name="$(sg_unit_name "$rel")"
     [ -z "${seen[$name]:-}" ] || sg_die "duplicate unit name: $name"
     seen[$name]=1
+    printf '%s\n' "$rel"
   done <<<"$out"
-  printf '%s\n' "$out"
+}
+
+# sg_read_units BASE ALLOW_NONE: set the global array `units` (sg_units order). Call it in the main
+# shell, so a discovery failure stops the script. A BASE that exists but holds no unit (a stage
+# whose first unit has not landed yet, issue #56) is an error unless ALLOW_NONE is true; then
+# `units` is empty and the caller must handle that before planning or binding anything. A
+# missing BASE is always an error.
+sg_read_units() {
+  local base="$1" allow="$2" out
+  out="$(sg_units "$base")" || exit 1
+  units=()
+  [ -z "$out" ] || mapfile -t units <<<"$out"
+  [ "${#units[@]}" -gt 0 ] || [ "$allow" = true ] || sg_die "no units found under $base"
 }
 
 # sg_unit_name REL: the unit's name is its relative path with / replaced by __.
@@ -547,7 +561,10 @@ sg_edges() {
   local -A known=()
   local rbase
   rbase="$(realpath "$base")"
-  mapfile -t all < <(sg_units "$base")
+  local found
+  found="$(sg_units "$base")" || exit 1
+  all=()
+  [ -z "$found" ] || mapfile -t all <<<"$found"
   for rel in "${all[@]}"; do known[$rel]=1; done
   : >"$out.lines"
   for rel in "${units[@]}"; do

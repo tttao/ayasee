@@ -103,7 +103,20 @@ inputs:
       binding-mode drift and encrypt false; an apply refuses that mode.
     required: false
     default: "false"
+  allow-no-units:
+    description: >-
+      "true" lets a units directory that exists but holds no unit yet (a stage whose first unit
+      has not landed, issue #56) plan nothing and succeed, with no-units true and has-changes
+      false and no other output. false (default) fails on it. A missing units directory still
+      fails; refused with binding-mode drift and breakglass.
+    required: false
+    default: "false"
 outputs:
+  no-units:
+    description: >-
+      "true" when allow-no-units is true and the units directory holds no unit: nothing was
+      planned, and no manifest, change set, summary, plan or plan JSON exists. "false" otherwise.
+    value: ${{ steps.plan.outputs.no-units }}
   exit-codes-path:
     description: Path of exit-codes.json (unit to plan exit code); set only when drift is true.
     value: ${{ steps.plan.outputs.exit-codes-path }}
@@ -149,4 +162,5 @@ runs:
         SG_ALLOW_CASCADE: ${{ inputs.allow-cascade }}
         SG_LOCK_TIMEOUT: ${{ inputs.lock-timeout }}
         SG_EXPECT_SHA: ${{ inputs.expect-sha }}
+        SG_ALLOW_NO_UNITS: ${{ inputs.allow-no-units }}
       run: "$GITHUB_ACTION_PATH/plan.sh"

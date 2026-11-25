@@ -360,7 +360,10 @@ jobs:
           engine: ${{ needs.resolve.outputs.engine }}
           encrypt: "false"
           binding-mode: same-job
+          allow-no-units: "true" # #56: a stage whose first unit has not landed plans nothing
       - id: apply
+        # a stage without units has nothing to apply; it is recorded with no units below
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -378,11 +381,20 @@ jobs:
       - id: units
         name: Locate the units record
         if: ${{ !cancelled() }}
+        env:
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            # #56: the guard of the next stage needs this SHA recorded here, converged
+            echo "::notice::no units under $UNITS_ROOT/$STAGE: nothing planned or applied; the ledger records $STAGE at this commit with no units"
+            echo "no-units=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
           if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
       - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        if: ${{ !cancelled() && (steps.units.outputs.units-json != '' || steps.units.outputs.no-units == 'true') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
@@ -399,6 +411,7 @@ jobs:
           run-id: ${{ github.run_id }}
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
+          no-units: ${{ steps.units.outputs.no-units == 'true' }}
           mirror-deployments: "true"
           environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
@@ -495,7 +508,10 @@ jobs:
           engine: ${{ needs.resolve.outputs.engine }}
           encrypt: "false"
           binding-mode: same-job
+          allow-no-units: "true" # #56: a stage whose first unit has not landed plans nothing
       - id: apply
+        # a stage without units has nothing to apply; it is recorded with no units below
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -513,11 +529,20 @@ jobs:
       - id: units
         name: Locate the units record
         if: ${{ !cancelled() }}
+        env:
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            # #56: the guard of the next stage needs this SHA recorded here, converged
+            echo "::notice::no units under $UNITS_ROOT/$STAGE: nothing planned or applied; the ledger records $STAGE at this commit with no units"
+            echo "no-units=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
           if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
       - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        if: ${{ !cancelled() && (steps.units.outputs.units-json != '' || steps.units.outputs.no-units == 'true') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
@@ -534,6 +559,7 @@ jobs:
           run-id: ${{ github.run_id }}
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
+          no-units: ${{ steps.units.outputs.no-units == 'true' }}
           mirror-deployments: "true"
           environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
@@ -630,7 +656,10 @@ jobs:
           engine: ${{ needs.resolve.outputs.engine }}
           encrypt: "false"
           binding-mode: same-job
+          allow-no-units: "true" # #56: a stage whose first unit has not landed plans nothing
       - id: apply
+        # a stage without units has nothing to apply; it is recorded with no units below
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -648,11 +677,20 @@ jobs:
       - id: units
         name: Locate the units record
         if: ${{ !cancelled() }}
+        env:
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            # #56: the guard of the next stage needs this SHA recorded here, converged
+            echo "::notice::no units under $UNITS_ROOT/$STAGE: nothing planned or applied; the ledger records $STAGE at this commit with no units"
+            echo "no-units=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
           if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
       - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        if: ${{ !cancelled() && (steps.units.outputs.units-json != '' || steps.units.outputs.no-units == 'true') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
@@ -669,6 +707,7 @@ jobs:
           run-id: ${{ github.run_id }}
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
+          no-units: ${{ steps.units.outputs.no-units == 'true' }}
           mirror-deployments: "true"
           environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
@@ -765,7 +804,10 @@ jobs:
           engine: ${{ needs.resolve.outputs.engine }}
           encrypt: "false"
           binding-mode: same-job
+          allow-no-units: "true" # #56: a stage whose first unit has not landed plans nothing
       - id: apply
+        # a stage without units has nothing to apply; it is recorded with no units below
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         uses: OWNER/ayasee/actions/apply@0000000000000000000000000000000000000000 # AYASEE_REF
         env:
           AYASEE_EXTRA_SECRET: ${{ secrets.extra-env-secret }}
@@ -783,11 +825,20 @@ jobs:
       - id: units
         name: Locate the units record
         if: ${{ !cancelled() }}
+        env:
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            # #56: the guard of the next stage needs this SHA recorded here, converged
+            echo "::notice::no units under $UNITS_ROOT/$STAGE: nothing planned or applied; the ledger records $STAGE at this commit with no units"
+            echo "no-units=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           f="$RUNNER_TEMP/ayasee/$STAGE/units.json"
           if [ -f "$f" ]; then echo "units-json=$f" >>"$GITHUB_OUTPUT"; fi
       - uses: OWNER/ayasee/actions/ledger@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ !cancelled() && steps.units.outputs.units-json != '' }}
+        if: ${{ !cancelled() && (steps.units.outputs.units-json != '' || steps.units.outputs.no-units == 'true') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           AYASEE_LEDGER_TOKEN: ${{ secrets.ledger-token }}
@@ -804,6 +855,7 @@ jobs:
           run-id: ${{ github.run_id }}
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
+          no-units: ${{ steps.units.outputs.no-units == 'true' }}
           mirror-deployments: "true"
           environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - name: Open the stop-the-line issue
@@ -861,6 +913,7 @@ jobs:
     name: prod-plan
     outputs:
       has-changes: ${{ steps.plan.outputs.has-changes }}
+      no-units: ${{ steps.summary.outputs.no-units }}
       gate-changed: ${{ steps.gate.outputs.gate-changed }}
       critical: ${{ steps.summary.outputs.critical }}
       high: ${{ steps.summary.outputs.high }}
@@ -983,12 +1036,15 @@ jobs:
           openbao-key-url: ${{ vars.AYASEE_OPENBAO_KEY_URL }}
           allow-cascade: ${{ needs.resolve.outputs.allow-cascade }} # UNSAFE when true (R52)
           shared-units: ${{ needs.resolve.outputs.shared-units }} # flagged in the gate summary
+          allow-no-units: "true" # #56: no prod unit yet; prod-in-sync records it, nothing to approve
       - uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
           stage: prod
           tool-mirror: ${{ inputs.tool-mirror }}
       - id: trivy
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
@@ -1015,7 +1071,23 @@ jobs:
         env:
           CHANGESET: ${{ steps.plan.outputs.changeset-path }}
           MANIFEST: ${{ steps.plan.outputs.manifest-path }}
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ needs.resolve.outputs.units-root }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            # #56: no prod unit yet: nothing to scan, upload or approve
+            echo "::notice::no units under $UNITS_ROOT/prod: nothing planned; prod-in-sync records prod at this commit with no units"
+            {
+              echo "no-units=true"
+              echo "critical=0"
+              echo "high=0"
+              echo "units=[]"
+              echo "changes=0"
+              echo "manifest-digest="
+            } >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "no-units=false" >>"$GITHUB_OUTPUT"
           critical="$(jq -e '.risk.critical' "$CHANGESET")"
           high="$(jq -e '.risk.high' "$CHANGESET")"
           units="$(jq -ec '.units | keys' "$MANIFEST")"
@@ -1031,6 +1103,7 @@ jobs:
             echo "manifest-digest=$digest"
           } >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ steps.plan.outputs.no-units != 'true' }}
         with:
           name: ayasee-prod-plan
           path: |
@@ -1039,7 +1112,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF
-        if: ${{ steps.plan.outputs.has-changes == 'true' || steps.gate.outputs.gate-changed == 'true' }}
+        if: ${{ steps.plan.outputs.no-units != 'true' && (steps.plan.outputs.has-changes == 'true' || steps.gate.outputs.gate-changed == 'true') }}
         with:
           event: prod_waiting
           repo: ${{ github.repository }}
@@ -1063,7 +1136,7 @@ jobs:
     # (gate_mechanism: workflow, D15: prod-approval and iac-approve.yml instead)
     name: prod
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism != 'workflow' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.no-units != 'true' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism != 'workflow' }}
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.env-prod }}
     permissions:
@@ -1227,7 +1300,7 @@ jobs:
     # counts and links only reach the issue.
     name: prod-approval
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism == 'workflow' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.no-units != 'true' && (needs.prod-plan.outputs.has-changes == 'true' || needs.prod-plan.outputs.gate-changed == 'true') && needs.resolve.outputs.gate-mechanism == 'workflow' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # check out the code (in-repo actions)
@@ -1264,10 +1337,12 @@ jobs:
   prod-in-sync:
     # empty prod plan: no reviewers, record every unit as converged at this SHA. Not when the
     # commit changes the gate settings with the workflow gate on either side (D15): that change
-    # goes to prod or prod-approval like any other
+    # goes to prod or prod-approval like any other. Except with no prod unit at all (#56): there
+    # is no plan to approve; the record carries no approver, so the workflow gate's trust anchor
+    # does not move and the first prod plan with units still needs the approval
     name: prod-in-sync
     needs: [resolve, prod-plan]
-    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'false' && needs.prod-plan.outputs.gate-changed == 'false' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.prod-plan.outputs.has-changes == 'false' && (needs.prod-plan.outputs.gate-changed == 'false' || needs.prod-plan.outputs.no-units == 'true') }}
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.env-prod-plan }}
     permissions:
@@ -1327,7 +1402,18 @@ jobs:
         name: Build the in-sync units record
         env:
           UNITS: ${{ needs.prod-plan.outputs.units }}
+          NO_UNITS: ${{ needs.prod-plan.outputs.no-units }}
+          GATE_CHANGED: ${{ needs.prod-plan.outputs.gate-changed }}
         run: |
+          if [ "$NO_UNITS" = true ]; then
+            [ "$UNITS" = "[]" ] || { echo "::error::prod-plan reported no units but a unit list"; exit 1; }
+            echo "::notice::no prod unit yet: the ledger records prod at this commit with no units"
+            if [ "$GATE_CHANGED" = true ]; then
+              echo "::notice::the gate settings changed: the first prod plan with units needs a prod approval"
+            fi
+            echo "no-units=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           jq -e 'type == "array" and length > 0 and all(type == "string")' <<<"$UNITS" >/dev/null || {
             echo "::error::the prod plan reported no units; refusing to write an empty ledger record"
             exit 1
@@ -1352,6 +1438,7 @@ jobs:
           run-id: ${{ github.run_id }}
           run-attempt: ${{ github.run_attempt }}
           units-json: ${{ steps.units.outputs.units-json }}
+          no-units: ${{ steps.units.outputs.no-units == 'true' }}
           mirror-deployments: "true"
           environment-prefix: ${{ needs.resolve.outputs.environment-prefix }}
       - uses: OWNER/ayasee/actions/notify@0000000000000000000000000000000000000000 # AYASEE_REF

@@ -625,6 +625,65 @@ def test_cli_empty_units_exit_1(tmp_path, capsys):
     assert not (tmp_path / "st").exists()
 
 
+def _no_units_args(tmp_path, *extra, env="dev"):
+    args = _write_args(tmp_path, "unused", env=env)
+    i = args.index("--units-json")
+    return [*args[:i], *args[i + 2 :], "--no-units", *extra]
+
+
+def test_record_from_run_no_units_records_an_empty_stage_as_converged():
+    rec = record_from_run(
+        repo=REPO, env="dev", sha="a" * 40, run_id=1, run_attempt=1, units={}, no_units=True
+    )
+    assert rec.units == {} and rec.converged is True and rec.approver is None
+    # the record round-trips: readers (guard, drift, cockpit) accept an empty units object
+    assert LedgerRecord.from_dict(json.loads(json.dumps(rec.to_dict()))) == rec
+
+
+def test_record_from_run_no_units_refuses_units():
+    unit = {"a": UnitResult("no_changes", True)}
+    with pytest.raises(ValueError, match="no_units"):
+        record_from_run(
+            repo=REPO, env="dev", sha="a" * 40, run_id=1, run_attempt=1, units=unit, no_units=True
+        )
+
+
+def test_cli_no_units_writes_a_converged_record_without_units(tmp_path, capsys):
+    assert cli.main(_no_units_args(tmp_path)) == 0
+    capsys.readouterr()
+    store = f"file://{tmp_path / 'st'}"
+    assert cli.main(["ledger", "show", "--store", store, "--repo", REPO, "--env", "dev"]) == 0
+    cur = json.loads(capsys.readouterr().out)
+    assert cur["units"] == {} and cur["converged"] is True and cur["approver"] is None
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (("--units-json", "u.json"), "not both"),
+        (("--approver", "bob"), "approver"),
+        (("--breakglass-incident", "INC123"), "break-glass"),
+        (("--requester", "bob"), "requester"),
+    ],
+    ids=["units-json", "approver", "breakglass", "requester"],
+)
+def test_cli_no_units_refuses_what_an_empty_stage_cannot_carry(tmp_path, capsys, extra, message):
+    # an approver would make a record without units the workflow gate's trust anchor (D15)
+    (tmp_path / "u.json").write_text('{"a": {"status": "applied", "converged": true}}')
+    extra = tuple(str(tmp_path / e) if e == "u.json" else e for e in extra)
+    assert cli.main(_no_units_args(tmp_path, *extra, env="prod")) == 1
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "st").exists()
+
+
+def test_cli_needs_units_json_or_no_units(tmp_path, capsys):
+    args = _write_args(tmp_path, "unused")
+    i = args.index("--units-json")
+    assert cli.main([*args[:i], *args[i + 2 :]]) == 1
+    assert "--units-json" in capsys.readouterr().err
+    assert not (tmp_path / "st").exists()
+
+
 def test_cli_history_must_be_positive(tmp_path):
     with pytest.raises(SystemExit):
         cli.main(

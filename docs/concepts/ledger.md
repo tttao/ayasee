@@ -34,7 +34,16 @@ One record is written when a stage finishes:
 
 A failed apply is still written (the units that did apply are recorded) and then the job fails.
 An empty prod plan is recorded too: `prod-in-sync` writes every unit as `no_changes` and converged
-at the new SHA, so drift checks never keep planning an older SHA. Empty `units` are refused.
+at the new SHA, so drift checks never keep planning an older SHA. Empty `units` are refused, with
+one exception: a stage whose units directory holds no unit yet
+([stages without units](staged-run.md#stages-without-units), issue #56) is recorded at the SHA
+with empty `units` and `converged: true`, so the guard of the next stage finds this SHA there.
+Only `ayasee ledger write --no-units` (the ledger action's `no-units` input) writes such a record;
+a `--units-json` file holding `{}` is still refused, and `--no-units` refuses `--units-json`,
+`--approver`, `--breakglass-incident` and `--requester`. A record without units therefore never
+carries an approver and can never become the [trust anchor](staged-run.md#the-workflow-gate) of
+the workflow gate. The cockpit shows it as converged with no changes; the nightly drift check skips
+it.
 
 ## Stores and URLs
 

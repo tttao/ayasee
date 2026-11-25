@@ -24,7 +24,10 @@ The `resolve` job reads the configured `stages` (without `prod-plan`) and the `d
 per environment.
 
 1. Read the ledger record of the environment. No record means nothing is live yet: a notice, and
-   the environment is skipped.
+   the environment is skipped. So does a record with no units: the stage had no units at the live
+   commit ([stages without units](staged-run.md#stages-without-units)). A commit that removes
+   every unit of an environment therefore ends its drift checks, as removing one unit ends that
+   unit's; an open drift issue of the environment stays open until closed by hand.
 2. If an open issue labelled `ayasee:apply-failed` and `env:<env>` exists, skip the environment.
    The state may be half-applied, so a plan would report noise.
 3. Check out the SHA the ledger says is live (`fetch-depth: 0`), **not** `main`. Drift means "the

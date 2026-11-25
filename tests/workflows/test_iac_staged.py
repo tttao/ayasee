@@ -188,6 +188,7 @@ def test_prod_plan_outputs(wf):
         "changes",
         "manifest-digest",
         "gate-changed",
+        "no-units",
     }
 
 
@@ -791,3 +792,119 @@ def test_prod_gate_refuses_a_prod_environment_without_reviewers(wf):
     plan = wf["jobs"]["prod-plan"]
     assert "prod-gate" in plan["needs"]
     assert "needs.prod-gate.result == 'success'" in plan["if"]
+
+
+# ---- #56: stages without units ------------------------------------------------------------
+
+
+def _step(wf, job, pred):
+    steps = _steps(wf, job)
+    return steps[_index(steps, pred)]
+
+
+def _bash(tmp_path, step, **env):
+    import os
+    import subprocess
+
+    out = tmp_path / "out"
+    out.write_text("")
+    proc = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_OUTPUT": str(out), **env},
+    )
+    return proc, out.read_text()
+
+
+def test_pre_prod_slots_record_a_stage_without_units(wf, tmp_path):
+    for name in SLOTS:
+        plan = _step(wf, name, lambda s: "/actions/plan@" in s.get("uses", ""))
+        apply = _step(wf, name, lambda s: "/actions/apply@" in s.get("uses", ""))
+        ledger = _step(wf, name, lambda s: "/actions/ledger@" in s.get("uses", ""))
+        assert plan["with"]["allow-no-units"] == "true"
+        # the apply action never sees an empty stage; nothing else changes its condition
+        assert apply["if"] == "${{ steps.plan.outputs.no-units != 'true' }}"
+        assert "steps.units.outputs.no-units == 'true'" in ledger["if"]
+        assert "!cancelled()" in ledger["if"]
+        assert ledger["with"]["no-units"] == "${{ steps.units.outputs.no-units == 'true' }}"
+        assert ledger["with"]["units-json"] == "${{ steps.units.outputs.units-json }}"
+    units = _step(wf, SLOTS[0], lambda s: s.get("id") == "units")
+    # no units: a notice and the no-units record; no units.json is looked for
+    (tmp_path / "ayasee" / "dev").mkdir(parents=True)
+    (tmp_path / "ayasee" / "dev" / "units.json").write_text("{}")
+    proc, out = _bash(tmp_path, units, NO_UNITS="true", STAGE="dev", UNITS_ROOT="stages")
+    assert proc.returncode == 0 and out == "no-units=true\n"
+    assert "::notice::no units under stages/dev" in proc.stdout
+    # units: the apply's units.json, as before
+    proc, out = _bash(tmp_path, units, NO_UNITS="false", STAGE="dev", UNITS_ROOT="stages")
+    assert out == f"units-json={tmp_path}/ayasee/dev/units.json\n"
+    # a failed plan sets no output: nothing is recorded unless the apply wrote units.json
+    (tmp_path / "ayasee" / "dev" / "units.json").unlink()
+    proc, out = _bash(tmp_path, units, NO_UNITS="", STAGE="dev", UNITS_ROOT="stages")
+    assert proc.returncode == 0 and out == ""
+
+
+def test_prod_plan_without_units_skips_scans_upload_and_notification(wf, tmp_path):
+    plan = _step(wf, "prod-plan", lambda s: "/actions/plan@" in s.get("uses", ""))
+    assert plan["with"]["allow-no-units"] == "true"
+    skip = "steps.plan.outputs.no-units != 'true'"
+    for pred in (
+        lambda s: "/actions/policy@" in s.get("uses", ""),
+        lambda s: s.get("id") == "trivy",
+        lambda s: "upload-artifact" in s.get("uses", ""),
+        lambda s: s.get("with", {}).get("event") == "prod_waiting",
+    ):
+        assert skip in _step(wf, "prod-plan", pred)["if"]
+    assert wf["jobs"]["prod-plan"]["outputs"]["no-units"] == "${{ steps.summary.outputs.no-units }}"
+    summary = _step(wf, "prod-plan", lambda s: s.get("id") == "summary")
+    proc, out = _bash(tmp_path, summary, NO_UNITS="true", UNITS_ROOT="stages")
+    assert proc.returncode == 0, proc.stderr
+    assert out.splitlines() == [
+        "no-units=true",
+        "critical=0",
+        "high=0",
+        "units=[]",
+        "changes=0",
+        "manifest-digest=",
+    ]
+    # with units, a missing change set still fails the step (never reads as no units)
+    proc, out = _bash(
+        tmp_path, summary, NO_UNITS="false", CHANGESET="/nope", MANIFEST="/nope", UNITS_ROOT="s"
+    )
+    assert proc.returncode != 0 and "no-units=true" not in out
+
+
+def test_prod_without_units_goes_to_prod_in_sync_only(wf):
+    jobs = wf["jobs"]
+    for name in ("prod", "prod-approval"):
+        assert "needs.prod-plan.outputs.no-units != 'true' && " in jobs[name]["if"], name
+    cond = jobs["prod-in-sync"]["if"]
+    assert "needs.prod-plan.outputs.has-changes == 'false'" in cond
+    assert (
+        "(needs.prod-plan.outputs.gate-changed == 'false' || "
+        "needs.prod-plan.outputs.no-units == 'true')" in cond
+    )
+    ledger = _step(wf, "prod-in-sync", lambda s: "/actions/ledger@" in s.get("uses", ""))
+    assert ledger["with"]["no-units"] == "${{ steps.units.outputs.no-units == 'true' }}"
+    # never an approver on the in-sync record, with or without units
+    assert "approver" not in ledger["with"]
+
+
+@pytest.mark.parametrize(
+    ("no_units", "units", "gate", "rc", "out", "says"),
+    [
+        ("true", "[]", "false", 0, "no-units=true\n", "no prod unit yet"),
+        ("true", "[]", "true", 0, "no-units=true\n", "first prod plan with units needs"),
+        ("true", '["a"]', "false", 1, "", "no units but a unit list"),
+        ("false", "[]", "false", 1, "", "refusing to write an empty ledger record"),
+        ("", "[]", "false", 1, "", "refusing to write an empty ledger record"),
+    ],
+    ids=["no-units", "no-units-gate-changed", "contradiction", "empty-list", "no-output"],
+)
+def test_prod_in_sync_units_step(wf, tmp_path, no_units, units, gate, rc, out, says):
+    step = _step(wf, "prod-in-sync", lambda s: s.get("id") == "units")
+    proc, written = _bash(tmp_path, step, NO_UNITS=no_units, UNITS=units, GATE_CHANGED=gate)
+    assert (proc.returncode != 0) == bool(rc)
+    assert written == out
+    assert says in proc.stdout + proc.stderr

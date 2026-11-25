@@ -35,6 +35,23 @@ released version into the GitHub release notes.
   (`--code-scanning` / `--no-code-scanning` decide instead); `ayasee doctor` warns when a caller
   uploads to a repository without code scanning or where it cannot confirm it. Existing adopters
   on such a repository add `with: code-scanning: false` to both callers.
+- **A stage with no units yet failed the pull-request plan and the staged run** (#56): wiring the
+  callers, the bootstrap and `root.hcl` before the first unit made `plan-first-stage` fail with
+  `no *.tfplan files found` and `plan-dev` report a failed plan, and every stage job of `iac-staged`
+  failed the same way. A units directory that exists but holds no unit now plans nothing and
+  passes: the plan action has an `allow-no-units` input (off by default; refused with drift and
+  break-glass) and a `no-units` output. The pull-request comment says "No units under
+  `<units_root>/<stage>`: nothing was planned", skips the policy pack, and warns when the base
+  commit has units there. In `iac-staged` a pre-prod stage without units skips the apply and is
+  recorded at the SHA with no units, converged, so the guard chain holds; this also fixes a
+  pre-prod stage whose units are all `shared_units` under prod. Without prod units, `prod-plan`
+  skips the scans and the upload and `prod-in-sync` records prod the same way, also when the gate
+  settings changed (the record has no approver, so the change still needs an approval at the first
+  prod plan with units). `ayasee ledger write --no-units` (ledger action input `no-units`) writes
+  such a record and refuses an approver, incident or requester with it; `iac-nightly` skips an
+  environment whose live record has no units. A missing stage directory still fails. Unit
+  discovery now runs in the plan and apply scripts' own shell, so its refusals (`unit discovery
+  failed`, `duplicate unit name`) stop the script at once instead of surfacing as a binding error.
 
 ## [0.1.0] - unreleased
 

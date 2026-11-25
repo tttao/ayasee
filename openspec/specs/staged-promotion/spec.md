@@ -6,9 +6,7 @@
 of `main` through every configured stage in one run: the pre-prod stages plan and apply, `prod-plan`
 produces an encrypted, scanned prod plan, and a gated job applies it, or `prod-in-sync` records an
 unchanged prod. Reference: `docs/concepts/staged-run.md`.
-
 ## Requirements
-
 ### Requirement: One run per commit of main, in stage order
 The system SHALL promote a single commit SHA through the configured `stages` in order, running every stage job only when `github.ref` is `refs/heads/main`, using four fixed pre-prod job slots (`stage-1` to `stage-4`) filled right-aligned so that `stage-4` always runs the stage just before prod, followed by `prod-plan` and then `prod`, `prod-approval` or `prod-in-sync`.
 
@@ -39,11 +37,15 @@ The `resolve` job SHALL refuse the run as `superseded` when `github.sha` is no l
 - **THEN** `resolve` fails with `superseded`
 
 ### Requirement: Pre-prod stages plan and apply in one job
-Each pre-prod stage job SHALL run setup, the guard, a plan, and an apply in binding mode `same-job` with plan encryption off, applying unit by unit in dependency order with a converge check after each unit, and SHALL then write the stage's ledger record.
+Each pre-prod stage job SHALL run setup, the guard, a plan, and an apply in binding mode `same-job` with plan encryption off, applying unit by unit in dependency order with a converge check after each unit, and SHALL then write the stage's ledger record. The plan SHALL pass `allow-no-units: true`; when the stage's units directory holds no unit, the job SHALL skip the apply, emit a notice, and write the stage's ledger record at the SHA with no units (`no-units`), converged.
 
 #### Scenario: Unit fails to converge
 - **WHEN** the post-apply re-plan of a unit is not empty
 - **THEN** the run stops, later units are skipped, the ledger is written with the units that were applied, and the job fails
+
+#### Scenario: Stage without units
+- **WHEN** `<units_root>/<stage>` exists but holds no unit
+- **THEN** nothing is applied, the ledger records the stage at this SHA with no units and converged, and the next stage's guard passes
 
 ### Requirement: Stop-the-line on a failed pre-prod apply
 The system SHALL, when a stage apply fails, write the ledger record, fail the job, open or extend an `ayasee:stop-the-line` issue (with `ayasee:apply-failed`) for that environment, and send a `stage_failed` notification.
@@ -53,7 +55,7 @@ The system SHALL, when a stage apply fails, write the ledger record, fail the jo
 - **THEN** a stop-the-line issue for `uat` is open and the guard blocks later stages until it is closed
 
 ### Requirement: Prod plan job
-`prod-plan` SHALL run in its own `prod-plan` environment with only `contents: read`, `id-token: write` and `issues: read`, run the guard, plan every prod unit in binding mode `encrypted_plan`, refuse a cascading change, run the Rego packs and a Trivy config scan (HIGH and CRITICAL fail) on the plan JSON inside the job, upload only the encrypted plan files and `manifest.json` as artifact `ayasee-prod-plan` (7 days), and output `has-changes`, `critical`, `high` and `units`. It SHALL write no ledger record, deployment or issue.
+`prod-plan` SHALL run in its own `prod-plan` environment with only `contents: read`, `id-token: write` and `issues: read`, run the guard, plan every prod unit in binding mode `encrypted_plan` with `allow-no-units: true`, refuse a cascading change, run the Rego packs and a Trivy config scan (HIGH and CRITICAL fail) on the plan JSON inside the job, upload only the encrypted plan files and `manifest.json` as artifact `ayasee-prod-plan` (7 days), and output `has-changes`, `no-units`, `critical`, `high` and `units`. When prod has no units it SHALL skip the scans, the upload and the `prod_waiting` notification and output `no-units` true, `has-changes` false and an empty `units` list. It SHALL write no ledger record, deployment or issue.
 
 #### Scenario: Policy finding
 - **WHEN** a Rego `deny` or a HIGH Trivy finding is reported on the prod plan
@@ -63,12 +65,20 @@ The system SHALL, when a stage apply fails, write the ledger record, fail the jo
 - **WHEN** the only change in the prod plan is a root output
 - **THEN** `has-changes` is `true` and prod goes through the gate
 
+#### Scenario: Prod without units
+- **WHEN** `<units_root>/prod` exists but holds no unit
+- **THEN** `prod-plan` succeeds with `no-units` true, uploads nothing, and neither `prod` nor `prod-approval` runs
+
 ### Requirement: Empty plan path
-The system SHALL, when every prod unit plans clean and the gate settings did not change, skip the gated prod job and run `prod-in-sync` in the `prod-plan` environment, which runs the guard and writes the prod ledger record (and deployment projection) with every unit `no_changes` and converged; an empty `units` list SHALL be refused.
+The system SHALL, when every prod unit plans clean and the gate settings did not change, skip the gated prod job and run `prod-in-sync` in the `prod-plan` environment, which runs the guard and writes the prod ledger record (and deployment projection) with every unit `no_changes` and converged; an empty `units` list SHALL be refused unless `prod-plan` reported `no-units`. When prod has no units, `prod-in-sync` SHALL run whether or not the gate settings changed and SHALL write the prod record with no units, converged and without an approver, so the gate change still needs an approval at the first prod plan with units.
 
 #### Scenario: Nothing changes in prod
 - **WHEN** `has-changes` and `gate-changed` are both `false`
 - **THEN** no reviewer is asked and the prod ledger records the new SHA as in sync
+
+#### Scenario: First push before any unit
+- **WHEN** the first push to `main` has no unit in any stage, with `gate_mechanism: workflow` and no approved prod apply yet
+- **THEN** every pre-prod stage and prod are recorded at the SHA with no units, no approval issue is opened, and the run succeeds
 
 ### Requirement: Prod plan failures before apply are not incidents
 A prod job that stops before anything is applied (stale or mismatched plan, init or decrypt failure) SHALL NOT open a stop-the-line issue; the job summary and a `prod_failed` notification with the status line "Plan refused: re-plan and approve again" SHALL say to re-run `prod-plan` and approve again.
@@ -104,3 +114,4 @@ The `prod-result` job SHALL run when `prod` failed and there were changes, read 
 #### Scenario: Reviewer rejects
 - **WHEN** a reviewer rejects the `prod` environment
 - **THEN** a `prod_rejected` notification is sent
+

@@ -59,6 +59,29 @@ def test_prod_ok_same_sha(store):
     assert check(REPO, "prod", A, ORDER, store, Issues()) == GuardResult(True, ())
 
 
+def _put_empty(store, env, sha, n=1):
+    # a stage with no units yet (#56): recorded at its SHA, converged, without units
+    store.append(
+        record_from_run(
+            repo=REPO,
+            env=env,
+            sha=sha,
+            run_id=n,
+            run_attempt=1,
+            units={},
+            no_units=True,
+            now=f"2026-11-06T12:00:0{n}.000001Z",
+        )
+    )
+
+
+def test_a_stage_without_units_keeps_the_chain(store):
+    _put_empty(store, "uat", A)
+    assert check(REPO, "prod", A, ORDER, store, Issues()) == GuardResult(True, ())
+    # and still supersedes an older run waiting at the prod gate
+    assert check(REPO, "prod", B, ORDER, store, Issues()).reasons == ("superseded",)
+
+
 def test_uat_red_blocks_prod(store):
     _put(store, "uat", A, converged=False)
     assert check(REPO, "prod", A, ORDER, store, Issues()).reasons == ("predecessor_not_converged",)

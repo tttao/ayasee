@@ -205,6 +205,13 @@ store that ignores the lock condition. See
 
 ### 7. First adoption
 
+The callers, `.ayasee.yaml`, the bootstrap and `root.hcl` can land in one merge before any unit,
+as long as each stage directory exists (`ayasee init` writes a `.gitkeep` in each): the
+pull-request plan then says that there are no units under `stages/test` and passes, and the first
+staged run records every stage with no units
+([stages without units](../../docs/concepts/staged-run.md#stages-without-units)). The units follow,
+one merge each.
+
 Each unit reads existing objects; import them before the first apply so that ayasee does not try to
 create a second tunnel configuration or Access application (`import` blocks in the unit, landed in a
 pull request whose plan shows only imports). Land `dns` first, then `tunnel`, then `access`, each in

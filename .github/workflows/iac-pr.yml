@@ -395,6 +395,19 @@ jobs:
               if [ "$units" = ALL ]; then echo "only-units="; else echo "only-units=$units"; fi
             fi
           } >>"$GITHUB_OUTPUT"
+          # #56: a stage without units plans nothing; the comment then warns when the base commit
+          # had units in that stage (under the base's units_root), so that removing them all, or
+          # pointing units_root elsewhere, never reads as a quiet "nothing to plan"
+          base_root="$units_root"
+          if git cat-file -e "$BASE_SHA:$CONFIG_PATH" 2>/dev/null; then
+            git show "$BASE_SHA:$CONFIG_PATH" >"$RUNNER_TEMP/ayasee-base.yaml"
+            base_root="$(ayasee config show --path "$RUNNER_TEMP/ayasee-base.yaml" | jq -r '.units_root')" || base_root=""
+          fi
+          base_units=unknown
+          if [ -n "$base_root" ] && listing="$(git ls-tree -r --name-only "$BASE_SHA" -- "$base_root/$stage/")"; then
+            if grep -Eq '(^|/)terragrunt\.hcl$' <<<"$listing"; then base_units=true; else base_units=false; fi
+          fi
+          echo "base-units=$base_units" >>"$GITHUB_OUTPUT"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         if: ${{ steps.changed.outputs.any == 'true' && steps.changed.outputs.identity == 'oidc' }}
         with:
@@ -424,8 +437,11 @@ jobs:
           encrypt: "false"
           binding-mode: same-job
           lock: "false" # a read-only identity cannot write the state lock
+          # #56: a first stage without units yet (callers wired before the first unit) plans
+          # nothing and passes; the comment says so. A missing stage directory still fails
+          allow-no-units: "true"
       - id: policy
-        if: ${{ steps.plan.outcome == 'success' }}
+        if: ${{ steps.plan.outcome == 'success' && steps.plan.outputs.no-units != 'true' }}
         uses: OWNER/ayasee/actions/policy@0000000000000000000000000000000000000000 # AYASEE_REF
         with:
           plan-json: ${{ steps.plan.outputs.json-dir }}
@@ -441,14 +457,30 @@ jobs:
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SUMMARY: ${{ steps.plan.outputs.summary-path }}
+          NO_UNITS: ${{ steps.plan.outputs.no-units }}
+          UNITS_ROOT: ${{ steps.changed.outputs.units-root }}
+          BASE_UNITS: ${{ steps.changed.outputs.base-units }}
         run: |
           out="$RUNNER_TEMP/pr-comment.md"
+          # units_root comes from the pull request's configuration: name it only when it is a plain path
+          dir="the units directory of $STAGE"
+          if [[ "$UNITS_ROOT" =~ ^[A-Za-z0-9._/-]+$ ]]; then dir="\`$UNITS_ROOT/$STAGE\`"; fi
           if [ "$CHANGED_OUTCOME" != success ]; then
             printf 'The pull-request plan failed before it started. See the [run](%s).\n' "$RUN_URL" >"$out"
           elif [ "$ANY" != true ]; then
             echo "No IaC changes in this pull request; nothing was planned." >"$out"
           elif [ "$PLAN_OUTCOME" != success ]; then
             printf 'The plan of %s failed. See the [run](%s).\n' "$STAGE" "$RUN_URL" >"$out"
+          elif [ "$NO_UNITS" = true ]; then
+            {
+              echo "### Plan of $STAGE"
+              echo
+              echo "No units under $dir: nothing was planned."
+              if [ "$BASE_UNITS" = true ]; then
+                echo
+                echo "**Warning:** the base commit has units in $STAGE; this pull request leaves none to plan. Check that removing them, or changing \`units_root\`, is intended."
+              fi
+            } >"$out"
           else
             {
               echo "### Plan of $STAGE"

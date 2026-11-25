@@ -254,12 +254,20 @@ jobs:
           if [ -z "$sha" ]; then
             echo "::notice::no ledger record for $DRIFT_ENV; nothing is live yet, skipping drift"
             echo "skip=true" >>"$GITHUB_OUTPUT"
-          elif [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "skip=false" >>"$GITHUB_OUTPUT"
-            echo "sha=$sha" >>"$GITHUB_OUTPUT"
-          else
+          elif ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::the ledger record of $DRIFT_ENV has no valid commit SHA"
             exit 1
+          else
+            # assigned first, so that an unreadable record fails the step
+            count="$(jq -e '.units | objects | length' "$RUNNER_TEMP/ledger.json")"
+            if [ "$count" -eq 0 ]; then
+              # #56: the stage had no units at the live commit; there is nothing to plan
+              echo "::notice::the live record of $DRIFT_ENV has no units; nothing to check for drift"
+              echo "skip=true" >>"$GITHUB_OUTPUT"
+            else
+              echo "skip=false" >>"$GITHUB_OUTPUT"
+              echo "sha=$sha" >>"$GITHUB_OUTPUT"
+            fi
           fi
       - id: failed
         name: Skip while an apply failure is open

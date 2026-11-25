@@ -5,11 +5,9 @@
 `ayasee guard` (`src/ayasee/guard.py`, `actions/guard`) decides from the ledger and the open issues
 whether a stage may run for a given SHA. It enforces stage order, supersession and stop-the-line,
 and fails closed.
-
 ## Requirements
-
 ### Requirement: Predecessor must have this SHA live and converged
-The guard SHALL allow a stage only when the preceding recordable stage (in the configured `stages` order, skipping `prod-plan`, which writes no record) has a ledger record at this SHA that converged.
+The guard SHALL allow a stage only when the preceding recordable stage (in the configured `stages` order, skipping `prod-plan`, which writes no record) has a ledger record at this SHA that converged. A record of a stage without units counts as converged at its SHA, for this rule and for supersession.
 
 #### Scenario: Predecessor has no record
 - **WHEN** the guard runs for `uat` and `dev` has no ledger record
@@ -18,6 +16,10 @@ The guard SHALL allow a stage only when the preceding recordable stage (in the c
 #### Scenario: Predecessor not converged
 - **WHEN** the predecessor's record is at this SHA but not converged
 - **THEN** it refuses with `predecessor_not_converged`
+
+#### Scenario: Predecessor has no units
+- **WHEN** `uat` holds no unit and its record at this SHA has no units
+- **THEN** the guard allows `prod-plan`, and refuses an older SHA at the prod apply as `superseded`
 
 ### Requirement: Supersession
 The guard SHALL refuse with `superseded` when the predecessor's record is at a different SHA and converged, and SHALL refuse with `predecessor_missing` when that different-SHA record did not converge. The `prod` job SHALL run the guard again after the approval wait, at apply time.
@@ -46,3 +48,4 @@ The guard SHALL key its predecessor chain and its stop-the-line lookup on the lo
 #### Scenario: Prefixed environments
 - **WHEN** `environment_prefix` is `iac-`
 - **THEN** the guard still reads the ledger records keyed `dev`, `uat` and `prod`
+
